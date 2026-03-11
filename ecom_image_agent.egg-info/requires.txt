@@ -1,0 +1,15 @@
+streamlit>=1.44.0
+langgraph>=0.3.18
+pydantic>=2.8.0
+pydantic-settings>=2.4.0
+pillow>=10.4.0
+paddleocr>=2.8.1
+paddlepaddle>=3.0.0
+rembg>=2.0.59
+google-genai>=1.8.0
+langsmith>=0.3.13
+python-dotenv>=1.0.1
+
+[dev]
+pytest>=8.3.0
+pytest-cov>=6.0.0

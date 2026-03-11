@@ -1,0 +1,62 @@
+Metadata-Version: 2.4
+Name: ecom-image-agent
+Version: 0.1.0
+Summary: Local Streamlit e-commerce image generation tool for tea products.
+Requires-Python: <3.12,>=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: streamlit>=1.44.0
+Requires-Dist: langgraph>=0.3.18
+Requires-Dist: pydantic>=2.8.0
+Requires-Dist: pydantic-settings>=2.4.0
+Requires-Dist: pillow>=10.4.0
+Requires-Dist: paddleocr>=2.8.1
+Requires-Dist: paddlepaddle>=3.0.0
+Requires-Dist: rembg>=2.0.59
+Requires-Dist: google-genai>=1.8.0
+Requires-Dist: langsmith>=0.3.13
+Requires-Dist: python-dotenv>=1.0.1
+Provides-Extra: dev
+Requires-Dist: pytest>=8.3.0; extra == "dev"
+Requires-Dist: pytest-cov>=6.0.0; extra == "dev"
+
+# ecom-image-agent
+
+Local Streamlit MVP for tea e-commerce image generation. The app accepts one or more product images, runs a LangGraph workflow skeleton, and outputs placeholder listing images with Chinese copy rendered by Pillow.
+
+## Current status
+- Completed: project scaffold, config loading, typed domain schemas, local task storage, provider abstraction, Gemini provider skeletons, LangGraph node skeletons, Pillow text rendering, Streamlit UI, zip export, unit tests, workflow docs
+- In progress: real Gemini prompt tuning, OCR-based quality checks, rembg-assisted preprocessing, richer tea-specific planning rules
+
+## Install
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+python -m pip install -U pip
+python -m pip install -e .[dev]
+```
+
+## Start
+```bash
+python -m streamlit run streamlit_app.py
+```
+
+## Environment
+Copy `.env.example` to `.env` and fill `ECOM_IMAGE_AGENT_GOOGLE_API_KEY` if you want to switch from mock providers to Gemini-backed providers.
+
+## Directory overview
+- `streamlit_app.py`: Streamlit entrypoint
+- `src/domain/`: workflow contracts and schemas
+- `src/providers/`: LLM and image provider abstraction and Gemini implementations
+- `src/services/`: local storage, rendering, OCR, QC, and helper services
+- `src/workflows/`: LangGraph state, graph builder, and node implementations
+- `src/ui/`: Streamlit page and reusable UI components
+- `outputs/tasks/`: persisted task inputs, artifacts, previews, exports
+- `tests/unit/`: schema and text renderer tests
+- `docs/workflow.md`: workflow notes for the current MVP
+
+## Current limitations
+- Tea is the only optimized category
+- Image generation currently falls back to deterministic mock canvases by default
+- OCR QA is scaffolded and can be expanded once PaddleOCR runtime is configured
+- Chinese rendering quality depends on an available CJK font file under `assets/fonts/`
+

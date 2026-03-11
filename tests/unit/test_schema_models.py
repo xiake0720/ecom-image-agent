@@ -1,0 +1,45 @@
+from __future__ import annotations
+
+from src.domain.asset import Asset
+from src.domain.copy_plan import CopyItem, CopyPlan
+from src.domain.generation_result import GeneratedImage, GenerationResult
+from src.domain.image_prompt_plan import ImagePrompt, ImagePromptPlan
+from src.domain.layout_plan import LayoutBlock, LayoutItem, LayoutPlan
+from src.domain.product_analysis import ProductAnalysis
+from src.domain.qc_report import QCCheck, QCReport
+from src.domain.shot_plan import ShotPlan, ShotSpec
+from src.domain.task import Task
+
+
+def test_domain_models_round_trip() -> None:
+    task = Task(
+        task_id="task-001",
+        brand_name="山野茶事",
+        product_name="高山绿茶",
+        platform="taobao",
+        output_size="1440x1440",
+        shot_count=3,
+        copy_tone="专业自然",
+        task_dir="outputs/tasks/task-001",
+    )
+    asset = Asset(asset_id="asset-01", filename="demo.png", local_path="demo.png")
+    analysis = ProductAnalysis(category="tea", product_type="绿茶")
+    shot_plan = ShotPlan(shots=[ShotSpec(shot_id="shot-01", title="主图", purpose="展示", composition_hint="主体居中", copy_goal="品牌")])
+    copy_plan = CopyPlan(items=[CopyItem(shot_id="shot-01", title="标题", subtitle="副标题", bullets=["卖点1"])])
+    layout_plan = LayoutPlan(
+        items=[LayoutItem(shot_id="shot-01", canvas_width=1440, canvas_height=1440, blocks=[LayoutBlock(kind="title", x=0, y=0, width=200, height=80)])]
+    )
+    prompt_plan = ImagePromptPlan(prompts=[ImagePrompt(shot_id="shot-01", prompt="tea shot", output_size="1440x1440")])
+    result = GenerationResult(images=[GeneratedImage(shot_id="shot-01", image_path="a.png", preview_path="b.png", width=1440, height=1440)])
+    qc_report = QCReport(passed=True, checks=[QCCheck(shot_id="shot-01", check_name="dimension", passed=True, details="ok")])
+
+    assert task.model_dump()["task_id"] == "task-001"
+    assert asset.model_dump()["filename"] == "demo.png"
+    assert analysis.model_dump()["category"] == "tea"
+    assert shot_plan.model_dump()["shots"][0]["shot_id"] == "shot-01"
+    assert copy_plan.model_dump()["items"][0]["title"] == "标题"
+    assert layout_plan.model_dump()["items"][0]["blocks"][0]["kind"] == "title"
+    assert prompt_plan.model_dump()["prompts"][0]["output_size"] == "1440x1440"
+    assert result.model_dump()["images"][0]["width"] == 1440
+    assert qc_report.model_dump()["checks"][0]["passed"] is True
+
