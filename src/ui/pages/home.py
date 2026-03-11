@@ -1,9 +1,21 @@
+"""首页与任务执行入口。
+
+该模块位于 `src/ui/pages/`，负责：
+- 渲染 Streamlit 首页
+- 收集上传和表单参数
+- 触发 workflow 执行
+- 将任务结果写入 session_state
+
+这里不直接实现 provider 细节，只负责 UI 到 workflow 的最小衔接。
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
 
 import streamlit as st
 
+from src.core.config import get_settings
 from src.core.constants import DEFAULT_CATEGORY
 from src.core.paths import ensure_task_dirs
 from src.domain.task import Task, TaskStatus
@@ -16,6 +28,7 @@ from src.workflows.graph import build_workflow
 
 
 def render_home_page() -> None:
+    """渲染首页并处理用户交互。"""
     st.set_page_config(page_title="ecom-image-agent", layout="wide")
     ensure_ui_state()
 
@@ -48,6 +61,11 @@ def render_home_page() -> None:
 
 
 def _run_task(form_data: dict[str, object], uploads) -> dict:
+    """执行一次任务并返回可供 UI 展示的状态。
+
+    失败时异常会继续向上抛给页面层显示，避免 silent failure。
+    """
+    settings = get_settings()
     storage = LocalStorageService()
     task_id = storage.create_task_id()
     task_dirs = ensure_task_dirs(task_id)
@@ -68,7 +86,18 @@ def _run_task(form_data: dict[str, object], uploads) -> dict:
     assets = storage.save_uploads(task_id, uploads_payload)
 
     workflow = build_workflow()
-    state = workflow.invoke({"task": task, "assets": assets, "logs": [f"Created task {task_id}."]})
+    state = workflow.invoke(
+        {
+            "task": task,
+            "assets": assets,
+            "logs": [
+                f"Created task {task_id}.",
+                # 把当前 provider mode 写进日志，方便区分 mock 与 real 运行态。
+                f"Text provider mode: {settings.text_provider_mode}.",
+                f"Image provider mode: {settings.image_provider_mode}.",
+            ],
+        }
+    )
 
     state["task"] = state["task"].model_dump(mode="json")
     state["generation_result"] = state["generation_result"].model_dump(mode="json")
@@ -77,7 +106,7 @@ def _run_task(form_data: dict[str, object], uploads) -> dict:
     sample_path = Path(task_dirs["previews"]) / "text_render_test.png"
     from src.services.rendering.text_renderer import TextRenderer
 
+    # 额外保留一张文本渲染样图，方便快速验证后贴字链路是否可用。
     TextRenderer().render_test_image(str(sample_path))
     state["logs"].append(f"Saved text render sample to {sample_path}.")
     return state
-

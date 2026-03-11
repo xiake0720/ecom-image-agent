@@ -35,4 +35,5 @@ class WorkflowDependencies:
     image_provider: object
     text_renderer: object
     ocr_service: object
-
+    text_provider_mode: str
+    image_provider_mode: str

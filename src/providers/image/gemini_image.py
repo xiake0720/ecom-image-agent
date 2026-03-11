@@ -4,6 +4,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
+from src.domain.asset import Asset
 from src.domain.generation_result import GeneratedImage, GenerationResult
 from src.domain.image_prompt_plan import ImagePromptPlan
 from src.providers.image.base import BaseImageProvider
@@ -13,7 +14,13 @@ class GeminiImageProvider(BaseImageProvider):
     def __init__(self) -> None:
         pass
 
-    def generate_images(self, plan: ImagePromptPlan, *, output_dir: Path) -> GenerationResult:
+    def generate_images(
+        self,
+        plan: ImagePromptPlan,
+        *,
+        output_dir: Path,
+        reference_assets: list[Asset] | None = None,
+    ) -> GenerationResult:
         # TODO: Replace this mock canvas renderer with a real image model provider after MVP approval.
         output_dir.mkdir(parents=True, exist_ok=True)
         images: list[GeneratedImage] = []

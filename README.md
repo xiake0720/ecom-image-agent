@@ -1,27 +1,73 @@
 # ecom-image-agent
 
-这是一个面向茶叶品类的本地 Streamlit 电商生图工具第一阶段项目。当前版本为可运行的 mock MVP：用户上传商品图，填写参数，系统通过 LangGraph 工作流骨架生成占位结果图，并使用 Pillow 完成中文后贴字，随后支持预览、单图下载和 ZIP 下载。
+这是一个面向茶叶品类的本地 Streamlit 电商自动生图工具。  
+仓库当前已经从第一阶段 **Mock MVP** 进入第二阶段**真实 provider 接线阶段**，但项目形态保持不变：
+- Python 3.11
+- Streamlit 单体应用
+- 本地文件存储
+- LangGraph workflow
+- Pillow 中文后贴字
 
-## 当前项目状态
-- 当前里程碑：`v0.1.0-mock-mvp`
-- 当前阶段：第一阶段，mock MVP 冻结版本
-- 当前形态：仅保留本地 Streamlit 单体应用
-- 当前状态：工作流骨架与 mock 端到端流程已验证通过，尚未接入真实 Gemini / OCR / rembg 能力
+第一阶段里程碑文档是历史归档，见：
+- `docs/milestones/phase-1-mock-mvp.md`
 
-## 第一阶段已完成内容
-- 已完成 Streamlit 单体应用脚手架，唯一 UI 入口为 [streamlit_app.py](D:/python/ecom-image-agent/streamlit_app.py)
-- 已完成本地文件上传
-- 已完成本地任务目录生成
-- 已完成 LangGraph workflow 骨架
-- 已完成 mock 任务执行
-- 已完成结果预览
-- 已完成单图下载
-- 已完成 ZIP 下载
-- 已完成 provider / services / workflows / ui 分层结构
-- 已完成 Pillow 文本渲染基础能力
-- 已完成 schema 与文本渲染单元测试
+---
 
-## 安装方式
+## 当前仓库状态
+- 当前代码状态标签：`v0.2.0-real-provider-wiring`
+- 当前包元数据版本：`0.2.0`
+- 当前阶段：第二阶段，真实 provider 接线
+- 当前入口：唯一 UI 入口仍为 `streamlit_app.py`
+- 当前结论：mock 链路可运行；真实文本与真实图片 provider 已完成接线；是否真正联通取决于有效 API Key 与外部服务可用性
+
+说明：
+- “代码状态标签”用于表达当前仓库阶段
+- `pyproject.toml` 中的版本号用于项目元数据
+- 当前这两个口径已经对齐到 `0.2.0 / v0.2.0-real-provider-wiring`
+
+---
+
+## 第一阶段历史里程碑
+第一阶段已经完成并归档，归档结论不变：
+- 已完成本地上传、参数提交、任务目录生成
+- 已完成 LangGraph 工作流骨架
+- 已完成 mock 结果预览
+- 已完成单图下载与 ZIP 下载
+- 已完成 Pillow 中文后贴字基础能力
+
+第一阶段属于历史基线，不等同于当前仓库的实时状态。
+
+---
+
+## 当前已具备能力
+- 本地上传商品图
+- 本地创建任务目录
+- LangGraph 10 节点工作流
+- Pillow 中文后贴字
+- 预览图显示
+- 单图下载
+- ZIP 下载
+- 文本 provider `mock / real` 模式切换
+- 图片 provider `mock / real` 模式切换
+
+当前真实 provider：
+- 文本侧：`NVIDIATextProvider`，对接 NVIDIA GLM-5
+- 图片侧：`RunApiGeminiImageProvider`，对接 RunAPI Gemini Image Gen
+
+---
+
+## 当前仍未完成的内容
+- OCR 真实质检运行时
+- rembg 真实抠图兜底
+- 多模型 fallback
+- 生产级质量优化
+- 更严格的视觉一致性与自动复核能力
+
+---
+
+## 当前运行方式
+安装：
+
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
@@ -29,37 +75,85 @@ python -m pip install -U pip
 python -m pip install -e .[dev]
 ```
 
-## 当前运行方式
+启动：
+
 ```bash
 python -m streamlit run streamlit_app.py
 ```
 
-## 环境变量
-如需覆盖本地默认配置，可将 `.env.example` 复制为 `.env` 后再修改。当前版本为 mock MVP，不会调用真实 Gemini、PaddleOCR、rembg、数据库或任何云端服务。
+---
 
-## 目录说明
-- `streamlit_app.py`：Streamlit 应用入口
-- `src/domain/`：工作流领域模型与结构化 schema
-- `src/providers/`：provider 接口与当前 mock 实现
-- `src/services/`：本地存储、渲染、质检与辅助服务
-- `src/workflows/`：LangGraph 状态、图定义与节点实现
-- `src/ui/`：上传表单、结果预览、下载组件
-- `outputs/tasks/`：任务输入、过程产物、预览图与导出文件
-- `tests/unit/`：schema 与文本渲染测试
-- `docs/workflow.md`：当前工作流说明文档
+## 环境变量
+所有敏感配置统一按以下优先级读取：
+- 系统环境变量
+- Streamlit `st.secrets`
+- 若 provider 需要但仍缺失，则显式报错
+
+本地开发可使用 `.env` 或 `.streamlit/secrets.toml`，但不要提交真实 key、token 或私有网关地址。
+`st.secrets` 中使用的键名应与下面的完整环境变量名保持一致。
+
+基础配置：
+
+```env
+ECOM_IMAGE_AGENT_TEXT_PROVIDER_MODE=mock
+ECOM_IMAGE_AGENT_IMAGE_PROVIDER_MODE=mock
+ECOM_IMAGE_AGENT_DEFAULT_FONT_PATH=assets/fonts/NotoSansSC-Regular.otf
+ECOM_IMAGE_AGENT_PROVIDER_TIMEOUT_SECONDS=120
+```
+
+文本侧真实 provider：
+
+```env
+ECOM_IMAGE_AGENT_NVIDIA_API_KEY=
+ECOM_IMAGE_AGENT_NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
+ECOM_IMAGE_AGENT_NVIDIA_TEXT_MODEL=z-ai/glm5
+```
+
+图片侧真实 provider：
+
+```env
+ECOM_IMAGE_AGENT_RUNAPI_API_KEY=
+ECOM_IMAGE_AGENT_RUNAPI_IMAGE_BASE_URL=https://runapi.co
+ECOM_IMAGE_AGENT_RUNAPI_IMAGE_MODEL=gemini-2.5-flash-image
+```
+
+模式说明：
+- `ECOM_IMAGE_AGENT_TEXT_PROVIDER_MODE=mock`：文本节点继续使用本地 mock 输出
+- `ECOM_IMAGE_AGENT_TEXT_PROVIDER_MODE=real`：文本节点切换到 NVIDIA GLM-5
+- `ECOM_IMAGE_AGENT_IMAGE_PROVIDER_MODE=mock`：图片节点继续使用占位图输出
+- `ECOM_IMAGE_AGENT_IMAGE_PROVIDER_MODE=real`：图片节点切换到 RunAPI Gemini Image Gen
+
+当前不会 silent fallback：
+- 缺失 key 时会显式报错
+- 接口请求失败时会显式报错
+
+---
+
+## 当前目录说明
+- `streamlit_app.py`：Streamlit 唯一入口
+- `src/domain/`：结构化 schema
+- `src/providers/`：文本与图片 provider
+- `src/services/`：本地存储、渲染、规划、质检及占位服务
+- `src/workflows/`：状态、图定义、节点实现
+- `src/ui/`：上传表单、预览、下载组件
+- `outputs/tasks/`：任务输入、JSON 产物、图片与导出 ZIP
+- `tests/unit/`：schema、文本渲染、provider 模式测试
+
+---
 
 ## 当前限制
-- 当前仅对茶叶品类做了优先支持
-- 当前图片输出仍为确定性的 mock 占位图，不是真实生图结果
-- OCR 质检与抠图兜底目前仅保留接口占位，尚未接入真实运行时
-- 中文排版效果依赖 `assets/fonts/` 下可用的中文字体文件
+- 当前仍不是生产可用系统
+- 文本真实链路只接入 NVIDIA GLM-5
+- 图片真实链路只接入 RunAPI Gemini Image Gen
+- `generate_layout` 仍保持 mock 规划
+- OCR 仍为占位实现
+- rembg 仍为占位实现
+- 当前不支持多模型 fallback
+- 当前工作区保留了若干本地 smoke 任务产物
 
-## 第二阶段计划
-以下仅为计划说明，当前里程碑不实现：
+---
 
-- 在保持现有工作流契约稳定的前提下接入真实 Gemini 结构化文本分析
-- 在保持 Streamlit 单体形态不变的前提下接入真实 Gemini 生图
-- 在运行环境准备完成后接入 OCR 质检
-- 为困难素材接入 rembg 抠图兜底
-- 在主路径稳定后再考虑多模型 fallback
-
+## 验证建议
+- 验证 mock 模式：两个 mode 都设为 `mock`，检查 workflow、预览、单图下载、ZIP 下载是否正常
+- 验证 NVIDIA 文本链路：将 `ECOM_IMAGE_AGENT_TEXT_PROVIDER_MODE=real`，配置有效 `ECOM_IMAGE_AGENT_NVIDIA_API_KEY`，检查 `product_analysis.json`、`shot_plan.json`、`copy_plan.json`、`image_prompt_plan.json`
+- 验证 RunAPI 图片链路：将 `ECOM_IMAGE_AGENT_IMAGE_PROVIDER_MODE=real`，配置有效 `ECOM_IMAGE_AGENT_RUNAPI_API_KEY`，检查 `generated/`、`final/`、`previews/` 与 ZIP 是否正常生成

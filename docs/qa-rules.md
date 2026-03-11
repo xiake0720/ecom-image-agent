@@ -1,7 +1,138 @@
-# QA Rules
+# 质检规则
 
-- Verify generated output dimensions.
-- Verify Pillow-rendered text stays inside the configured block.
-- Attempt OCR readback when PaddleOCR runtime is available.
-- Mark the task as `review_required` when a required check fails.
+## 一、文档目的
+本文件用于说明当前项目的结果检查规则。
+
+当前仓库已经进入第二阶段真实 provider 接线状态，但质检目标仍然优先是：
+- 工作流是否完整
+- 输出目录是否完整
+- 图片是否成功生成
+- 文案是否成功贴字
+- 预览与下载是否可用
+
+当前阶段仍然不是生产级视觉质检体系。
+
+---
+
+## 二、当前阶段基础检查项
+
+### 1. 任务级检查
+每次任务执行后，应至少检查：
+- 是否成功生成 `task_id`
+- 是否创建任务目录
+- 是否保存上传文件
+- 是否生成中间 JSON 文件
+- 是否生成预览图
+- 是否生成最终图
+- 是否生成 ZIP 导出文件
+
+### 2. JSON 产物检查
+至少应检查以下文件是否存在且可读取：
+- `task.json`
+- `product_analysis.json`
+- `shot_plan.json`
+- `copy_plan.json`
+- `layout_plan.json`
+- `image_prompt_plan.json`
+- `qc_report.json`
+
+### 3. 图片产物检查
+至少应检查：
+- `generated/` 中是否有基础图片
+- `final/` 中是否有贴字后图片
+- `previews/` 中是否有预览图
+- `exports/` 中是否有 ZIP
+
+---
+
+## 三、mock / real 模式下的检查差异
+
+### mock 模式
+重点验证：
+- 工作流是否跑通
+- JSON 是否完整
+- 占位图是否成功生成
+- Pillow 后贴字是否成功
+- 预览与下载是否可用
+
+### real 模式
+在保留上述检查项基础上，还应额外关注：
+- 真实文本 provider 是否成功返回结构化 JSON
+- 真实图片 provider 是否成功返回可保存的图片数据
+- provider 失败时是否显式报错
+- 没有发生 silent fallback
+
+---
+
+## 四、尺寸检查
+无论 mock 还是 real 图片，都应检查：
+- 输出图片尺寸是否符合任务参数
+- 文件能否被正常打开
+- 图片不是空文件
+- 最终图与预览图都可被 UI 正常显示
+
+---
+
+## 五、文本渲染检查
+当前阶段使用 Pillow 进行中文后贴字，应至少检查：
+- 标题是否渲染成功
+- 副标题是否渲染成功
+- 卖点条目是否渲染成功
+- 没有明显报错
+- 没有整体渲染失败
+- 文案未超出画布边界
+- 文案未被裁切到完全不可读
+
+当前阶段允许版式不够精致，但不允许完全失效。
+
+---
+
+## 六、预览与下载检查
+当前阶段必须验证：
+- Streamlit 页面可以预览生成结果
+- 可以下载单张图片
+- 可以下载 ZIP 文件
+- 下载文件与任务目录中的文件一致
+
+---
+
+## 七、当前阶段的 review_required 条件
+当前阶段如出现以下情况，应视为需要人工复查：
+- 任务目录未完整创建
+- 中间 JSON 缺失
+- 最终图片缺失
+- 预览图无法显示
+- 单图下载不可用
+- ZIP 下载不可用
+- 文本渲染异常
+- 输出尺寸与所选尺寸明显不符
+- 真实 provider 请求失败
+- 真实 provider 返回结构化结果解析失败
+
+当前阶段可先通过 `qc_report.json` 标记：
+- `passed`
+- `warning`
+- `review_required`
+
+---
+
+## 八、当前阶段不强制的检查项
+当前仍未强制以下能力：
+- OCR 回读一致性检查
+- 商品主体一致性检查
+- 品牌视觉一致性检查
+- 抠图边缘质量检查
+- 真实电商图审美质量检查
+- 多模型 fallback 成功率检查
+
+其中：
+- OCR 仍未接入真实运行时
+- rembg 仍未接入真实运行时
+- fallback 仍未进入当前范围
+
+---
+
+## 九、结论
+当前阶段质检的重点仍然是**保证流程闭环和产物可用**。  
+第二阶段接入真实 provider 后，质检关注点增加了“显式报错”和“结构化结果可解析”，但整体目标仍不是生产级视觉质量评估。
 

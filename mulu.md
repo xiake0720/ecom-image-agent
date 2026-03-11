@@ -1,122 +1,21 @@
-ecom-image-agent/
-├─ AGENTS.md
-├─ README.md
-├─ pyproject.toml
-├─ .env.example
-├─ .gitignore
-├─ streamlit_app.py
-├─ Makefile
-│
-├─ src/
-│  ├─ core/
-│  │  ├─ config.py
-│  │  ├─ logging.py
-│  │  ├─ constants.py
-│  │  └─ paths.py
-│  │
-│  ├─ domain/
-│  │  ├─ task.py
-│  │  ├─ asset.py
-│  │  ├─ product_analysis.py
-│  │  ├─ shot_plan.py
-│  │  ├─ copy_plan.py
-│  │  ├─ layout_plan.py
-│  │  ├─ image_prompt_plan.py
-│  │  ├─ generation_result.py
-│  │  └─ qc_report.py
-│  │
-│  ├─ providers/
-│  │  ├─ llm/
-│  │  │  ├─ base.py
-│  │  │  ├─ gemini_text.py
-│  │  │  └─ deepseek_text.py
-│  │  ├─ image/
-│  │  │  ├─ base.py
-│  │  │  ├─ gemini_image.py
-│  │  │  └─ wanx_image.py
-│  │  └─ tracing/
-│  │     └─ langsmith.py
-│  │
-│  ├─ services/
-│  │  ├─ storage/
-│  │  │  ├─ local_storage.py
-│  │  │  └─ zip_export.py
-│  │  ├─ analysis/
-│  │  │  └─ product_analyzer.py
-│  │  ├─ planning/
-│  │  │  ├─ shot_planner.py
-│  │  │  ├─ copy_generator.py
-│  │  │  └─ layout_generator.py
-│  │  ├─ rendering/
-│  │  │  ├─ text_renderer.py
-│  │  │  ├─ font_utils.py
-│  │  │  └─ image_postprocess.py
-│  │  ├─ ocr/
-│  │  │  └─ paddle_ocr_service.py
-│  │  ├─ bg_remove/
-│  │  │  └─ rembg_service.py
-│  │  └─ qc/
-│  │     ├─ image_qc.py
-│  │     ├─ ocr_qc.py
-│  │     └─ copy_rules.py
-│  │
-│  ├─ prompts/
-│  │  ├─ analyze_product.md
-│  │  ├─ plan_shots.md
-│  │  ├─ generate_copy.md
-│  │  ├─ generate_layout.md
-│  │  ├─ build_image_prompts.md
-│  │  └─ qc_review.md
-│  │
-│  ├─ workflows/
-│  │  ├─ state.py
-│  │  ├─ graph.py
-│  │  └─ nodes/
-│  │     ├─ ingest_assets.py
-│  │     ├─ analyze_product.py
-│  │     ├─ plan_shots.py
-│  │     ├─ generate_copy.py
-│  │     ├─ generate_layout.py
-│  │     ├─ build_prompts.py
-│  │     ├─ render_images.py
-│  │     ├─ overlay_text.py
-│  │     ├─ run_qc.py
-│  │     └─ finalize.py
-│  │
-│  ├─ ui/
-│  │  ├─ pages/
-│  │  │  ├─ home.py
-│  │  │  ├─ task_form.py
-│  │  │  └─ result_view.py
-│  │  ├─ components/
-│  │  │  ├─ upload_panel.py
-│  │  │  ├─ preview_grid.py
-│  │  │  └─ download_panel.py
-│  │  └─ state.py
-│  │
-│  └─ utils/
-│     ├─ json_repair.py
-│     ├─ image_hash.py
-│     ├─ file_utils.py
-│     └─ time_utils.py
-│
-├─ assets/
-│  ├─ fonts/
-│  ├─ brand_refs/
-│  └─ demo_inputs/
-│
-├─ outputs/
-│  ├─ tasks/
-│  ├─ previews/
-│  └─ exports/
-│
-├─ tests/
-│  ├─ unit/
-│  ├─ integration/
-│  └─ fixtures/
-│
-└─ docs/
-   ├─ architecture.md
-   ├─ prompts.md
-   ├─ workflow.md
-   └─ qa-rules.md
+# 文档目录
+
+## 核心文档
+- `README.md`：项目总览、运行方式、当前状态
+- `AGENTS.md`：项目开发约束与 Codex 执行边界
+- `CHANGELOG.md`：版本变更记录
+
+## docs 目录
+- `docs/architecture.md`：架构说明
+- `docs/workflow.md`：工作流说明
+- `docs/prompts.md`：Prompt 说明
+- `docs/qa-rules.md`：质检规则
+- `docs/milestones/phase-1-mock-mvp.md`：第一阶段里程碑归档
+
+## 当前建议
+阅读顺序建议为：
+1. `README.md`
+2. `AGENTS.md`
+3. `docs/architecture.md`
+4. `docs/workflow.md`
+5. `docs/milestones/phase-1-mock-mvp.md`
