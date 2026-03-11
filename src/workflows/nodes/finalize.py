@@ -8,6 +8,7 @@ from src.workflows.state import WorkflowDependencies, WorkflowState
 
 
 def finalize(state: WorkflowState, deps: WorkflowDependencies) -> dict:
+    logs = [*state.get("logs", []), "[finalize] start export task artifacts."]
     task = state["task"].model_copy(
         update={
             "status": TaskStatus.COMPLETED if state["qc_report"].passed else TaskStatus.REVIEW_REQUIRED
@@ -19,6 +20,9 @@ def finalize(state: WorkflowState, deps: WorkflowDependencies) -> dict:
     return {
         "task": task,
         "export_zip_path": str(zip_path),
-        "logs": [*state.get("logs", []), "Finalized task artifacts and zip export."],
+        "logs": [
+            *logs,
+            f"[finalize] task_status={task.status.value}.",
+            f"[finalize] zip_path={zip_path}.",
+        ],
     }
-

@@ -15,6 +15,7 @@ from src.workflows.state import WorkflowDependencies, WorkflowState
 def generate_copy(state: WorkflowState, deps: WorkflowDependencies) -> dict:
     """生成并落盘结构化中文文案。"""
     task = state["task"]
+    logs = [*state.get("logs", []), f"[generate_copy] start mode={deps.text_provider_mode}."]
     if deps.text_provider_mode == "real":
         prompt = (
             "请为当前茶叶商品任务生成结构化中文文案。\n"
@@ -30,4 +31,11 @@ def generate_copy(state: WorkflowState, deps: WorkflowDependencies) -> dict:
     else:
         copy_plan = build_mock_copy_plan(task, state["shot_plan"])
     deps.storage.save_json_artifact(task.task_id, "copy_plan.json", copy_plan)
-    return {"copy_plan": copy_plan, "logs": [*state.get("logs", []), "Generated structured copy."]}
+    first_title = copy_plan.items[0].title if copy_plan.items else ""
+    logs.extend(
+        [
+            f"[generate_copy] result items={len(copy_plan.items)}, first_title={first_title!r}.",
+            "[generate_copy] saved copy_plan.json.",
+        ]
+    )
+    return {"copy_plan": copy_plan, "logs": logs}

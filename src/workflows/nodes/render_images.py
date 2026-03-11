@@ -16,10 +16,25 @@ def render_images(state: WorkflowState, deps: WorkflowDependencies) -> dict:
     """生成基础图片并返回 `GenerationResult`。"""
     task = state["task"]
     output_dir = Path(get_task_generated_dir(task.task_id))
+    logs = [
+        *state.get("logs", []),
+        (
+            "[render_images] start "
+            f"mode={deps.image_provider_mode}, prompts={len(state['image_prompt_plan'].prompts)}, "
+            f"references={len(state.get('assets', []))}."
+        ),
+    ]
     result = deps.image_provider.generate_images(
         state["image_prompt_plan"],
         output_dir=output_dir,
         # real 图片 provider 需要上传素材作为参考输入；mock provider 会忽略该参数。
         reference_assets=state.get("assets", []),
     )
-    return {"generation_result": result, "logs": [*state.get("logs", []), "Rendered placeholder images."]}
+    output_names = ", ".join(Path(image.image_path).name for image in result.images)
+    logs.extend(
+        [
+            f"[render_images] result count={len(result.images)}, files={output_names}.",
+            f"[render_images] output_dir={output_dir}.",
+        ]
+    )
+    return {"generation_result": result, "logs": logs}

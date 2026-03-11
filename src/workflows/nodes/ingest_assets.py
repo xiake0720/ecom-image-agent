@@ -14,5 +14,11 @@ def ingest_assets(state: WorkflowState, deps: WorkflowDependencies) -> dict:
                 assets.append(asset.model_copy(update={"width": image.width, "height": image.height}))
         except OSError:
             assets.append(asset)
-    return {"assets": assets, "logs": [*state.get("logs", []), f"Ingested {len(assets)} assets."]}
-
+    filenames = ", ".join(asset.filename for asset in assets)
+    return {
+        "assets": assets,
+        "logs": [
+            *state.get("logs", []),
+            f"[ingest_assets] count={len(assets)}, files={filenames}.",
+        ],
+    }
