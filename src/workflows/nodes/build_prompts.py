@@ -15,6 +15,7 @@ from src.workflows.state import WorkflowDependencies, WorkflowState
 def build_prompts(state: WorkflowState, deps: WorkflowDependencies) -> dict:
     """生成并落盘图片提示词计划。"""
     task = state["task"]
+    logs = [*state.get("logs", []), f"[build_prompts] start mode={deps.text_provider_mode}."]
     if deps.text_provider_mode == "real":
         prompt = (
             "请为当前茶叶商品图任务输出结构化图片提示词。\n"
@@ -54,4 +55,11 @@ def build_prompts(state: WorkflowState, deps: WorkflowDependencies) -> dict:
             )
         plan = ImagePromptPlan(prompts=prompts)
     deps.storage.save_json_artifact(task.task_id, "image_prompt_plan.json", plan)
-    return {"image_prompt_plan": plan, "logs": [*state.get("logs", []), "Built image prompts."]}
+    prompt_shot_ids = ", ".join(item.shot_id for item in plan.prompts)
+    logs.extend(
+        [
+            f"[build_prompts] result count={len(plan.prompts)}, shot_ids={prompt_shot_ids}.",
+            "[build_prompts] saved image_prompt_plan.json.",
+        ]
+    )
+    return {"image_prompt_plan": plan, "logs": logs}

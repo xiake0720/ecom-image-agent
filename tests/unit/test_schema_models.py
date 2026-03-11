@@ -14,8 +14,8 @@ from src.domain.task import Task
 def test_domain_models_round_trip() -> None:
     task = Task(
         task_id="task-001",
-        brand_name="山野茶事",
-        product_name="高山绿茶",
+        brand_name="醒千峰",
+        product_name="凤凰单丛",
         platform="taobao",
         output_size="1440x1440",
         shot_count=3,

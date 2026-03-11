@@ -10,6 +10,7 @@ from src.workflows.state import WorkflowDependencies, WorkflowState
 
 def overlay_text(state: WorkflowState, deps: WorkflowDependencies) -> dict:
     task = state["task"]
+    logs = [*state.get("logs", []), f"[overlay_text] start images={len(state['generation_result'].images)}."]
     copy_map = {item.shot_id: item for item in state["copy_plan"].items}
     layout_map = {item.shot_id: item for item in state["layout_plan"].items}
     final_images: list[GeneratedImage] = []
@@ -34,6 +35,9 @@ def overlay_text(state: WorkflowState, deps: WorkflowDependencies) -> dict:
         )
     return {
         "generation_result": GenerationResult(images=final_images),
-        "logs": [*state.get("logs", []), "Overlayed Chinese copy with Pillow."],
+        "logs": [
+            *logs,
+            f"[overlay_text] finalized images={len(final_images)}.",
+            "[overlay_text] rendered Chinese copy with Pillow.",
+        ],
     }
-

@@ -15,6 +15,7 @@ from src.workflows.nodes.prompt_utils import dump_pretty, load_prompt_text
 def analyze_product(state: WorkflowState, deps: WorkflowDependencies) -> dict:
     """生成并落盘商品分析结果。"""
     task = state["task"]
+    logs = [*state.get("logs", []), f"[analyze_product] start mode={deps.text_provider_mode}."]
     if deps.text_provider_mode == "real":
         assets_payload = [
             {
@@ -44,4 +45,14 @@ def analyze_product(state: WorkflowState, deps: WorkflowDependencies) -> dict:
     else:
         analysis = build_mock_product_analysis(state.get("assets", []), task.product_name)
     deps.storage.save_json_artifact(task.task_id, "product_analysis.json", analysis)
-    return {"product_analysis": analysis, "logs": [*state.get("logs", []), "Generated product analysis."]}
+    logs.extend(
+        [
+            (
+                "[analyze_product] result "
+                f"category={analysis.category}, product_type={analysis.product_type}, "
+                f"selling_points={len(analysis.selling_points)}, focuses={len(analysis.recommended_focuses)}."
+            ),
+            "[analyze_product] saved product_analysis.json.",
+        ]
+    )
+    return {"product_analysis": analysis, "logs": logs}

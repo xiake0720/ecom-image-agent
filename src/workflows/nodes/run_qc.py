@@ -7,6 +7,7 @@ from src.workflows.state import WorkflowDependencies, WorkflowState
 
 
 def run_qc(state: WorkflowState, deps: WorkflowDependencies) -> dict:
+    logs = [*state.get("logs", []), f"[run_qc] start images={len(state['generation_result'].images)}."]
     checks = []
     copy_map = {item.shot_id: item for item in state["copy_plan"].items}
     for image in state["generation_result"].images:
@@ -15,5 +16,15 @@ def run_qc(state: WorkflowState, deps: WorkflowDependencies) -> dict:
     passed = all(check.passed for check in checks)
     report = QCReport(passed=passed, review_required=not passed, checks=checks)
     deps.storage.save_json_artifact(state["task"].task_id, "qc_report.json", report)
-    return {"qc_report": report, "logs": [*state.get("logs", []), "Completed QC checks."]}
-
+    failed_checks = [check.check_name for check in checks if not check.passed]
+    logs.extend(
+        [
+            (
+                "[run_qc] result "
+                f"passed={report.passed}, review_required={report.review_required}, "
+                f"checks={len(report.checks)}, failed={failed_checks}."
+            ),
+            "[run_qc] saved qc_report.json.",
+        ]
+    )
+    return {"qc_report": report, "logs": logs}

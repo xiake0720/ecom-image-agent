@@ -95,6 +95,9 @@ def _run_task(form_data: dict[str, object], uploads) -> dict:
                 # 把当前 provider mode 写进日志，方便区分 mock 与 real 运行态。
                 f"Text provider mode: {settings.text_provider_mode}.",
                 f"Image provider mode: {settings.image_provider_mode}.",
+                f"NVIDIA text model: {settings.nvidia_text_model}.",
+                f"RunAPI image model: {settings.runapi_image_model}.",
+                f"Uploaded files: {', '.join(upload.name for upload in uploads)}.",
             ],
         }
     )

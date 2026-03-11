@@ -14,6 +14,7 @@ from src.workflows.state import WorkflowDependencies, WorkflowState
 def plan_shots(state: WorkflowState, deps: WorkflowDependencies) -> dict:
     """根据商品分析结果生成图组规划。"""
     task = state["task"]
+    logs = [*state.get("logs", []), f"[plan_shots] start mode={deps.text_provider_mode}, target_count={task.shot_count}."]
     if deps.text_provider_mode == "real":
         prompt = (
             "请为当前茶叶商品任务规划电商图组。\n"
@@ -29,4 +30,11 @@ def plan_shots(state: WorkflowState, deps: WorkflowDependencies) -> dict:
     else:
         shot_plan = build_mock_shot_plan(state["product_analysis"], task.shot_count)
     deps.storage.save_json_artifact(task.task_id, "shot_plan.json", shot_plan)
-    return {"shot_plan": shot_plan, "logs": [*state.get("logs", []), "Planned image shots."]}
+    shot_ids = ", ".join(shot.shot_id for shot in shot_plan.shots)
+    logs.extend(
+        [
+            f"[plan_shots] result count={len(shot_plan.shots)}, shot_ids={shot_ids}.",
+            "[plan_shots] saved shot_plan.json.",
+        ]
+    )
+    return {"shot_plan": shot_plan, "logs": logs}
