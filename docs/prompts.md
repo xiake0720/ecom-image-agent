@@ -21,7 +21,7 @@
 - `analyze_product.md`
 
 作用：
-- 根据上传的商品图和基础参数，输出商品类别、包装形式、主色调、主体对象、可推荐图型等结构化结果
+- 根据上传的商品图输出 SKU 级视觉分析结果，重点描述包装形态、标签布局、主色调、材质感和必须保留的视觉识别点
 
 输出目标：
 - `product_analysis.json`
@@ -96,10 +96,12 @@
 
 ## 四、当前实现对齐说明
 当前仓库中，prompt 已经开始服务以下真实文本节点：
-- `analyze_product`
 - `plan_shots`
 - `generate_copy`
 - `build_prompts`
+
+其中：
+- `analyze_product` 已切换到真实视觉分析 prompt，不再由纯文本模型承担图片理解
 
 但仍然需要注意：
 - `generate_layout` 目前没有切换到真实模型

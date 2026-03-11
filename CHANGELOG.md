@@ -1,6 +1,11 @@
 # 变更记录
 
 ## v0.2.0
+- 将 `analyze_product` 从泛化文本分析升级为基于上传商品图的 SKU 级视觉分析
+- 新增 NVIDIA 多模态商品分析 provider，模型为 `qwen/qwen3-5-122b-a10b`
+- 为商品分析新增独立 `vision mock | real` 模式与环境变量配置
+- 升级 `product_analysis.json` 结构，加入包装结构、视觉识别、材质猜测和视觉约束字段
+- 重写 `analyze_product` prompt，显式禁止用行业常识卖点替代图片观察
 - 对齐当前仓库为第二阶段真实 provider 接线状态的文档口径
 - 接入 `NVIDIATextProvider`，通过 NVIDIA NIM 对接 GLM-5
 - 接入 `RunApiGeminiImageProvider`，通过 RunAPI 对接 Gemini Image Gen

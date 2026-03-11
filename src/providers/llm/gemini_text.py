@@ -26,11 +26,36 @@ class GeminiTextProvider(BaseTextProvider):
         name = response_model.__name__
         if name == "ProductAnalysis":
             return {
+                "analysis_scope": "sku_level",
+                "intended_for": "all_future_shots",
                 "category": "tea",
+                "subcategory": "绿茶",
                 "product_type": "绿茶",
-                "selling_points": ["茶形完整", "香气清新", "适合礼赠"],
-                "visual_style_keywords": ["清透", "自然", "高端电商"],
-                "recommended_focuses": ["茶叶干茶", "茶汤色泽", "礼盒质感"],
+                "product_form": "packaged_tea",
+                "packaging_structure": {
+                    "primary_container": "unknown",
+                    "has_outer_box": "unknown",
+                    "has_visible_lid": "unknown",
+                    "container_count": "1",
+                },
+                "visual_identity": {
+                    "dominant_colors": ["绿色", "白色"],
+                    "label_position": "front_center",
+                    "label_ratio": "medium",
+                    "style_impression": ["清透", "自然", "电商清爽"],
+                    "must_preserve": ["包装主体轮廓", "正面标签区"],
+                },
+                "material_guess": {
+                    "container_material": "unknown",
+                    "label_material": "unknown",
+                },
+                "visual_constraints": {
+                    "recommended_style_direction": ["突出包装主体", "延续原始配色"],
+                    "avoid": ["不要虚构包装结构", "不要输出行业通用卖点"],
+                },
+                "selling_points": [],
+                "visual_style_keywords": ["清透", "自然", "包装主体"],
+                "recommended_focuses": ["包装主体", "标签区", "材质表现"],
                 "source_asset_ids": [],
             }
         if name == "ShotPlan":

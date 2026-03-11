@@ -51,7 +51,8 @@
 - 图片 provider `mock / real` 模式切换
 
 当前真实 provider：
-- 文本侧：`NVIDIATextProvider`，对接 NVIDIA GLM-5
+- 商品分析视觉侧：`NVIDIAVisionProductAnalysisProvider`，对接 NVIDIA `qwen/qwen3-5-122b-a10b`
+- 文本规划侧：`NVIDIATextProvider`，对接 NVIDIA GLM-5
 - 图片侧：`RunApiGeminiImageProvider`，对接 RunAPI Gemini Image Gen
 
 ---
@@ -95,10 +96,19 @@ python -m streamlit run streamlit_app.py
 基础配置：
 
 ```env
+ECOM_IMAGE_AGENT_VISION_PROVIDER_MODE=mock
 ECOM_IMAGE_AGENT_TEXT_PROVIDER_MODE=mock
 ECOM_IMAGE_AGENT_IMAGE_PROVIDER_MODE=mock
 ECOM_IMAGE_AGENT_DEFAULT_FONT_PATH=assets/fonts/NotoSansSC-Regular.otf
 ECOM_IMAGE_AGENT_PROVIDER_TIMEOUT_SECONDS=120
+```
+
+商品分析视觉 provider：
+
+```env
+ECOM_IMAGE_AGENT_NVIDIA_VISION_API_KEY=
+ECOM_IMAGE_AGENT_NVIDIA_VISION_BASE_URL=https://integrate.api.nvidia.com/v1
+ECOM_IMAGE_AGENT_NVIDIA_VISION_MODEL=qwen/qwen3-5-122b-a10b
 ```
 
 文本侧真实 provider：
@@ -118,6 +128,8 @@ ECOM_IMAGE_AGENT_RUNAPI_IMAGE_MODEL=gemini-2.5-flash-image
 ```
 
 模式说明：
+- `ECOM_IMAGE_AGENT_VISION_PROVIDER_MODE=mock`：`analyze_product` 节点继续使用本地 mock SKU 分析
+- `ECOM_IMAGE_AGENT_VISION_PROVIDER_MODE=real`：`analyze_product` 节点切换到 NVIDIA 多模态视觉分析
 - `ECOM_IMAGE_AGENT_TEXT_PROVIDER_MODE=mock`：文本节点继续使用本地 mock 输出
 - `ECOM_IMAGE_AGENT_TEXT_PROVIDER_MODE=real`：文本节点切换到 NVIDIA GLM-5
 - `ECOM_IMAGE_AGENT_IMAGE_PROVIDER_MODE=mock`：图片节点继续使用占位图输出
@@ -143,7 +155,8 @@ ECOM_IMAGE_AGENT_RUNAPI_IMAGE_MODEL=gemini-2.5-flash-image
 
 ## 当前限制
 - 当前仍不是生产可用系统
-- 文本真实链路只接入 NVIDIA GLM-5
+- 商品分析真实链路改为接入 NVIDIA 多模态视觉模型
+- 文本规划真实链路继续接入 NVIDIA GLM-5
 - 图片真实链路只接入 RunAPI Gemini Image Gen
 - `generate_layout` 仍保持 mock 规划
 - OCR 仍为占位实现
@@ -155,5 +168,6 @@ ECOM_IMAGE_AGENT_RUNAPI_IMAGE_MODEL=gemini-2.5-flash-image
 
 ## 验证建议
 - 验证 mock 模式：两个 mode 都设为 `mock`，检查 workflow、预览、单图下载、ZIP 下载是否正常
-- 验证 NVIDIA 文本链路：将 `ECOM_IMAGE_AGENT_TEXT_PROVIDER_MODE=real`，配置有效 `ECOM_IMAGE_AGENT_NVIDIA_API_KEY`，检查 `product_analysis.json`、`shot_plan.json`、`copy_plan.json`、`image_prompt_plan.json`
+- 验证 SKU 视觉分析链路：将 `ECOM_IMAGE_AGENT_VISION_PROVIDER_MODE=real`，配置有效 `ECOM_IMAGE_AGENT_NVIDIA_VISION_API_KEY` 或 `ECOM_IMAGE_AGENT_NVIDIA_API_KEY`，检查 `product_analysis.json` 是否为 SKU 级视觉分析
+- 验证 NVIDIA 文本规划链路：将 `ECOM_IMAGE_AGENT_TEXT_PROVIDER_MODE=real`，配置有效 `ECOM_IMAGE_AGENT_NVIDIA_API_KEY`，检查 `shot_plan.json`、`copy_plan.json`、`image_prompt_plan.json`
 - 验证 RunAPI 图片链路：将 `ECOM_IMAGE_AGENT_IMAGE_PROVIDER_MODE=real`，配置有效 `ECOM_IMAGE_AGENT_RUNAPI_API_KEY`，检查 `generated/`、`final/`、`previews/` 与 ZIP 是否正常生成

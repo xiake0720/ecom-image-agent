@@ -1,3 +1,11 @@
+"""中文后贴字节点。
+
+该节点将结构化文案和布局计划应用到基础图片上：
+- 使用 Pillow 渲染中文标题 / 副标题 / 卖点
+- 输出最终图到 `final/`
+- 生成 UI 用预览图到 `previews/`
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -9,6 +17,7 @@ from src.workflows.state import WorkflowDependencies, WorkflowState
 
 
 def overlay_text(state: WorkflowState, deps: WorkflowDependencies) -> dict:
+    """对生成结果执行中文后贴字并生成预览图。"""
     task = state["task"]
     logs = [*state.get("logs", []), f"[overlay_text] start images={len(state['generation_result'].images)}."]
     copy_map = {item.shot_id: item for item in state["copy_plan"].items}

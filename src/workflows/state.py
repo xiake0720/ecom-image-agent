@@ -1,3 +1,13 @@
+"""Workflow 状态与调试辅助定义。
+
+该模块集中定义：
+- LangGraph 在节点间传递的 `WorkflowState`
+- workflow 运行时依赖 `WorkflowDependencies`
+- 统一的日志格式化与异常包装
+
+这里不承载业务逻辑，只负责让调用链、日志和错误边界更清晰。
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -32,8 +42,68 @@ class WorkflowState(TypedDict, total=False):
 class WorkflowDependencies:
     storage: object
     text_provider: object
+    vision_provider: object | None
     image_provider: object
     text_renderer: object
     ocr_service: object
     text_provider_mode: str
+    vision_provider_mode: str
     image_provider_mode: str
+
+
+class WorkflowExecutionError(RuntimeError):
+    """包装 workflow 节点失败信息，便于 UI 展示部分执行日志。"""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        logs: list[str],
+        task_id: str | None = None,
+        node_name: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.logs = logs
+        self.task_id = task_id
+        self.node_name = node_name
+
+
+def get_task_id_from_state(state: WorkflowState) -> str:
+    """从当前 workflow state 中提取 task_id。"""
+    task = state.get("task")
+    if hasattr(task, "task_id"):
+        return str(task.task_id)
+    if isinstance(task, dict):
+        return str(task.get("task_id", "unknown-task"))
+    return "unknown-task"
+
+
+def append_log(logs: list[str] | None, message: str) -> list[str]:
+    """向日志列表追加一条日志并返回新列表。"""
+    return [*(logs or []), message]
+
+
+def format_workflow_log(
+    *,
+    task_id: str,
+    node_name: str,
+    event: str,
+    detail: str | None = None,
+    output: str | None = None,
+    elapsed_ms: int | None = None,
+    level: str = "INFO",
+) -> str:
+    """生成统一格式的 workflow 日志行。"""
+    parts = [
+        f"[{level}]",
+        f"task_id={task_id}",
+        f"node={node_name}",
+        f"event={event}",
+    ]
+    if elapsed_ms is not None:
+        parts.append(f"elapsed_ms={elapsed_ms}")
+    if output:
+        parts.append(f"output={output}")
+    if detail:
+        parts.append(f"detail={detail}")
+    return " | ".join(parts)

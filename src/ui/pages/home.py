@@ -25,6 +25,17 @@ from src.ui.pages.result_view import render_result_view
 from src.ui.pages.task_form import render_task_form
 from src.ui.state import ensure_ui_state
 from src.workflows.graph import build_workflow
+from src.workflows.state import WorkflowExecutionError
+
+DEBUG_JSON_FILENAMES = [
+    "task.json",
+    "product_analysis.json",
+    "shot_plan.json",
+    "copy_plan.json",
+    "layout_plan.json",
+    "image_prompt_plan.json",
+    "qc_report.json",
+]
 
 
 def render_home_page() -> None:
@@ -50,6 +61,9 @@ def render_home_page() -> None:
                 try:
                     st.session_state["task_error"] = None
                     st.session_state["task_state"] = _run_task(form_data, uploads)
+                except WorkflowExecutionError as exc:
+                    st.session_state["task_error"] = str(exc)
+                    st.session_state["task_state"] = getattr(exc, "task_state", None)
                 except Exception as exc:
                     st.session_state["task_error"] = str(exc)
 
@@ -84,23 +98,58 @@ def _run_task(form_data: dict[str, object], uploads) -> dict:
     storage.save_task_manifest(task)
     uploads_payload = [(upload.name, upload.getvalue()) for upload in uploads]
     assets = storage.save_uploads(task_id, uploads_payload)
+    debug_info = _build_debug_info(task, settings)
+    initial_logs = [
+        f"[INFO] | task_id={task_id} | node=streamlit_entry | event=start | detail=streamlit_app.py -> render_home_page -> _run_task",
+        (
+            f"[INFO] | task_id={task_id} | node=streamlit_entry | event=config | "
+            f"detail=text_provider_mode={settings.text_provider_mode}, "
+            f"vision_provider_mode={settings.vision_provider_mode}, "
+            f"image_provider_mode={settings.image_provider_mode}"
+        ),
+        f"[INFO] | task_id={task_id} | node=streamlit_entry | event=paths | output={task.task_dir} | detail=task artifacts root",
+        f"[INFO] | task_id={task_id} | node=streamlit_entry | event=uploads | detail={', '.join(upload.name for upload in uploads)}",
+        f"[INFO] | task_id={task_id} | node=langgraph_invoke | event=start | detail=build_workflow().invoke(...)",
+    ]
 
     workflow = build_workflow()
-    state = workflow.invoke(
-        {
-            "task": task,
-            "assets": assets,
+    initial_state = {
+        "task": task,
+        "assets": assets,
+        "logs": initial_logs,
+    }
+    try:
+        state = workflow.invoke(initial_state)
+    except WorkflowExecutionError as exc:
+        partial_state = {
+            "task": task.model_dump(mode="json"),
             "logs": [
-                f"Created task {task_id}.",
-                # 把当前 provider mode 写进日志，方便区分 mock 与 real 运行态。
-                f"Text provider mode: {settings.text_provider_mode}.",
-                f"Image provider mode: {settings.image_provider_mode}.",
-                f"NVIDIA text model: {settings.nvidia_text_model}.",
-                f"RunAPI image model: {settings.runapi_image_model}.",
-                f"Uploaded files: {', '.join(upload.name for upload in uploads)}.",
+                *exc.logs,
+                f"[ERROR] | task_id={task_id} | node=langgraph_invoke | event=error | detail={exc}",
             ],
+            "debug": debug_info,
+            "generation_result": {"images": []},
         }
-    )
+        exc.task_state = partial_state
+        raise
+    except Exception as exc:
+        failure_logs = [
+            *initial_logs,
+            f"[ERROR] | task_id={task_id} | node=langgraph_invoke | event=error | detail={exc}",
+        ]
+        workflow_error = WorkflowExecutionError(
+            f"workflow invoke failed for task {task_id}: {exc}",
+            logs=failure_logs,
+            task_id=task_id,
+            node_name="langgraph_invoke",
+        )
+        workflow_error.task_state = {
+            "task": task.model_dump(mode="json"),
+            "logs": failure_logs,
+            "debug": debug_info,
+            "generation_result": {"images": []},
+        }
+        raise workflow_error from exc
 
     state["task"] = state["task"].model_dump(mode="json")
     state["generation_result"] = state["generation_result"].model_dump(mode="json")
@@ -111,5 +160,25 @@ def _run_task(form_data: dict[str, object], uploads) -> dict:
 
     # 额外保留一张文本渲染样图，方便快速验证后贴字链路是否可用。
     TextRenderer().render_test_image(str(sample_path))
-    state["logs"].append(f"Saved text render sample to {sample_path}.")
+    state["logs"].extend(
+        [
+            f"[INFO] | task_id={task_id} | node=streamlit_entry | event=artifact | output={sample_path} | detail=text render sample",
+            f"[INFO] | task_id={task_id} | node=langgraph_invoke | event=finish | detail=workflow completed and UI state normalized",
+        ]
+    )
+    state["debug"] = debug_info
     return state
+
+
+def _build_debug_info(task: Task, settings) -> dict[str, object]:
+    """构建结果页调试区需要的静态信息。"""
+    task_dir = Path(task.task_dir)
+    return {
+        **settings.build_debug_summary(),
+        "task_id": task.task_id,
+        "task_dir": str(task_dir),
+        "artifact_paths": {
+            filename: str(task_dir / filename)
+            for filename in DEBUG_JSON_FILENAMES
+        },
+    }

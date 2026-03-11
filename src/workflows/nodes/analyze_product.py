@@ -1,7 +1,7 @@
 """商品分析节点。
 
-当前节点位于 workflow 文本链路起点，负责输出 `ProductAnalysis`。
-在 mock 模式下走本地规则，在 real 模式下走真实文本 provider。
+当前节点位于 workflow 起点，负责输出 `ProductAnalysis`。
+在 mock 模式下走本地规则，在 real 模式下切换到真正的多模态视觉分析 provider。
 """
 
 from __future__ import annotations
@@ -15,8 +15,8 @@ from src.workflows.nodes.prompt_utils import dump_pretty, load_prompt_text
 def analyze_product(state: WorkflowState, deps: WorkflowDependencies) -> dict:
     """生成并落盘商品分析结果。"""
     task = state["task"]
-    logs = [*state.get("logs", []), f"[analyze_product] start mode={deps.text_provider_mode}."]
-    if deps.text_provider_mode == "real":
+    logs = [*state.get("logs", []), f"[analyze_product] start mode={deps.vision_provider_mode}."]
+    if deps.vision_provider_mode == "real":
         assets_payload = [
             {
                 "asset_id": asset.asset_id,
@@ -29,14 +29,19 @@ def analyze_product(state: WorkflowState, deps: WorkflowDependencies) -> dict:
             for asset in state.get("assets", [])
         ]
         prompt = (
-            "请基于当前茶叶商品任务输出结构化商品分析结果。\n"
+            "请基于当前上传商品图做 SKU 级视觉分析，并输出结构化商品分析结果。\n"
             f"任务信息:\n{dump_pretty(task)}\n\n"
             f"素材信息:\n{dump_pretty(assets_payload)}"
         )
-        # 真实模式下要求 provider 直接返回可被 schema 校验的结构化 JSON。
-        analysis = deps.text_provider.generate_structured(
+        if deps.vision_provider is None:
+            raise RuntimeError(
+                "Vision provider is required when ECOM_IMAGE_AGENT_VISION_PROVIDER_MODE=real."
+            )
+        # 真实模式下要求视觉 provider 结合上传图片直接返回可被 schema 校验的结构化 JSON。
+        analysis = deps.vision_provider.generate_structured_from_assets(
             prompt,
             ProductAnalysis,
+            assets=state.get("assets", []),
             system_prompt=load_prompt_text("analyze_product.md"),
         )
         analysis = analysis.model_copy(
@@ -49,8 +54,9 @@ def analyze_product(state: WorkflowState, deps: WorkflowDependencies) -> dict:
         [
             (
                 "[analyze_product] result "
-                f"category={analysis.category}, product_type={analysis.product_type}, "
-                f"selling_points={len(analysis.selling_points)}, focuses={len(analysis.recommended_focuses)}."
+                f"category={analysis.category}, subcategory={analysis.subcategory}, "
+                f"product_form={analysis.product_form}, "
+                f"must_preserve={len(analysis.visual_identity.must_preserve)}."
             ),
             "[analyze_product] saved product_analysis.json.",
         ]
