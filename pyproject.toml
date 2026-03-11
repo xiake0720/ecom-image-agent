@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ecom-image-agent"
+version = "0.1.0"
+description = "Local Streamlit e-commerce image generation tool for tea products."
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "streamlit>=1.44.0",
+  "langgraph>=0.3.18",
+  "pydantic>=2.8.0",
+  "pydantic-settings>=2.4.0",
+  "pillow>=10.4.0",
+  "python-dotenv>=1.0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0",
+  "pytest-cov>=6.0.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["src*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
