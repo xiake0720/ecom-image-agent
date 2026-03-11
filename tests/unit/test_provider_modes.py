@@ -16,6 +16,7 @@ from src.domain.image_prompt_plan import ImagePrompt, ImagePromptPlan
 from src.domain.product_analysis import ProductAnalysis
 from src.providers.image.runapi_gemini_image import RunApiGeminiImageProvider
 from src.providers.llm.nvidia_text import NVIDIATextProvider
+from src.providers.vision.nvidia_product_analysis import NVIDIAVisionProductAnalysisProvider
 
 
 def test_nvidia_provider_requires_api_key_in_real_mode() -> None:
@@ -36,3 +37,15 @@ def test_runapi_provider_requires_api_key_in_real_mode(tmp_path: Path) -> None:
 
     with pytest.raises(RuntimeError, match="ECOM_IMAGE_AGENT_RUNAPI_API_KEY"):
         provider.generate_images(plan, output_dir=tmp_path, reference_assets=assets)
+
+
+def test_nvidia_vision_provider_requires_api_key_in_real_mode(tmp_path: Path) -> None:
+    """真实视觉模式下缺失 key 时必须显式报错。"""
+    image_path = tmp_path / "demo.png"
+    image_path.write_bytes(b"demo")
+    settings = Settings(vision_provider_mode="real", nvidia_api_key=None, nvidia_vision_api_key=None)
+    provider = NVIDIAVisionProductAnalysisProvider(settings)
+    assets = [Asset(asset_id="asset-01", filename="demo.png", local_path=str(image_path))]
+
+    with pytest.raises(RuntimeError, match="ECOM_IMAGE_AGENT_NVIDIA_VISION_API_KEY|ECOM_IMAGE_AGENT_NVIDIA_API_KEY"):
+        provider.generate_structured_from_assets("test", ProductAnalysis, assets=assets)

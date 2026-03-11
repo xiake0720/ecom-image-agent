@@ -5,7 +5,13 @@ from src.domain.copy_plan import CopyItem, CopyPlan
 from src.domain.generation_result import GeneratedImage, GenerationResult
 from src.domain.image_prompt_plan import ImagePrompt, ImagePromptPlan
 from src.domain.layout_plan import LayoutBlock, LayoutItem, LayoutPlan
-from src.domain.product_analysis import ProductAnalysis
+from src.domain.product_analysis import (
+    MaterialGuess,
+    PackagingStructure,
+    ProductAnalysis,
+    VisualConstraints,
+    VisualIdentity,
+)
 from src.domain.qc_report import QCCheck, QCReport
 from src.domain.shot_plan import ShotPlan, ShotSpec
 from src.domain.task import Task
@@ -23,7 +29,35 @@ def test_domain_models_round_trip() -> None:
         task_dir="outputs/tasks/task-001",
     )
     asset = Asset(asset_id="asset-01", filename="demo.png", local_path="demo.png")
-    analysis = ProductAnalysis(category="tea", product_type="绿茶")
+    analysis = ProductAnalysis(
+        analysis_scope="sku_level",
+        intended_for="all_future_shots",
+        category="tea",
+        subcategory="绿茶",
+        product_type="绿茶",
+        product_form="packaged_tea",
+        packaging_structure=PackagingStructure(
+            primary_container="box",
+            has_outer_box="yes",
+            has_visible_lid="no",
+            container_count="1",
+        ),
+        visual_identity=VisualIdentity(
+            dominant_colors=["绿色", "白色"],
+            label_position="front_center",
+            label_ratio="medium",
+            style_impression=["简洁", "自然"],
+            must_preserve=["正面标签区"],
+        ),
+        material_guess=MaterialGuess(
+            container_material="paper_box",
+            label_material="matte_paper",
+        ),
+        visual_constraints=VisualConstraints(
+            recommended_style_direction=["延续原始配色"],
+            avoid=["不要虚构透明罐体"],
+        ),
+    )
     shot_plan = ShotPlan(shots=[ShotSpec(shot_id="shot-01", title="主图", purpose="展示", composition_hint="主体居中", copy_goal="品牌")])
     copy_plan = CopyPlan(items=[CopyItem(shot_id="shot-01", title="标题", subtitle="副标题", bullets=["卖点1"])])
     layout_plan = LayoutPlan(
@@ -36,6 +70,7 @@ def test_domain_models_round_trip() -> None:
     assert task.model_dump()["task_id"] == "task-001"
     assert asset.model_dump()["filename"] == "demo.png"
     assert analysis.model_dump()["category"] == "tea"
+    assert analysis.model_dump()["analysis_scope"] == "sku_level"
     assert shot_plan.model_dump()["shots"][0]["shot_id"] == "shot-01"
     assert copy_plan.model_dump()["items"][0]["title"] == "标题"
     assert layout_plan.model_dump()["items"][0]["blocks"][0]["kind"] == "title"

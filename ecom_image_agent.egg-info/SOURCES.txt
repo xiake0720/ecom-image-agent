@@ -25,13 +25,11 @@ src/providers/__init__.py
 src/providers/image/__init__.py
 src/providers/image/base.py
 src/providers/image/gemini_image.py
-src/providers/image/wanx_image.py
+src/providers/image/runapi_gemini_image.py
 src/providers/llm/__init__.py
 src/providers/llm/base.py
-src/providers/llm/deepseek_text.py
 src/providers/llm/gemini_text.py
-src/providers/tracing/__init__.py
-src/providers/tracing/langsmith.py
+src/providers/llm/nvidia_text.py
 src/services/__init__.py
 src/services/analysis/__init__.py
 src/services/analysis/product_analyzer.py
@@ -81,5 +79,6 @@ src/workflows/nodes/generate_layout.py
 src/workflows/nodes/ingest_assets.py
 src/workflows/nodes/overlay_text.py
 src/workflows/nodes/plan_shots.py
+src/workflows/nodes/prompt_utils.py
 src/workflows/nodes/render_images.py
 src/workflows/nodes/run_qc.py

@@ -57,7 +57,7 @@
 
 当前状态：
 - `mock` 模式下使用本地规则输出
-- `real` 模式下切换到 NVIDIA GLM-5 结构化输出
+- `real` 模式下切换到 NVIDIA 多模态模型做 SKU 级视觉分析
 
 主要落盘：
 - `product_analysis.json`
@@ -179,7 +179,8 @@
 当前工作流已经不是“只支持 mock”的状态，但也不是“全部能力都已真实化”的状态。
 
 更准确的阶段划分是：
-- 真实文本 provider 已接入：`analyze_product`、`plan_shots`、`generate_copy`、`build_prompts`
+- 真实视觉 provider 已接入：`analyze_product`
+- 真实文本 provider 已接入：`plan_shots`、`generate_copy`、`build_prompts`
 - 真实图片 provider 已接入：`render_images`
 - 仍保持 mock / 占位：`generate_layout`、`run_qc` 中的 OCR 路径、OCR 服务、rembg 服务
 
@@ -193,7 +194,8 @@
 
 ## 六、当前与后续边界
 当前已完成的真实接线：
-- 文本能力：`NVIDIATextProvider`
+- 商品分析视觉能力：`NVIDIAVisionProductAnalysisProvider`
+- 文本规划能力：`NVIDIATextProvider`
 - 图片能力：`RunApiGeminiImageProvider`
 
 当前尚未进入范围的能力：

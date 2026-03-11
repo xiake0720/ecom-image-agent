@@ -34,10 +34,14 @@ class Settings(BaseSettings):
     enable_mock_providers: bool = True
     enable_ocr_qc: bool = False
     text_provider_mode: str = "mock"
+    vision_provider_mode: str = "mock"
     image_provider_mode: str = "mock"
     nvidia_api_key: str | None = None
     nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
     nvidia_text_model: str = "z-ai/glm5"
+    nvidia_vision_api_key: str | None = None
+    nvidia_vision_base_url: str = "https://integrate.api.nvidia.com/v1"
+    nvidia_vision_model: str = "qwen/qwen3-5-122b-a10b"
     runapi_api_key: str | None = None
     runapi_image_base_url: str = "https://runapi.co"
     runapi_image_model: str = "gemini-2.5-flash-image"
@@ -92,6 +96,19 @@ class Settings(BaseSettings):
         """确保本地运行所需目录存在。"""
         for path in (self.outputs_dir, self.tasks_dir, self.previews_dir, self.exports_dir, self.assets_dir):
             path.mkdir(parents=True, exist_ok=True)
+
+    def build_debug_summary(self) -> dict[str, str]:
+        """返回适合 UI 调试区展示的关键运行配置摘要。"""
+        return {
+            "text_provider_mode": self.text_provider_mode,
+            "vision_provider_mode": self.vision_provider_mode,
+            "image_provider_mode": self.image_provider_mode,
+            "nvidia_text_model": self.nvidia_text_model,
+            "nvidia_vision_model": self.nvidia_vision_model,
+            "runapi_image_model": self.runapi_image_model,
+            "outputs_dir": str(self.outputs_dir),
+            "tasks_dir": str(self.tasks_dir),
+        }
 
 
 def _read_streamlit_secrets() -> dict[str, Any]:

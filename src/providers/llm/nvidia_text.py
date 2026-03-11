@@ -11,6 +11,7 @@ mock / real 的选择由 workflow 依赖注入层决定。
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 import requests
@@ -55,7 +56,59 @@ class NVIDIATextProvider(BaseTextProvider):
             )
 
         schema = response_model.model_json_schema()
-        messages = []
+        messages = self._build_messages(prompt, schema, system_prompt=system_prompt)
+        payload = {
+            "model": self.settings.nvidia_text_model,
+            "messages": messages,
+            "temperature": 0.2,
+            "stream": False,
+            "response_format": {"type": "json_object"},
+        }
+        response = self._post_with_retry(payload)
+        elapsed_seconds = getattr(response, "_ecom_elapsed_seconds", None)
+        elapsed_text = f"{elapsed_seconds:.2f}" if isinstance(elapsed_seconds, (int, float)) else "unknown"
+        if response.status_code >= 400:
+            raise RuntimeError(
+                "NVIDIA text request failed: "
+                f"model={self.settings.nvidia_text_model}, "
+                f"status_code={response.status_code}, "
+                f"elapsed_seconds={elapsed_text}, "
+                f"response={response.text[:800]}"
+            )
+        data = response.json()
+        try:
+            content = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise RuntimeError(
+                "Unexpected NVIDIA response format: "
+                f"model={self.settings.nvidia_text_model}, "
+                f"elapsed_seconds={elapsed_text}, "
+                f"response={data}"
+            ) from exc
+        if isinstance(content, list):
+            # 个别兼容接口可能返回 content parts，这里统一拼接文本部分。
+            content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
+        try:
+            parsed: dict[str, Any] = json.loads(content)
+        except json.JSONDecodeError as exc:
+            # 当前项目禁止 silent fallback，解析失败必须直接暴露。
+            raise RuntimeError(
+                "NVIDIA returned non-JSON content: "
+                f"model={self.settings.nvidia_text_model}, "
+                f"elapsed_seconds={elapsed_text}, "
+                f"content={content[:800]}"
+            ) from exc
+        return response_model.model_validate(parsed)
+
+    def _build_messages(
+        self,
+        prompt: str,
+        schema: dict[str, Any],
+        *,
+        system_prompt: str | None = None,
+    ) -> list[dict[str, str]]:
+        """构造 chat completions 请求消息。"""
+        messages: list[dict[str, str]] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append(
@@ -69,37 +122,55 @@ class NVIDIATextProvider(BaseTextProvider):
                 ),
             }
         )
-        payload = {
-            "model": self.settings.nvidia_text_model,
-            "messages": messages,
-            "temperature": 0.2,
-            "stream": False,
-            "response_format": {"type": "json_object"},
+        return messages
+
+    def _post_with_retry(self, payload: dict[str, Any]) -> requests.Response:
+        """执行 NVIDIA 请求，并对网络层超时/连接失败做一次重试。"""
+        url = f"{self.settings.nvidia_base_url.rstrip('/')}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.settings.nvidia_api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
         }
-        response = requests.post(
-            f"{self.settings.nvidia_base_url.rstrip('/')}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {self.settings.nvidia_api_key}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=self.settings.provider_timeout_seconds,
-        )
-        if response.status_code >= 400:
+        connect_timeout = 10
+        read_timeout = max(int(self.settings.provider_timeout_seconds), 180)
+        timeout = (connect_timeout, read_timeout)
+        max_attempts = 2
+        last_exception: Exception | None = None
+
+        with requests.Session() as session:
+            session.trust_env = False
+            for attempt in range(1, max_attempts + 1):
+                started_at = time.time()
+                try:
+                    response = session.post(
+                        url,
+                        headers=headers,
+                        json=payload,
+                        timeout=timeout,
+                    )
+                    response._ecom_elapsed_seconds = time.time() - started_at
+                    return response
+                except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError) as exc:
+                    elapsed_seconds = time.time() - started_at
+                    last_exception = exc
+                    if attempt >= max_attempts:
+                        raise RuntimeError(
+                            "NVIDIA text request failed after retry: "
+                            f"model={self.settings.nvidia_text_model}, "
+                            f"url={url}, "
+                            f"attempt={attempt}/{max_attempts}, "
+                            f"timeout=(connect={connect_timeout}, read={read_timeout}), "
+                            f"elapsed_seconds={elapsed_seconds:.2f}, "
+                            f"error={exc}"
+                        ) from exc
+                    time.sleep(2)
+
+        if last_exception is not None:
             raise RuntimeError(
-                f"NVIDIA text request failed: {response.status_code} {response.text[:800]}"
-            )
-        data = response.json()
-        try:
-            content = data["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise RuntimeError(f"Unexpected NVIDIA response format: {data}") from exc
-        if isinstance(content, list):
-            # 个别兼容接口可能返回 content parts，这里统一拼接文本部分。
-            content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
-        try:
-            parsed: dict[str, Any] = json.loads(content)
-        except json.JSONDecodeError as exc:
-            # 当前项目禁止 silent fallback，解析失败必须直接暴露。
-            raise RuntimeError(f"NVIDIA returned non-JSON content: {content[:800]}") from exc
-        return response_model.model_validate(parsed)
+                "NVIDIA text request failed unexpectedly without response: "
+                f"model={self.settings.nvidia_text_model}, url={url}, error={last_exception}"
+            ) from last_exception
+        raise RuntimeError(
+            "NVIDIA text request failed unexpectedly without response or exception."
+        )

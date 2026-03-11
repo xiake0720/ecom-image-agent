@@ -1,3 +1,13 @@
+"""基础质检节点。
+
+该节点负责：
+- 检查输出尺寸
+- 调用 OCR 占位服务做基础文本校验
+- 汇总为 `qc_report.json`
+
+当前阶段重点是保证链路可检查，而不是生产级视觉质检。
+"""
+
 from __future__ import annotations
 
 from src.domain.qc_report import QCReport
@@ -7,6 +17,7 @@ from src.workflows.state import WorkflowDependencies, WorkflowState
 
 
 def run_qc(state: WorkflowState, deps: WorkflowDependencies) -> dict:
+    """执行基础质检并落盘 `qc_report.json`。"""
     logs = [*state.get("logs", []), f"[run_qc] start images={len(state['generation_result'].images)}."]
     checks = []
     copy_map = {item.shot_id: item for item in state["copy_plan"].items}
