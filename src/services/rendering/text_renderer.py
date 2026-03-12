@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from pathlib import Path
 from typing import Iterable
 
@@ -10,6 +11,8 @@ from src.core.config import get_settings
 from src.domain.copy_plan import CopyItem
 from src.domain.layout_plan import LayoutBlock, LayoutItem
 from src.services.rendering.font_utils import load_font
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -38,6 +41,13 @@ class TextRenderer:
         layout_item: LayoutItem,
         output_path: str,
     ) -> TextRenderReport:
+        logger.info(
+            "开始执行中文后贴字，shot_id=%s，输入=%s，输出=%s，布局块数量=%s",
+            copy_item.shot_id,
+            input_image_path,
+            output_path,
+            len(layout_item.blocks),
+        )
         with Image.open(input_image_path).convert("RGBA") as image:
             draw = ImageDraw.Draw(image)
             reports: list[PlacedTextBlock] = []
@@ -59,9 +69,16 @@ class TextRenderer:
             target = Path(output_path)
             target.parent.mkdir(parents=True, exist_ok=True)
             image.convert("RGB").save(target)
+        logger.info(
+            "中文后贴字完成，shot_id=%s，输出=%s，实际渲染块数量=%s",
+            copy_item.shot_id,
+            output_path,
+            len(reports),
+        )
         return TextRenderReport(output_path=str(output_path), blocks=reports)
 
     def render_test_image(self, output_path: str) -> TextRenderReport:
+        logger.info("开始生成文本渲染测试样图，输出=%s", output_path)
         sample = Image.new("RGB", (1440, 1440), color=(245, 241, 229))
         temp_path = Path(output_path).with_name("text_render_base.png")
         sample.save(temp_path)
@@ -156,4 +173,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

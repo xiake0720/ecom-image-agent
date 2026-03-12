@@ -12,12 +12,25 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from functools import lru_cache
+import os
 from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+@dataclass(frozen=True)
+class ResolvedModelSelection:
+    """解析后的模型选择结果。"""
+
+    capability: str
+    provider_key: str
+    model_id: str
+    label: str
+    source: str
 
 
 class Settings(BaseSettings):
@@ -36,16 +49,24 @@ class Settings(BaseSettings):
     text_provider_mode: str = "mock"
     vision_provider_mode: str = "mock"
     image_provider_mode: str = "mock"
+    text_model_provider: str = "qwen"
+    vision_model_provider: str = "qwen"
     nvidia_api_key: str | None = None
     nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
-    nvidia_text_model: str = "z-ai/glm5"
+    text_model_id: str | None = None
+    vision_model_id: str | None = None
+    qwen_model_id: str = "qwen/qwen3.5-122b-a10b"
+    glm5_model_id: str = "z-ai/glm5"
+    nvidia_text_model: str | None = None
     nvidia_vision_api_key: str | None = None
     nvidia_vision_base_url: str = "https://integrate.api.nvidia.com/v1"
-    nvidia_vision_model: str = "qwen/qwen3-5-122b-a10b"
+    nvidia_vision_model: str | None = None
     runapi_api_key: str | None = None
     runapi_image_base_url: str = "https://runapi.co"
     runapi_image_model: str = "gemini-2.5-flash-image"
     provider_timeout_seconds: int = 120
+    log_level: str = "INFO"
+    enable_file_log: bool = True
     default_font_path: Path = Path("assets/fonts/NotoSansSC-Regular.otf")
     outputs_dir: Path = Path("outputs")
     tasks_dir: Path = Path("outputs/tasks")
@@ -99,16 +120,127 @@ class Settings(BaseSettings):
 
     def build_debug_summary(self) -> dict[str, str]:
         """返回适合 UI 调试区展示的关键运行配置摘要。"""
+        text_selection = self.resolve_text_model_selection()
+        vision_selection = self.resolve_vision_model_selection()
         return {
             "text_provider_mode": self.text_provider_mode,
             "vision_provider_mode": self.vision_provider_mode,
             "image_provider_mode": self.image_provider_mode,
-            "nvidia_text_model": self.nvidia_text_model,
-            "nvidia_vision_model": self.nvidia_vision_model,
+            "text_model_provider": text_selection.provider_key,
+            "vision_model_provider": vision_selection.provider_key,
+            "text_model_label": text_selection.label,
+            "vision_model_label": vision_selection.label,
+            "text_model_source": text_selection.source,
+            "vision_model_source": vision_selection.source,
+            "log_level": self.log_level,
+            "enable_file_log": "true" if self.enable_file_log else "false",
+            "proxy_enabled": "true" if self.is_proxy_enabled() else "false",
+            "nvidia_text_model": text_selection.model_id,
+            "nvidia_vision_model": vision_selection.model_id,
             "runapi_image_model": self.runapi_image_model,
             "outputs_dir": str(self.outputs_dir),
             "tasks_dir": str(self.tasks_dir),
         }
+
+    def resolve_text_model_selection(self) -> ResolvedModelSelection:
+        """解析当前结构化规划能力实际使用的模型。"""
+        provider_key = (self.text_model_provider or "qwen").strip().lower()
+        if self.text_model_id:
+            return ResolvedModelSelection(
+                capability="planning",
+                provider_key=provider_key or "custom",
+                model_id=self.text_model_id,
+                label=self._label_for_model(provider_key, self.text_model_id),
+                source="ECOM_IMAGE_AGENT_TEXT_MODEL_ID",
+            )
+        if self.nvidia_text_model:
+            return ResolvedModelSelection(
+                capability="planning",
+                provider_key=provider_key or "legacy",
+                model_id=self.nvidia_text_model,
+                label=self._label_for_model(provider_key, self.nvidia_text_model),
+                source="ECOM_IMAGE_AGENT_NVIDIA_TEXT_MODEL",
+            )
+        if provider_key == "qwen":
+            return ResolvedModelSelection(
+                capability="planning",
+                provider_key="qwen",
+                model_id=self.qwen_model_id,
+                label="Qwen3.5",
+                source="ECOM_IMAGE_AGENT_TEXT_MODEL_PROVIDER",
+            )
+        if provider_key == "glm5":
+            return ResolvedModelSelection(
+                capability="planning",
+                provider_key="glm5",
+                model_id=self.glm5_model_id,
+                label="GLM-5",
+                source="ECOM_IMAGE_AGENT_TEXT_MODEL_PROVIDER",
+            )
+        raise RuntimeError(
+            "不支持的文本模型开关："
+            f"{provider_key}。当前仅支持 qwen 或 glm5，"
+            "如需自定义模型，请显式设置 ECOM_IMAGE_AGENT_TEXT_MODEL_ID。"
+        )
+
+    def resolve_vision_model_selection(self) -> ResolvedModelSelection:
+        """解析当前视觉分析能力实际使用的模型。"""
+        provider_key = (self.vision_model_provider or "qwen").strip().lower()
+        if self.vision_model_id:
+            return ResolvedModelSelection(
+                capability="vision",
+                provider_key=provider_key or "custom",
+                model_id=self.vision_model_id,
+                label=self._label_for_model(provider_key, self.vision_model_id),
+                source="ECOM_IMAGE_AGENT_VISION_MODEL_ID",
+            )
+        if self.nvidia_vision_model:
+            return ResolvedModelSelection(
+                capability="vision",
+                provider_key=provider_key or "legacy",
+                model_id=self.nvidia_vision_model,
+                label=self._label_for_model(provider_key, self.nvidia_vision_model),
+                source="ECOM_IMAGE_AGENT_NVIDIA_VISION_MODEL",
+            )
+        if provider_key == "qwen":
+            return ResolvedModelSelection(
+                capability="vision",
+                provider_key="qwen",
+                model_id=self.qwen_model_id,
+                label="Qwen3.5",
+                source="ECOM_IMAGE_AGENT_VISION_MODEL_PROVIDER",
+            )
+        raise RuntimeError(
+            "不支持的视觉模型开关："
+            f"{provider_key}。当前默认视觉链路仅支持 qwen，"
+            "如需自定义视觉模型，请显式设置 ECOM_IMAGE_AGENT_VISION_MODEL_ID。"
+        )
+
+    def _label_for_model(self, provider_key: str, model_id: str) -> str:
+        """根据 provider 开关和模型 ID 生成可读标签。"""
+        normalized = (provider_key or "").strip().lower()
+        lowered = model_id.lower()
+        if "glm5" in lowered:
+            return "GLM-5"
+        if "qwen" in lowered:
+            return "Qwen3.5"
+        if normalized == "glm5":
+            return "GLM-5"
+        if normalized == "qwen":
+            return "Qwen3.5"
+        return model_id
+
+    def is_proxy_enabled(self) -> bool:
+        """返回当前进程是否设置了常见环境变量代理。"""
+        proxy_names = (
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+        )
+        return any(os.getenv(name) for name in proxy_names)
 
 
 def _read_streamlit_secrets() -> dict[str, Any]:

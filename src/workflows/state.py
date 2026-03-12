@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TypedDict
 
+from src.core.config import ResolvedModelSelection
 from src.domain.asset import Asset
 from src.domain.copy_plan import CopyPlan
 from src.domain.generation_result import GenerationResult
@@ -41,14 +42,19 @@ class WorkflowState(TypedDict, total=False):
 @dataclass
 class WorkflowDependencies:
     storage: object
-    text_provider: object
-    vision_provider: object | None
-    image_provider: object
+    planning_provider: object
+    vision_analysis_provider: object | None
+    image_generation_provider: object
     text_renderer: object
     ocr_service: object
     text_provider_mode: str
     vision_provider_mode: str
     image_provider_mode: str
+    planning_provider_name: str = ""
+    vision_provider_name: str = ""
+    image_provider_name: str = ""
+    planning_model_selection: ResolvedModelSelection | None = None
+    vision_model_selection: ResolvedModelSelection | None = None
 
 
 class WorkflowExecutionError(RuntimeError):
@@ -90,10 +96,17 @@ def format_workflow_log(
     event: str,
     detail: str | None = None,
     output: str | None = None,
+    output_hint: str | None = None,
     elapsed_ms: int | None = None,
     level: str = "INFO",
 ) -> str:
-    """生成统一格式的 workflow 日志行。"""
+    """生成统一格式的 workflow 日志行。
+
+    保留现有字符串日志格式，便于：
+    - 页面直接展示
+    - 异常时随 state 一起回传
+    - 与标准库 logging 并行存在
+    """
     parts = [
         f"[{level}]",
         f"task_id={task_id}",
@@ -102,8 +115,9 @@ def format_workflow_log(
     ]
     if elapsed_ms is not None:
         parts.append(f"elapsed_ms={elapsed_ms}")
-    if output:
-        parts.append(f"output={output}")
+    resolved_output = output_hint or output
+    if resolved_output:
+        parts.append(f"output={resolved_output}")
     if detail:
         parts.append(f"detail={detail}")
     return " | ".join(parts)

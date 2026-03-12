@@ -1,8 +1,16 @@
 # 变更记录
 
 ## v0.2.0
+- 收紧 `build_prompts`：当前改为纯结构化推理模式，不再向文本模型发送图片输入，参考商品图只在 `render_images` 阶段发送给真实图片模型
+- 强化 `build_image_prompts.md`，按单张图输出更强的主体保持、构图、留白、平台风格与 negative prompt 约束
+- 重写 `plan_shots.md`，增加类目族群识别、核心图型 / 扩展图型边界、整组统一风格锚点与发散边界控制
+- 修正 `generate_copy.md` 与 `generate_layout.md` 的职责表述，避免文案、布局与图组规划职责漂移
+- 为 `plan_shots` 与 `build_prompts` 增加中文日志，明确模板来源、类目族群、整组风格锚点，以及 `build_prompts` 未发送图片输入
+- 新增模型能力路由层，统一处理视觉分析、结构化规划和图片生成三类能力的 provider 选择
+- 默认主链路模型切换为 `qwen/qwen3.5-122b-a10b`
+- 保留 `GLM-5` 作为文本链路可配置开关，不再需要改节点代码
 - 将 `analyze_product` 从泛化文本分析升级为基于上传商品图的 SKU 级视觉分析
-- 新增 NVIDIA 多模态商品分析 provider，模型为 `qwen/qwen3-5-122b-a10b`
+- 新增 NVIDIA 多模态商品分析 provider，模型为 `qwen/qwen3.5-122b-a10b`
 - 为商品分析新增独立 `vision mock | real` 模式与环境变量配置
 - 升级 `product_analysis.json` 结构，加入包装结构、视觉识别、材质猜测和视觉约束字段
 - 重写 `analyze_product` prompt，显式禁止用行业常识卖点替代图片观察

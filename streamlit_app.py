@@ -11,7 +11,13 @@
 
 from __future__ import annotations
 
+import logging
+
+from src.core.config import get_settings
+from src.core.logging import initialize_logging, log_application_startup
 from src.ui.pages.home import render_home_page
+
+logger = logging.getLogger(__name__)
 
 
 def main() -> None:
@@ -19,6 +25,10 @@ def main() -> None:
 
     这里本身不承载业务逻辑，只作为 Streamlit 到 UI 页面层的最外层入口。
     """
+    settings = get_settings()
+    initialize_logging(settings)
+    log_application_startup(settings)
+    logger.info("开始渲染 Streamlit 首页")
     render_home_page()
 
 

@@ -12,17 +12,15 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import logging
 from time import perf_counter
 from typing import Callable
 
 from langgraph.graph import END, StateGraph
 
 from src.core.config import get_settings
-from src.providers.image.gemini_image import GeminiImageProvider
-from src.providers.image.runapi_gemini_image import RunApiGeminiImageProvider
-from src.providers.llm.gemini_text import GeminiTextProvider
-from src.providers.llm.nvidia_text import NVIDIATextProvider
-from src.providers.vision.nvidia_product_analysis import NVIDIAVisionProductAnalysisProvider
+from src.core.logging import initialize_logging, log_context
+from src.providers.router import build_capability_bindings
 from src.services.ocr.paddle_ocr_service import PaddleOCRService
 from src.services.rendering.text_renderer import TextRenderer
 from src.services.storage.local_storage import LocalStorageService
@@ -46,6 +44,7 @@ from src.workflows.state import (
 )
 
 NodeHandler = Callable[[WorkflowState, WorkflowDependencies], dict]
+logger = logging.getLogger(__name__)
 
 NODE_OUTPUT_HINTS: dict[str, str] = {
     "ingest_assets": "inputs/, task.json",
@@ -53,13 +52,12 @@ NODE_OUTPUT_HINTS: dict[str, str] = {
     "plan_shots": "shot_plan.json",
     "generate_copy": "copy_plan.json",
     "generate_layout": "layout_plan.json",
-    "build_prompts": "image_prompt_plan.json",
+    "build_prompts": "image_prompt_plan.json, artifacts/shots/",
     "render_images": "generated/",
     "overlay_text": "final/, previews/",
     "run_qc": "qc_report.json",
     "finalize": "task.json, exports/",
 }
-
 
 def build_dependencies() -> WorkflowDependencies:
     """构建 workflow 运行依赖。
@@ -67,31 +65,37 @@ def build_dependencies() -> WorkflowDependencies:
     provider mode 的选择集中放在这里，避免把 mock / real 分支散落到 UI 或节点外层。
     """
     settings = get_settings()
-    text_provider = (
-        NVIDIATextProvider(settings)
-        if settings.text_provider_mode == "real"
-        else GeminiTextProvider()
+    initialize_logging(settings)
+    logger.info(
+        "开始构建工作流依赖，文本模式=%s，视觉模式=%s，图片模式=%s",
+        settings.text_provider_mode,
+        settings.vision_provider_mode,
+        settings.image_provider_mode,
     )
-    vision_provider = (
-        NVIDIAVisionProductAnalysisProvider(settings)
-        if settings.vision_provider_mode == "real"
-        else None
-    )
-    image_provider = (
-        RunApiGeminiImageProvider(settings)
-        if settings.image_provider_mode == "real"
-        else GeminiImageProvider()
+    bindings = build_capability_bindings(settings)
+    logger.info(
+        "工作流依赖构建完成，结构化规划 provider=%s，model=%s，视觉 provider=%s，model=%s，图片 provider=%s",
+        bindings.planning_provider_name,
+        bindings.planning_model_selection.model_id,
+        bindings.vision_provider_name,
+        bindings.vision_model_selection.model_id,
+        bindings.image_provider_name,
     )
     return WorkflowDependencies(
         storage=LocalStorageService(),
-        text_provider=text_provider,
-        vision_provider=vision_provider,
-        image_provider=image_provider,
+        planning_provider=bindings.planning_provider,
+        vision_analysis_provider=bindings.vision_analysis_provider,
+        image_generation_provider=bindings.image_generation_provider,
         text_renderer=TextRenderer(settings.default_font_path),
         ocr_service=PaddleOCRService(enabled=settings.enable_ocr_qc),
         text_provider_mode=settings.text_provider_mode,
         vision_provider_mode=settings.vision_provider_mode,
         image_provider_mode=settings.image_provider_mode,
+        planning_provider_name=bindings.planning_provider_name,
+        vision_provider_name=bindings.vision_provider_name,
+        image_provider_name=bindings.image_provider_name,
+        planning_model_selection=bindings.planning_model_selection,
+        vision_model_selection=bindings.vision_model_selection,
     )
 
 
@@ -100,53 +104,74 @@ def _wrap_node(node_name: str, handler: NodeHandler, deps: WorkflowDependencies)
 
     def _runner(state: WorkflowState) -> dict:
         task_id = get_task_id_from_state(state)
-        start_log = format_workflow_log(
-            task_id=task_id,
-            node_name=node_name,
-            event="start",
-            detail=(
-                f"text_provider_mode={deps.text_provider_mode}, "
-                f"vision_provider_mode={deps.vision_provider_mode}, "
-                f"image_provider_mode={deps.image_provider_mode}"
-            ),
-        )
-        started_state: WorkflowState = {
-            **state,
-            "logs": append_log(state.get("logs"), start_log),
-        }
-        started_at = perf_counter()
-        try:
-            updates = handler(started_state, deps)
-        except Exception as exc:
-            elapsed_ms = int((perf_counter() - started_at) * 1000)
-            error_log = format_workflow_log(
+        with log_context(task_id=task_id, node_name=node_name):
+            start_log = format_workflow_log(
                 task_id=task_id,
                 node_name=node_name,
-                event="error",
-                detail=str(exc),
-                elapsed_ms=elapsed_ms,
-                level="ERROR",
+                event="start",
+                detail=(
+                    "节点开始执行，"
+                    f"text_provider_mode={deps.text_provider_mode}, "
+                    f"vision_provider_mode={deps.vision_provider_mode}, "
+                    f"image_provider_mode={deps.image_provider_mode}, "
+                    f"planning_model={deps.planning_model_selection.model_id if deps.planning_model_selection else '-'}, "
+                    f"vision_model={deps.vision_model_selection.model_id if deps.vision_model_selection else '-'}"
+                ),
             )
-            raise WorkflowExecutionError(
-                f"{node_name} failed for task {task_id}: {exc}",
-                logs=append_log(started_state.get("logs"), error_log),
+            logger.info(
+                "节点开始：%s，文本模式=%s，视觉模式=%s，图片模式=%s，规划模型=%s，视觉模型=%s",
+                node_name,
+                deps.text_provider_mode,
+                deps.vision_provider_mode,
+                deps.image_provider_mode,
+                deps.planning_model_selection.model_id if deps.planning_model_selection else "-",
+                deps.vision_model_selection.model_id if deps.vision_model_selection else "-",
+            )
+            started_state: WorkflowState = {
+                **state,
+                "logs": append_log(state.get("logs"), start_log),
+            }
+            started_at = perf_counter()
+            try:
+                updates = handler(started_state, deps)
+            except Exception as exc:
+                elapsed_ms = int((perf_counter() - started_at) * 1000)
+                error_log = format_workflow_log(
+                    task_id=task_id,
+                    node_name=node_name,
+                    event="error",
+                    detail=f"节点执行失败，原因：{exc}",
+                    elapsed_ms=elapsed_ms,
+                    level="ERROR",
+                )
+                logger.exception("节点失败：%s，耗时=%sms，原因=%s", node_name, elapsed_ms, exc)
+                raise WorkflowExecutionError(
+                    f"{node_name} failed for task {task_id}: {exc}",
+                    logs=append_log(started_state.get("logs"), error_log),
+                    task_id=task_id,
+                    node_name=node_name,
+                ) from exc
+
+            elapsed_ms = int((perf_counter() - started_at) * 1000)
+            output_hint = NODE_OUTPUT_HINTS.get(node_name)
+            end_log = format_workflow_log(
                 task_id=task_id,
                 node_name=node_name,
-            ) from exc
-
-        elapsed_ms = int((perf_counter() - started_at) * 1000)
-        output_hint = NODE_OUTPUT_HINTS.get(node_name)
-        end_log = format_workflow_log(
-            task_id=task_id,
-            node_name=node_name,
-            event="finish",
-            output=output_hint,
-            elapsed_ms=elapsed_ms,
-        )
-        return {
-            **updates,
-            "logs": append_log(updates.get("logs", started_state.get("logs")), end_log),
-        }
+                event="finish",
+                output_hint=output_hint,
+                detail="节点执行完成",
+                elapsed_ms=elapsed_ms,
+            )
+            logger.info(
+                "节点完成：%s，耗时=%sms，输出=%s",
+                node_name,
+                elapsed_ms,
+                output_hint or "-",
+            )
+            return {
+                **updates,
+                "logs": append_log(updates.get("logs", started_state.get("logs")), end_log),
+            }
 
     return _runner
 
@@ -158,6 +183,7 @@ def build_workflow():
     返回值是已编译的图对象，供 UI 层直接 invoke。
     """
     deps = build_dependencies()
+    logger.info("开始构建 LangGraph 工作流图")
     graph = StateGraph(WorkflowState)
     graph.add_node("ingest_assets", _wrap_node("ingest_assets", ingest_assets, deps))
     graph.add_node("analyze_product", _wrap_node("analyze_product", analyze_product, deps))
@@ -181,4 +207,5 @@ def build_workflow():
     graph.add_edge("overlay_text", "run_qc")
     graph.add_edge("run_qc", "finalize")
     graph.add_edge("finalize", END)
+    logger.info("LangGraph 工作流图构建完成，固定节点数=%s", 10)
     return graph.compile()

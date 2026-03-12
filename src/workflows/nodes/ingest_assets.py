@@ -10,10 +10,14 @@
 
 from __future__ import annotations
 
+import logging
+
 from PIL import Image
 
 from src.domain.asset import Asset
 from src.workflows.state import WorkflowDependencies, WorkflowState
+
+logger = logging.getLogger(__name__)
 
 
 def ingest_assets(state: WorkflowState, deps: WorkflowDependencies) -> dict:
@@ -26,10 +30,11 @@ def ingest_assets(state: WorkflowState, deps: WorkflowDependencies) -> dict:
         except OSError:
             assets.append(asset)
     filenames = ", ".join(asset.filename for asset in assets)
+    logger.info("素材接收完成，素材数量=%s，文件=%s", len(assets), filenames or "-")
     return {
         "assets": assets,
         "logs": [
             *state.get("logs", []),
-            f"[ingest_assets] count={len(assets)}, files={filenames}.",
+            f"[ingest_assets] 素材接收完成，数量={len(assets)}，文件={filenames or '-' }。",
         ],
     }
