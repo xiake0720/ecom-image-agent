@@ -58,12 +58,41 @@ def test_domain_models_round_trip() -> None:
             avoid=["不要虚构透明罐体"],
         ),
     )
-    shot_plan = ShotPlan(shots=[ShotSpec(shot_id="shot-01", title="主图", purpose="展示", composition_hint="主体居中", copy_goal="品牌")])
+    shot_plan = ShotPlan(
+        shots=[
+            ShotSpec(
+                shot_id="shot-01",
+                title="主图",
+                purpose="展示",
+                composition_hint="主体居中",
+                copy_goal="品牌",
+                shot_type="hero",
+                goal="突出品牌主视觉",
+                focus="包装主体",
+                scene_direction="高级棚拍主图场景",
+                composition_direction="主体居中，右侧留白",
+            )
+        ]
+    )
     copy_plan = CopyPlan(items=[CopyItem(shot_id="shot-01", title="标题", subtitle="副标题", bullets=["卖点1"])])
     layout_plan = LayoutPlan(
         items=[LayoutItem(shot_id="shot-01", canvas_width=1440, canvas_height=1440, blocks=[LayoutBlock(kind="title", x=0, y=0, width=200, height=80)])]
     )
-    prompt_plan = ImagePromptPlan(prompts=[ImagePrompt(shot_id="shot-01", prompt="tea shot", output_size="1440x1440")])
+    prompt_plan = ImagePromptPlan(
+        prompts=[
+            ImagePrompt(
+                shot_id="shot-01",
+                shot_type="hero",
+                prompt="tea shot",
+                negative_prompt=["garbled text", "deformed product"],
+                output_size="1440x1440",
+                preserve_rules=["保持包装主体"],
+                text_space_hint="top_right_clean_space",
+                composition_notes=["主体居中"],
+                style_notes=["高端商业摄影"],
+            )
+        ]
+    )
     result = GenerationResult(images=[GeneratedImage(shot_id="shot-01", image_path="a.png", preview_path="b.png", width=1440, height=1440)])
     qc_report = QCReport(passed=True, checks=[QCCheck(shot_id="shot-01", check_name="dimension", passed=True, details="ok")])
 
@@ -72,9 +101,11 @@ def test_domain_models_round_trip() -> None:
     assert analysis.model_dump()["category"] == "tea"
     assert analysis.model_dump()["analysis_scope"] == "sku_level"
     assert shot_plan.model_dump()["shots"][0]["shot_id"] == "shot-01"
+    assert shot_plan.model_dump()["shots"][0]["shot_type"] == "hero"
     assert copy_plan.model_dump()["items"][0]["title"] == "标题"
     assert layout_plan.model_dump()["items"][0]["blocks"][0]["kind"] == "title"
     assert prompt_plan.model_dump()["prompts"][0]["output_size"] == "1440x1440"
+    assert prompt_plan.model_dump()["prompts"][0]["negative_prompt"][0] == "garbled text"
     assert result.model_dump()["images"][0]["width"] == 1440
     assert qc_report.model_dump()["checks"][0]["passed"] is True
 

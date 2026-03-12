@@ -6,7 +6,8 @@
 
 因此当前工作流的准确描述应为：
 - 仍然保留 mock 路径，便于本地验证和回退
-- 部分节点已经支持切换到真实文本 provider
+- `analyze_product` 已支持切换到真实视觉 provider
+- `plan_shots`、`generate_copy`、`build_prompts` 已支持切换到真实文本 provider
 - 图片生成节点已经支持切换到真实图片 provider
 - OCR 与 rembg 仍保持占位，不属于当前已完成能力
 
@@ -58,6 +59,7 @@
 当前状态：
 - `mock` 模式下使用本地规则输出
 - `real` 模式下切换到 NVIDIA 多模态模型做 SKU 级视觉分析
+- 当前它仍然是唯一看图分析节点，后续 `plan_shots`、`generate_copy`、`build_prompts` 只消费结构化结果
 
 主要落盘：
 - `product_analysis.json`
@@ -69,7 +71,8 @@
 
 当前状态：
 - `mock` 模式下使用本地规则输出
-- `real` 模式下切换到 NVIDIA GLM-5 结构化输出
+- `real` 模式下切换到 NVIDIA 结构化规划模型，默认是 Qwen3.5，可切到 GLM-5
+- 当前模板已增加类目族群识别、核心图型与扩展图型、整组风格锚点与发散边界控制
 
 主要落盘：
 - `shot_plan.json`
@@ -80,7 +83,8 @@
 
 当前状态：
 - `mock` 模式下使用本地规则输出
-- `real` 模式下切换到 NVIDIA GLM-5 结构化输出
+- `real` 模式下切换到 NVIDIA 结构化规划模型，默认是 Qwen3.5，可切到 GLM-5
+- 当前职责只保留为“按 shot 生成结构化中文文案”，不再混入图组规划
 
 主要落盘：
 - `copy_plan.json`
@@ -103,11 +107,19 @@
 - 约束主体保持、风格一致和文案留白区域
 
 当前状态：
-- `mock` 模式下使用本地 prompt 构造
-- `real` 模式下切换到 NVIDIA GLM-5 结构化输出
+- `mock` 模式下按逐张 shot 生成本地占位 prompt
+- `real` 模式下继续使用 NVIDIA 结构化规划模型，默认是 Qwen3.5，可切到 GLM-5，并改为逐张 shot 调用生成单张结构化 prompt
+- 当前为纯结构化推理模式，不向文本模型发送图片输入
+- 当前输入只依赖 `task`、`product_analysis`、当前 `shot`、当前 `copy`、当前 `layout`
+- 商品参考图会在后续 `render_images` 节点再发送给真实图片模型
+- 在保留 `image_prompt_plan.json` 的同时，额外写入每张图的调试产物
 
 主要落盘：
 - `image_prompt_plan.json`
+- `artifacts/shots/{shot_id}/shot.json`
+- `artifacts/shots/{shot_id}/copy.json`
+- `artifacts/shots/{shot_id}/layout.json`
+- `artifacts/shots/{shot_id}/prompt.json`
 
 ### 7. render_images
 职责：
@@ -167,6 +179,10 @@
 - `copy_plan.json`
 - `layout_plan.json`
 - `image_prompt_plan.json`
+- `artifacts/shots/{shot_id}/shot.json`
+- `artifacts/shots/{shot_id}/copy.json`
+- `artifacts/shots/{shot_id}/layout.json`
+- `artifacts/shots/{shot_id}/prompt.json`
 - `qc_report.json`
 - `generated/`
 - `final/`
@@ -184,6 +200,12 @@
 - 真实图片 provider 已接入：`render_images`
 - 仍保持 mock / 占位：`generate_layout`、`run_qc` 中的 OCR 路径、OCR 服务、rembg 服务
 
+当前链路中的职责分工还应明确理解为：
+- `analyze_product` 负责看图
+- `plan_shots` 负责先收住类目边界和整组风格锚点
+- `build_prompts` 负责基于结构化结果逐张放大成可执行 prompt
+- `render_images` 才重新接收参考商品图做真实生图
+
 必须继续保证：
 - 结构化产物存在
 - 预览可显示
@@ -197,6 +219,11 @@
 - 商品分析视觉能力：`NVIDIAVisionProductAnalysisProvider`
 - 文本规划能力：`NVIDIATextProvider`
 - 图片能力：`RunApiGeminiImageProvider`
+
+当前默认模型：
+- 视觉分析：`Qwen3.5`
+- 结构化规划：`Qwen3.5`
+- 如需回切文本链路，可通过配置切到 `GLM-5`
 
 当前尚未进入范围的能力：
 - 真实 OCR 运行时

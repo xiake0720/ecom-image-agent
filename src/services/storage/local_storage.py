@@ -47,6 +47,7 @@ class LocalStorageService:
 
     def save_json_artifact(self, task_id: str, filename: str, payload: object) -> Path:
         task_path = ensure_task_dirs(task_id)["task"] / filename
+        task_path.parent.mkdir(parents=True, exist_ok=True)
         if hasattr(payload, "model_dump"):
             content = payload.model_dump(mode="json")
         else:
@@ -73,4 +74,3 @@ class LocalStorageService:
                 return image.size
         except OSError:
             return None, None
-

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from src.core.paths import get_task_final_dir, get_task_preview_dir
@@ -15,11 +16,13 @@ from src.domain.generation_result import GeneratedImage, GenerationResult
 from src.services.rendering.image_postprocess import save_preview
 from src.workflows.state import WorkflowDependencies, WorkflowState
 
+logger = logging.getLogger(__name__)
+
 
 def overlay_text(state: WorkflowState, deps: WorkflowDependencies) -> dict:
     """对生成结果执行中文后贴字并生成预览图。"""
     task = state["task"]
-    logs = [*state.get("logs", []), f"[overlay_text] start images={len(state['generation_result'].images)}."]
+    logs = [*state.get("logs", []), f"[overlay_text] 开始执行中文后贴字，图片数={len(state['generation_result'].images)}。"]
     copy_map = {item.shot_id: item for item in state["copy_plan"].items}
     layout_map = {item.shot_id: item for item in state["layout_plan"].items}
     final_images: list[GeneratedImage] = []
@@ -42,11 +45,12 @@ def overlay_text(state: WorkflowState, deps: WorkflowDependencies) -> dict:
                 }
             )
         )
+    logger.info("中文后贴字完成，最终图片数量=%s", len(final_images))
     return {
         "generation_result": GenerationResult(images=final_images),
         "logs": [
             *logs,
-            f"[overlay_text] finalized images={len(final_images)}.",
-            "[overlay_text] rendered Chinese copy with Pillow.",
+            f"[overlay_text] 中文后贴字完成，finalized_images={len(final_images)}。",
+            "[overlay_text] 已通过 Pillow 完成中文后贴字。",
         ],
     }

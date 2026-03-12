@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -8,6 +9,8 @@ from src.domain.asset import Asset
 from src.domain.generation_result import GeneratedImage, GenerationResult
 from src.domain.image_prompt_plan import ImagePromptPlan
 from src.providers.image.base import BaseImageProvider
+
+logger = logging.getLogger(__name__)
 
 
 class GeminiImageProvider(BaseImageProvider):
@@ -21,6 +24,11 @@ class GeminiImageProvider(BaseImageProvider):
         output_dir: Path,
         reference_assets: list[Asset] | None = None,
     ) -> GenerationResult:
+        logger.info(
+            "当前图片 provider 模式为 mock，开始生成占位图，数量=%s，输出目录=%s",
+            len(plan.prompts),
+            output_dir,
+        )
         # TODO: Replace this mock canvas renderer with a real image model provider after MVP approval.
         output_dir.mkdir(parents=True, exist_ok=True)
         images: list[GeneratedImage] = []
@@ -37,6 +45,7 @@ class GeminiImageProvider(BaseImageProvider):
                     height=height,
                 )
             )
+        logger.info("mock 图片生成完成，输出文件数=%s", len(images))
         return GenerationResult(images=images)
 
     def _render_placeholder(self, width: int, height: int, prompt: str, output_path: Path) -> None:

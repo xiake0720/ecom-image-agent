@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
+
 from src.providers.llm.base import BaseTextProvider, StructuredModel
+
+logger = logging.getLogger(__name__)
 
 
 class GeminiTextProvider(BaseTextProvider):
@@ -15,6 +19,7 @@ class GeminiTextProvider(BaseTextProvider):
         *,
         system_prompt: str | None = None,
     ) -> StructuredModel:
+        logger.info("当前文本 provider 模式为 mock，返回本地结构化占位数据，schema=%s", response_model.__name__)
         # TODO: Replace this mock-only implementation with a real Gemini API call after MVP approval.
         return self._mock_response(response_model)
 
