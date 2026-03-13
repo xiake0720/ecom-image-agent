@@ -30,7 +30,8 @@ def render_images(state: WorkflowState, deps: WorkflowDependencies) -> dict:
             "[render_images] 开始生成图片，"
             f"render_mode={render_mode}，render_variant={render_variant}，"
             f"prompts={len(prompt_plan.prompts)}，references={len(reference_assets)}，"
-            f"provider={deps.image_provider_name or '-'}。"
+            f"provider={deps.image_provider_name or '-'}，"
+            f"model={deps.image_model_selection.model_id if deps.image_model_selection else '-'}。"
         ),
         f"[render_images] 本次生图实际参考图 asset_id={reference_asset_ids or ['-']}。",
     ]

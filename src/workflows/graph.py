@@ -139,8 +139,10 @@ def _wrap_node(node_name: str, handler: NodeHandler, deps: WorkflowDependencies)
     return _runner
 
 
+    # Workflow graph 也带缓存；修改环境变量或 `.env` 后必须重启 Streamlit 进程，不能依赖当前进程热切换。
 @lru_cache(maxsize=1)
 def build_workflow():
+    logger.info("开始构建 workflow 图；如已修改环境变量或 .env，请先重启 Streamlit 进程再验证路由。")
     deps = build_dependencies()
     graph = StateGraph(WorkflowState)
     graph.add_node("ingest_assets", _wrap_node("ingest_assets", ingest_assets, deps))

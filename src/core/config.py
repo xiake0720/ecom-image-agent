@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
+import logging
 import os
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,8 @@ from typing import Any
 from dotenv import load_dotenv
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -69,9 +72,9 @@ class Settings(BaseSettings):
     text_provider: str | None = None
     vision_provider: str | None = None
     image_provider: str | None = None
-    text_provider_mode: str = "mock"
-    vision_provider_mode: str = "mock"
-    image_provider_mode: str = "mock"
+    text_provider_mode: str = "real"
+    vision_provider_mode: str = "real"
+    image_provider_mode: str = "real"
     text_model_provider: str = "qwen"
     vision_model_provider: str = "qwen"
     nvidia_api_key: str | None = None
@@ -91,6 +94,12 @@ class Settings(BaseSettings):
     text_model_id: str | None = None
     vision_model: str | None = Field(default=None, validation_alias="ECOM_IMAGE_AGENT_VISION_MODEL")
     vision_model_id: str | None = None
+    image_model: str | None = Field(default=None, validation_alias="ECOM_IMAGE_AGENT_IMAGE_MODEL")
+    image_model_id: str | None = None
+    image_allow_mock_fallback: bool = Field(
+        default=False,
+        validation_alias="ECOM_IMAGE_AGENT_IMAGE_ALLOW_MOCK_FALLBACK",
+    )
     qwen_model_id: str = "qwen/qwen3.5-122b-a10b"
     glm5_model_id: str = "z-ai/glm5"
     nvidia_text_model: str | None = None
@@ -183,11 +192,15 @@ class Settings(BaseSettings):
             "text_model_provider": text_selection.provider_key,
             "text_model_id": text_selection.model_id,
             "vision_model_provider": vision_selection.provider_key,
+            "vision_model_id": vision_selection.model_id,
+            "image_model_provider": image_selection.provider_key,
+            "image_model_id": image_selection.model_id,
             "text_model_label": text_selection.label,
             "vision_model_label": vision_selection.label,
             "image_model_label": image_selection.label,
             "text_model_source": text_selection.source,
             "vision_model_source": vision_selection.source,
+            "image_model_source": image_selection.source,
             "log_level": self.log_level,
             "prompt_build_mode": self.resolve_prompt_build_mode(),
             "render_mode": self.resolve_render_mode(),
@@ -198,9 +211,9 @@ class Settings(BaseSettings):
             "enable_node_cache": "true" if self.enable_node_cache else "false",
             "enable_file_log": "true" if self.enable_file_log else "false",
             "proxy_enabled": "true" if self.is_proxy_enabled() else "false",
-            "nvidia_text_model": text_selection.model_id,
-            "nvidia_vision_model": vision_selection.model_id,
-            "image_model_id": image_selection.model_id,
+            "dashscope_api_key_loaded": "true" if bool(self.dashscope_api_key) else "false",
+            "dashscope_base_url": self.dashscope_base_url,
+            "image_allow_mock_fallback": "true" if self.image_allow_mock_fallback else "false",
             "runapi_image_model": self.runapi_image_model,
             "outputs_dir": str(self.outputs_dir),
             "tasks_dir": str(self.tasks_dir),
@@ -278,12 +291,12 @@ class Settings(BaseSettings):
                 source=route.source,
             )
         if provider_key == "dashscope":
-            model_id = self.text_model_id or "dashscope-auto-text"
+            model_id = self.text_model or self.text_model_id or "qwen-plus"
             return ResolvedModelSelection(
                 capability="planning",
                 provider_key="dashscope",
                 model_id=model_id,
-                label="DashScope",
+                label=self._label_for_model(provider_key, model_id),
                 source=route.source,
             )
         if provider_key in {"zhipu", "zhipu_glm47_flash"}:
@@ -356,12 +369,12 @@ class Settings(BaseSettings):
                 source="ECOM_IMAGE_AGENT_VISION_MODEL_PROVIDER",
             )
         if provider_key == "dashscope":
-            model_id = self.vision_model or self.vision_model_id or "dashscope-vl-auto"
+            model_id = self.vision_model or self.vision_model_id or "qwen3-vl-flash"
             return ResolvedModelSelection(
                 capability="vision",
                 provider_key="dashscope",
                 model_id=model_id,
-                label="DashScope VL",
+                label=self._label_for_model(provider_key, model_id),
                 source=route.source,
             )
         if provider_key == "zhipu":
@@ -392,11 +405,12 @@ class Settings(BaseSettings):
                 source=route.source,
             )
         if provider_key == "dashscope":
+            model_id = self.image_model or self.image_model_id or "wanx2.1-t2i-turbo"
             return ResolvedModelSelection(
                 capability="image",
                 provider_key="dashscope",
-                model_id="wanx-auto",
-                label="DashScope Wanx",
+                model_id=model_id,
+                label=self._label_for_model(provider_key, model_id),
                 source=route.source,
             )
         if provider_key == "zhipu":
@@ -504,6 +518,12 @@ class Settings(BaseSettings):
         lowered = model_id.lower()
         if "glm5" in lowered:
             return "GLM-5"
+        if "wanx2.1-t2i-turbo" in lowered:
+            return "Wanx 2.1 Turbo"
+        if "qwen3-vl-flash" in lowered:
+            return "Qwen3 VL Flash"
+        if "qwen-plus" in lowered:
+            return "Qwen Plus"
         if "glm-4.7-flash" in lowered:
             return "GLM-4.7-Flash"
         if "glm-4.7" in lowered:
@@ -547,9 +567,9 @@ class Settings(BaseSettings):
         if self._should_apply_budget_defaults():
             return self._budget_defaults()[field_name], self.env_name_for("budget_mode")
         default_alias_map = {
-            "text": "nvidia",
-            "vision": "nvidia",
-            "image": "runapi" if self.image_provider_mode == "real" else "mock",
+            "text": "dashscope",
+            "vision": "dashscope",
+            "image": "dashscope",
         }
         return default_alias_map[capability], "legacy-default"
 
@@ -563,20 +583,20 @@ class Settings(BaseSettings):
         presets = {
             "local": {
                 "text_provider_mode": "real",
-                "vision_provider_mode": "mock",
-                "image_provider_mode": "mock",
+                "vision_provider_mode": "real",
+                "image_provider_mode": "real",
                 "prompt_build_mode": "batch",
-                "text_provider": "zhipu_glm47_flash",
-                "vision_provider": "mock",
-                "image_provider": "mock",
+                "text_provider": "dashscope",
+                "vision_provider": "dashscope",
+                "image_provider": "dashscope",
             },
             "cheap": {
                 "text_provider_mode": "real",
                 "vision_provider_mode": "real",
                 "image_provider_mode": "real",
                 "prompt_build_mode": "batch",
-                "text_provider": "zhipu_glm47_flash",
-                "vision_provider": "zhipu",
+                "text_provider": "dashscope",
+                "vision_provider": "dashscope",
                 "image_provider": "dashscope",
             },
             "balanced": {
@@ -584,18 +604,18 @@ class Settings(BaseSettings):
                 "vision_provider_mode": "real",
                 "image_provider_mode": "real",
                 "prompt_build_mode": "per_shot",
-                "text_provider": "nvidia",
-                "vision_provider": "nvidia",
-                "image_provider": "runapi",
+                "text_provider": "dashscope",
+                "vision_provider": "dashscope",
+                "image_provider": "dashscope",
             },
             "production": {
                 "text_provider_mode": "real",
                 "vision_provider_mode": "real",
                 "image_provider_mode": "real",
                 "prompt_build_mode": "per_shot",
-                "text_provider": "nvidia",
-                "vision_provider": "nvidia",
-                "image_provider": "runapi",
+                "text_provider": "dashscope",
+                "vision_provider": "dashscope",
+                "image_provider": "dashscope",
             },
         }
         return presets[budget_mode]
@@ -624,10 +644,13 @@ def _read_streamlit_secrets() -> dict[str, Any]:
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """返回单例化配置对象。"""
-    # 本地 `.env` 只作为开发期环境变量预加载，且不会覆盖系统环境变量。
+    # Settings 带缓存；修改环境变量或 `.env` 后必须重启 Streamlit 进程，不能假定当前进程会自动感知。
     load_dotenv(override=False)
     settings = Settings().with_streamlit_secrets()
     settings.ensure_directories()
+    logger.info(
+        "配置已加载并写入缓存；如修改环境变量或 .env，请重启 Streamlit 进程后再验证 provider/model 切换。"
+    )
     return settings
 
 
