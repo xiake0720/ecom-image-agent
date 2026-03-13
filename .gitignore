@@ -17,3 +17,4 @@ outputs/exports/*
 .env.*
 .streamlit/secrets.toml
 !.env.example
+/outputs/

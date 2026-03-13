@@ -6,6 +6,7 @@ import logging
 import time
 from typing import Any
 
+from pydantic import ValidationError
 import requests
 
 from src.core.config import Settings
@@ -13,6 +14,66 @@ from src.core.logging import describe_proxy_status, summarize_text
 from src.providers.llm.base import BaseTextProvider, StructuredModel
 
 logger = logging.getLogger(__name__)
+
+
+def build_json_schema_response_format(*, schema_name: str, schema: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": schema_name,
+            "schema": schema,
+        },
+    }
+
+
+def extract_json_candidate(raw_text: str) -> str | None:
+    start_positions = [pos for pos in (raw_text.find("{"), raw_text.find("[")) if pos >= 0]
+    if not start_positions:
+        return None
+    start = min(start_positions)
+    end_object = raw_text.rfind("}")
+    end_array = raw_text.rfind("]")
+    end = max(end_object, end_array)
+    if end < start:
+        return None
+    return raw_text[start : end + 1].strip()
+
+
+def parse_structured_output_content(
+    *,
+    provider_name: str,
+    capability: str,
+    model_id: str,
+    content: str,
+    elapsed_text: str,
+) -> dict[str, Any]:
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError as exc:
+        logger.warning(
+            "%s %s returned non-JSON content, attempting minimal repair. model=%s, elapsed_seconds=%s, raw_summary=%s",
+            provider_name,
+            capability,
+            model_id,
+            elapsed_text,
+            summarize_text(content, limit=320),
+        )
+        candidate = extract_json_candidate(content)
+        if candidate:
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                logger.warning(
+                    "%s %s minimal JSON repair failed. model=%s, candidate_summary=%s",
+                    provider_name,
+                    capability,
+                    model_id,
+                    summarize_text(candidate, limit=320),
+                )
+        raise RuntimeError(
+            f"{provider_name} {capability} returned non-JSON content: "
+            f"model={model_id}, elapsed_seconds={elapsed_text}, raw_summary={summarize_text(content, limit=600)}"
+        ) from exc
 
 
 class OpenAICompatibleChatClient:
@@ -33,9 +94,10 @@ class OpenAICompatibleChatClient:
         self,
         *,
         model_id: str,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         response_format: dict[str, Any] | None = None,
         temperature: float = 0.2,
+        extra_body: dict[str, Any] | None = None,
     ) -> requests.Response:
         payload: dict[str, Any] = {
             "model": model_id,
@@ -45,6 +107,8 @@ class OpenAICompatibleChatClient:
         }
         if response_format is not None:
             payload["response_format"] = response_format
+        if extra_body:
+            payload.update(extra_body)
         return self._post_with_retry(payload=payload, model_id=model_id)
 
     def parse_response_json(self, response: requests.Response, *, model_id: str) -> dict[str, Any]:
@@ -52,7 +116,8 @@ class OpenAICompatibleChatClient:
             return response.json()
         except ValueError as exc:
             raise RuntimeError(
-                f"{self.provider_name} text response is not valid JSON: model={model_id}, response={response.text[:800]}"
+                f"{self.provider_name} text response is not valid JSON: "
+                f"model={model_id}, response={summarize_text(response.text, limit=800)}"
             ) from exc
 
     def extract_message_content(self, data: dict[str, Any], *, model_id: str) -> str:
@@ -184,34 +249,56 @@ class OpenAICompatibleStructuredTextProvider(BaseTextProvider, ABC):
         response = client.create_chat_completion(
             model_id=self.model_selection.model_id,
             messages=self._build_messages(prompt, schema, system_prompt=system_prompt),
-            response_format={"type": "json_object"},
+            response_format=self._build_response_format(schema=schema, response_model=response_model),
+            extra_body=self._build_extra_body(),
         )
         self.last_response_status_code = response.status_code
         self.last_response_metadata = {
             "provider_name": self.provider_key,
             "model_id": self.model_selection.model_id,
+            "capability": "text",
             "status_code": response.status_code,
         }
         elapsed_seconds = getattr(response, "_ecom_elapsed_seconds", None)
         elapsed_text = f"{elapsed_seconds:.2f}" if isinstance(elapsed_seconds, (int, float)) else "unknown"
         if response.status_code >= 400:
+            logger.error(
+                "%s text request failed. model=%s, status_code=%s, elapsed_seconds=%s, response_summary=%s",
+                self.provider_display_name,
+                self.model_selection.model_id,
+                response.status_code,
+                elapsed_text,
+                summarize_text(response.text, limit=320),
+            )
             raise RuntimeError(
                 f"{self.provider_display_name} text request failed: "
                 f"model={self.model_selection.model_id}, status_code={response.status_code}, "
-                f"elapsed_seconds={elapsed_text}, response={response.text[:800]}"
+                f"elapsed_seconds={elapsed_text}, response={summarize_text(response.text, limit=800)}"
             )
 
         data = client.parse_response_json(response, model_id=self.model_selection.model_id)
         content = client.extract_message_content(data, model_id=self.model_selection.model_id)
+        parsed = parse_structured_output_content(
+            provider_name=self.provider_display_name,
+            capability="text",
+            model_id=self.model_selection.model_id,
+            content=content,
+            elapsed_text=elapsed_text,
+        )
         try:
-            parsed: dict[str, Any] = json.loads(content)
-        except json.JSONDecodeError as exc:
+            result = response_model.model_validate(parsed)
+        except ValidationError as exc:
+            logger.warning(
+                "%s text schema validation failed. model=%s, raw_summary=%s",
+                self.provider_display_name,
+                self.model_selection.model_id,
+                summarize_text(content, limit=320),
+            )
             raise RuntimeError(
-                f"{self.provider_display_name} returned non-JSON content: "
-                f"model={self.model_selection.model_id}, elapsed_seconds={elapsed_text}, content={content[:800]}"
+                f"{self.provider_display_name} text schema validation failed: "
+                f"model={self.model_selection.model_id}, raw_summary={summarize_text(content, limit=800)}"
             ) from exc
 
-        result = response_model.model_validate(parsed)
         logger.info(
             "文本模型调用成功，provider=%s，模型标签=%s，model=%s，耗时=%ss",
             self.provider_display_name,
@@ -242,6 +329,17 @@ class OpenAICompatibleStructuredTextProvider(BaseTextProvider, ABC):
             }
         )
         return messages
+
+    def _build_response_format(
+        self,
+        *,
+        schema: dict[str, Any],
+        response_model: type[StructuredModel],
+    ) -> dict[str, Any]:
+        return {"type": "json_object"}
+
+    def _build_extra_body(self) -> dict[str, Any]:
+        return {}
 
     def _resolve_route_mode(self) -> str:
         return self.settings.resolve_text_provider_route().mode

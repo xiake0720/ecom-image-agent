@@ -264,14 +264,18 @@ def _render_runtime_controls(settings, bindings) -> None:
         if action_col.button("重新加载配置 / 重建 Workflow", use_container_width=True):
             st.session_state["_ecom_reload_runtime"] = True
             st.rerun()
-        info_col.caption("修改环境变量或 .env 后，可点击此按钮清理缓存并重建 workflow。")
+        info_col.caption("修改环境变量或 .env 后必须重启 Streamlit 进程；此按钮只清理当前进程内的 settings/workflow 缓存。")
 
-        top_cols = st.columns(5)
+        top_cols = st.columns(4)
         top_cols[0].metric("Budget Mode", settings.resolve_budget_mode())
-        top_cols[1].metric("Text Provider", bindings.planning_route.alias)
-        top_cols[2].metric("Text Model", bindings.planning_model_selection.model_id)
-        top_cols[3].metric("Vision Alias", bindings.vision_route.alias)
-        top_cols[4].metric("Image Alias", bindings.image_route.alias)
+        top_cols[1].metric("Text Route", f"{bindings.planning_route.alias}/{bindings.planning_route.mode}")
+        top_cols[2].metric("Vision Route", f"{bindings.vision_route.alias}/{bindings.vision_route.mode}")
+        top_cols[3].metric("Image Route", f"{bindings.image_route.alias}/{bindings.image_route.mode}")
+
+        provider_cols = st.columns(3)
+        provider_cols[0].metric("Text Model", bindings.planning_model_selection.model_id)
+        provider_cols[1].metric("Vision Model", bindings.vision_model_selection.model_id)
+        provider_cols[2].metric("Image Model", bindings.image_model_selection.model_id)
 
         mode_cols = st.columns(4)
         mode_cols[0].metric("Prompt Build", settings.resolve_prompt_build_mode())
@@ -281,7 +285,31 @@ def _render_runtime_controls(settings, bindings) -> None:
         ref_cols = st.columns(2)
         ref_cols[0].metric("Analyze Refs", str(settings.analyze_max_reference_images))
         ref_cols[1].metric("Render Refs", str(settings.render_max_reference_images))
-        st.caption(f"当前文本实现={bindings.planning_provider_name}，当前文本模型={bindings.planning_model_selection.model_id}")
+        st.caption(
+            "当前实际实现: "
+            f"text={bindings.planning_provider_name} / {bindings.planning_model_selection.model_id}, "
+            f"vision={bindings.vision_provider_name} / {bindings.vision_model_selection.model_id}, "
+            f"image={bindings.image_provider_name} / {bindings.image_model_selection.model_id}"
+        )
+
+        st.subheader("配置自检")
+        check_cols = st.columns(5)
+        check_cols[0].metric("DashScope Key", settings.build_debug_summary()["dashscope_api_key_loaded"])
+        check_cols[1].metric("Text Model", bindings.planning_model_selection.model_id)
+        check_cols[2].metric("Vision Model", bindings.vision_model_selection.model_id)
+        check_cols[3].metric("Image Model", bindings.image_model_selection.model_id)
+        check_cols[4].metric("Mock Fallback", "true" if settings.image_allow_mock_fallback else "false")
+        st.code(
+            "\n".join(
+                [
+                    f"DASHSCOPE_BASE_URL={settings.dashscope_base_url}",
+                    f"ECOM_IMAGE_AGENT_TEXT_PROVIDER={bindings.planning_route.alias}",
+                    f"ECOM_IMAGE_AGENT_VISION_PROVIDER={bindings.vision_route.alias}",
+                    f"ECOM_IMAGE_AGENT_IMAGE_PROVIDER={bindings.image_route.alias}",
+                ]
+            ),
+            language="text",
+        )
 
         st.caption(
             f"节点缓存默认值: {'开启' if settings.enable_node_cache else '关闭'}，缓存目录: {settings.cache_dir}"

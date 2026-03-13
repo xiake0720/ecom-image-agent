@@ -8,12 +8,12 @@
 
 - 入口仍然只有 `streamlit_app.py`
 - 工作流仍然是 `Streamlit + LangGraph + 本地文件存储`
-- 文本 real provider 已有实现文件：`NVIDIATextProvider`
-- 图片 real provider 已有实现文件：`RunApiGeminiImageProvider`
+- 文本 real provider 已切到：`DashScopeTextProvider`
+- 图片 real provider 已切到：`DashScopeImageProvider`
 - 中文正式文案仍然统一通过 Pillow 后贴字
 - `generate_layout`、OCR、rembg 仍是规则或占位实现
-- 视觉分析 real provider 已有实现文件：`NVIDIAVisionProductAnalysisProvider`
-- 当前默认主链路模型已切到 Qwen3.5，GLM-5 仍保留为可配置开关
+- 视觉分析 real provider 已切到：`DashScopeVisionProvider`
+- 当前默认主链路统一为 DashScope：`qwen-plus + qwen3-vl-flash + wanx2.1-t2i-turbo`
 - 模型选择已集中到 provider 路由层，`build_prompts` 在 real 模式下继续保持逐张 shot 精细生成
 - `analyze_product` 是当前唯一看图节点，`build_prompts` 当前不再向文本模型发送图片输入
 - `plan_shots` 已增加类目边界、核心图型 / 扩展图型和整组风格锚点控制
@@ -88,18 +88,19 @@ python -m streamlit run streamlit_app.py
 文本侧：
 
 - `GeminiTextProvider`：当前代码里的 mock 文本 provider，本地返回伪造结构化数据
-- `NVIDIATextProvider`：当前真实结构化规划 provider，通过 NVIDIA NIM 返回结构化 JSON
-- 默认模型是 `qwen/qwen3.5-122b-a10b`
-- 如需回切，可通过开关改为 `z-ai/glm5`
+- `DashScopeTextProvider`：当前真实结构化规划 provider，通过 DashScope OpenAI-compatible `chat/completions` 返回结构化 JSON
+- 默认模型是 `qwen-plus`
+- `NVIDIATextProvider` / `ZhipuTextProvider` / `OllamaTextProvider` 仍保留，但不再是默认主路由
 
 图片侧：
 
 - `GeminiImageProvider`：当前代码里的 mock 图片 provider，本地生成占位图
-- `RunApiGeminiImageProvider`：当前真实图片 provider，通过 RunAPI 调用 Gemini Image Gen
+- `DashScopeImageProvider`：当前真实图片 provider，通过 DashScope Wanx `wanx2.1-t2i-turbo` 生成图片
+- `RunApiGeminiImageProvider` 仍保留，但不再是默认主路由
 
 视觉分析侧：
 
-- `NVIDIAVisionProductAnalysisProvider`：当前真实视觉分析 provider，使用支持图片输入的 NVIDIA 多模态接口做 SKU 级商品分析
+- `DashScopeVisionProvider`：当前真实视觉分析 provider，使用 `qwen3-vl-flash` 做 SKU 级商品分析
 - `analyze_product` 在 `vision_provider_mode=real` 时会直接把上传商品图传给该 provider，不做 silent fallback
 
 ## 当前任务目录结构
@@ -169,48 +170,39 @@ python -m streamlit run streamlit_app.py
 基础配置：
 
 ```env
-ECOM_IMAGE_AGENT_VISION_PROVIDER_MODE=mock
-ECOM_IMAGE_AGENT_TEXT_PROVIDER_MODE=mock
-ECOM_IMAGE_AGENT_IMAGE_PROVIDER_MODE=mock
-ECOM_IMAGE_AGENT_TEXT_MODEL_PROVIDER=qwen
-ECOM_IMAGE_AGENT_VISION_MODEL_PROVIDER=qwen
+ECOM_IMAGE_AGENT_VISION_PROVIDER_MODE=real
+ECOM_IMAGE_AGENT_TEXT_PROVIDER_MODE=real
+ECOM_IMAGE_AGENT_IMAGE_PROVIDER_MODE=real
 ECOM_IMAGE_AGENT_DEFAULT_FONT_PATH=assets/fonts/NotoSansSC-Regular.otf
 ECOM_IMAGE_AGENT_PROVIDER_TIMEOUT_SECONDS=120
 ```
 
-文本 / 视觉模型选择：
+DashScope 默认主链路：
 
 ```env
-ECOM_IMAGE_AGENT_TEXT_MODEL_PROVIDER=qwen
-ECOM_IMAGE_AGENT_VISION_MODEL_PROVIDER=qwen
-ECOM_IMAGE_AGENT_QWEN_MODEL_ID=qwen/qwen3.5-122b-a10b
-ECOM_IMAGE_AGENT_GLM5_MODEL_ID=z-ai/glm5
-ECOM_IMAGE_AGENT_TEXT_MODEL_ID=
-ECOM_IMAGE_AGENT_VISION_MODEL_ID=
+DASHSCOPE_API_KEY=
+DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+ECOM_IMAGE_AGENT_TEXT_PROVIDER=dashscope
+ECOM_IMAGE_AGENT_TEXT_MODEL=qwen-plus
+ECOM_IMAGE_AGENT_VISION_PROVIDER=dashscope
+ECOM_IMAGE_AGENT_VISION_MODEL=qwen3-vl-flash
+ECOM_IMAGE_AGENT_IMAGE_PROVIDER=dashscope
+ECOM_IMAGE_AGENT_IMAGE_MODEL=wanx2.1-t2i-turbo
+ECOM_IMAGE_AGENT_IMAGE_ALLOW_MOCK_FALLBACK=false
 ```
 
-文本 real provider：
+旧 provider 兼容配置仍保留，但不再默认启用：
 
 ```env
-ECOM_IMAGE_AGENT_NVIDIA_API_KEY=
-ECOM_IMAGE_AGENT_NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
-ECOM_IMAGE_AGENT_NVIDIA_TEXT_MODEL=
-```
-
-图片 real provider：
-
-```env
+ZHIPU_API_KEY=
+ZHIPU_BASE_URL=https://open.bigmodel.cn/api/paas/v4/
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+ECOM_IMAGE_AGENT_NVIDIA_VISION_API_KEY=
+ECOM_IMAGE_AGENT_NVIDIA_VISION_BASE_URL=https://integrate.api.nvidia.com/v1
+ECOM_IMAGE_AGENT_NVIDIA_VISION_MODEL=
 ECOM_IMAGE_AGENT_RUNAPI_API_KEY=
 ECOM_IMAGE_AGENT_RUNAPI_IMAGE_BASE_URL=https://runapi.co
 ECOM_IMAGE_AGENT_RUNAPI_IMAGE_MODEL=gemini-2.5-flash-image
-```
-
-视觉分析相关配置位当前代码仍保留：
-
-```env
-ECOM_IMAGE_AGENT_NVIDIA_VISION_API_KEY=
-ECOM_IMAGE_AGENT_NVIDIA_VISION_BASE_URL=https://integrate.api.nvidia.com/v1
-ECOM_IMAGE_AGENT_NVIDIA_VISION_MODEL=qwen/qwen3.5-122b-a10b
 ```
 
 说明：
