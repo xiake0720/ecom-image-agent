@@ -8,6 +8,7 @@ from src.providers.llm.nvidia_text import NVIDIATextProvider
 from src.providers.llm.ollama_text import OllamaTextProvider
 from src.providers.llm.zhipu_text import ZhipuTextProvider
 from src.providers.router import build_capability_bindings
+from src.providers.vision.zhipu_vision import ZhipuVisionProvider
 from src.workflows.graph import build_workflow, reload_runtime
 
 
@@ -22,6 +23,8 @@ def _clear_provider_envs(monkeypatch) -> None:
         "ECOM_IMAGE_AGENT_IMAGE_PROVIDER_MODE",
         "ECOM_IMAGE_AGENT_TEXT_MODEL",
         "ECOM_IMAGE_AGENT_TEXT_MODEL_ID",
+        "ECOM_IMAGE_AGENT_VISION_MODEL",
+        "ECOM_IMAGE_AGENT_VISION_MODEL_ID",
         "ECOM_IMAGE_AGENT_NVIDIA_TEXT_MODEL",
         "ECOM_IMAGE_AGENT_NVIDIA_VISION_MODEL",
     ]:
@@ -167,6 +170,23 @@ def test_explicit_production_budget_keeps_current_main_chain(monkeypatch) -> Non
     assert settings.resolve_text_provider_route().mode == "real"
     assert settings.resolve_vision_provider_route().alias == "nvidia"
     assert settings.resolve_image_provider_route().alias == "runapi"
+
+
+def test_zhipu_vision_alias_builds_real_provider(monkeypatch) -> None:
+    _clear_provider_envs(monkeypatch)
+    settings = Settings(
+        vision_provider_mode="real",
+        vision_provider="zhipu",
+        vision_model="glm-4.6v-flash",
+        zhipu_api_key="demo-key",
+    )
+
+    bindings = build_capability_bindings(settings)
+
+    assert isinstance(bindings.vision_analysis_provider, ZhipuVisionProvider)
+    assert bindings.vision_provider_name == "ZhipuVisionProvider"
+    assert bindings.vision_model_selection.provider_key == "zhipu"
+    assert bindings.vision_model_selection.model_id == "glm-4.6v-flash"
 
 
 def test_reload_runtime_clears_workflow_cache(monkeypatch) -> None:

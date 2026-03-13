@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import logging
 
+from src.core.logging import summarize_text
 from src.domain.copy_plan import CopyPlan
+from src.domain.shot_plan import ShotPlan
+from src.services.fallbacks.copy_fallback import merge_copy_plan_with_shots
 from src.services.planning.copy_generator import build_mock_copy_plan
 from src.workflows.nodes.cache_utils import (
     build_node_cache_key,
@@ -22,6 +25,7 @@ logger = logging.getLogger(__name__)
 def generate_copy(state: WorkflowState, deps: WorkflowDependencies) -> dict:
     """生成并落盘结构化中文文案。"""
     task = state["task"]
+    shot_plan = state["shot_plan"]
     logs = [*state.get("logs", []), f"[generate_copy] 开始生成文案，模式={deps.text_provider_mode}。"]
     provider_name, provider_model_id = planning_provider_identity(deps)
     cache_key, cache_context = build_node_cache_key(
@@ -34,32 +38,43 @@ def generate_copy(state: WorkflowState, deps: WorkflowDependencies) -> dict:
         model_id=provider_model_id,
         extra_payload={
             "product_analysis_hash": hash_state_payload(state["product_analysis"]),
-            "shot_plan_hash": hash_state_payload(state["shot_plan"]),
+            "shot_plan_hash": hash_state_payload(shot_plan),
         },
     )
+
     if should_use_cache(state):
         cached_plan = deps.storage.load_cached_json_artifact("generate_copy", cache_key, CopyPlan)
         if cached_plan is not None:
-            deps.storage.save_json_artifact(task.task_id, "copy_plan.json", cached_plan)
-            logger.info("generate_copy cache hit，key=%s", cache_key)
-            logs.extend(
-                [
-                    f"[generate_copy] cache hit，命中节点缓存，key={cache_key}。",
-                    "[generate_copy] 已从缓存恢复结果并写入 copy_plan.json。",
-                ]
+            logger.info("generate_copy cache hit, key=%s", cache_key)
+            logs.append(f"[generate_copy] cache hit，命中节点缓存，key={cache_key}。")
+            copy_plan = _finalize_copy_plan(
+                copy_plan=cached_plan,
+                shot_plan=shot_plan,
+                deps=deps,
+                logs=logs,
+                source_label="cache",
             )
-            return {"copy_plan": cached_plan, "logs": logs}
-        logger.info("generate_copy cache miss，key=%s", cache_key)
+            deps.storage.save_json_artifact(task.task_id, "copy_plan.json", copy_plan)
+            if state.get("cache_enabled"):
+                deps.storage.save_cached_json_artifact(
+                    "generate_copy",
+                    cache_key,
+                    copy_plan,
+                    metadata=cache_context,
+                )
+            logs.append("[generate_copy] 已从缓存恢复结果并写入 copy_plan.json。")
+            return {"copy_plan": copy_plan, "logs": logs}
+        logger.info("generate_copy cache miss, key=%s", cache_key)
         logs.append(f"[generate_copy] cache miss，未命中节点缓存，key={cache_key}。")
     elif is_force_rerun(state):
-        logger.info("generate_copy ignore cache，forced rerun")
+        logger.info("generate_copy ignore cache, forced rerun")
         logs.append("[generate_copy] ignore cache，已忽略缓存并强制重跑。")
 
     if deps.text_provider_mode == "real":
         model_label = deps.planning_model_selection.label if deps.planning_model_selection else "-"
         model_id = deps.planning_model_selection.model_id if deps.planning_model_selection else "-"
         logger.info(
-            "generate_copy 当前走结构化规划 real 模式，provider=%s，模型=%s，model_id=%s",
+            "generate_copy using real planning provider, provider=%s, model_label=%s, model_id=%s",
             deps.planning_provider_name or "unknown",
             model_label,
             model_id,
@@ -69,15 +84,25 @@ def generate_copy(state: WorkflowState, deps: WorkflowDependencies) -> dict:
             "只生成 CopyPlan，不要重新规划图组，不要输出布局建议，不要输出自由文本解释。\n"
             f"任务信息:\n{dump_pretty(task)}\n\n"
             f"商品分析:\n{dump_pretty(state['product_analysis'])}\n\n"
-            f"图组规划:\n{dump_pretty(state['shot_plan'])}"
+            f"图组规划:\n{dump_pretty(shot_plan)}"
         )
         copy_plan = deps.planning_provider.generate_structured(
             prompt,
             CopyPlan,
             system_prompt=load_prompt_text("generate_copy.md"),
         )
+        source_label = "provider"
     else:
-        copy_plan = build_mock_copy_plan(task, state["shot_plan"])
+        copy_plan = build_mock_copy_plan(task, shot_plan)
+        source_label = "mock"
+
+    copy_plan = _finalize_copy_plan(
+        copy_plan=copy_plan,
+        shot_plan=shot_plan,
+        deps=deps,
+        logs=logs,
+        source_label=source_label,
+    )
 
     deps.storage.save_json_artifact(task.task_id, "copy_plan.json", copy_plan)
     if state.get("cache_enabled"):
@@ -87,8 +112,9 @@ def generate_copy(state: WorkflowState, deps: WorkflowDependencies) -> dict:
             copy_plan,
             metadata=cache_context,
         )
+
     first_title = copy_plan.items[0].title if copy_plan.items else ""
-    logger.info("文案生成完成，条目数=%s，首条标题=%r", len(copy_plan.items), first_title)
+    logger.info("文案生成完成，最终条目数=%s，首条标题=%r", len(copy_plan.items), first_title)
     logs.extend(
         [
             f"[generate_copy] 文案生成完成，items={len(copy_plan.items)}，first_title={first_title!r}。",
@@ -100,3 +126,79 @@ def generate_copy(state: WorkflowState, deps: WorkflowDependencies) -> dict:
         ]
     )
     return {"copy_plan": copy_plan, "logs": logs}
+
+
+def _finalize_copy_plan(
+    *,
+    copy_plan: CopyPlan,
+    shot_plan: ShotPlan,
+    deps: WorkflowDependencies,
+    logs: list[str],
+    source_label: str,
+) -> CopyPlan:
+    provider_status = getattr(deps.planning_provider, "last_response_status_code", None)
+    provider_metadata = getattr(deps.planning_provider, "last_response_metadata", {}) or {}
+    parsed_summary = summarize_text(str(copy_plan.model_dump(mode="json")), limit=240)
+    logger.info(
+        "generate_copy %s summary: provider_status=%s, provider_metadata=%s, parsed_copy_plan=%s",
+        source_label,
+        provider_status,
+        provider_metadata,
+        parsed_summary,
+    )
+    logs.append(
+        f"[generate_copy] {source_label} 结构化结果摘要：status={provider_status or '-'}，summary={parsed_summary}。"
+    )
+
+    merge_result = merge_copy_plan_with_shots(copy_plan, shot_plan.shots)
+    if merge_result.original_count == 0:
+        logger.warning(
+            "generate_copy produced empty CopyPlan.items, source=%s, provider_status=%s, summary=%s",
+            source_label,
+            provider_status,
+            parsed_summary,
+        )
+        logs.append(
+            "[generate_copy] warning: schema 解析结果 items=0，疑似模型返回空对象/空数组或被上游静默归一为空计划，已启用 fallback CopyPlan。"
+        )
+    if merge_result.unexpected_shot_ids:
+        logger.warning(
+            "generate_copy found unexpected shot_ids not present in shot_plan: %s",
+            merge_result.unexpected_shot_ids,
+        )
+        logs.append(
+            "[generate_copy] warning: 检测到与 shot_plan 不一致的 shot_id="
+            f"{', '.join(merge_result.unexpected_shot_ids)}，这些条目已忽略。"
+        )
+    if merge_result.duplicate_shot_ids:
+        logger.warning("generate_copy found duplicate shot_ids: %s", merge_result.duplicate_shot_ids)
+        logs.append(
+            "[generate_copy] warning: 检测到重复 shot_id="
+            f"{', '.join(merge_result.duplicate_shot_ids)}，已保留首条并忽略重复条目。"
+        )
+    if merge_result.fallback_added_count > 0:
+        logger.warning(
+            "generate_copy applied fallback copy items, missing_shot_ids=%s, added=%s",
+            merge_result.missing_shot_ids,
+            merge_result.fallback_added_count,
+        )
+        logs.append(
+            "[generate_copy] warning: fallback 补齐缺失文案，missing_shot_ids="
+            f"{', '.join(merge_result.missing_shot_ids)}，added={merge_result.fallback_added_count}。"
+        )
+
+    final_summary = summarize_text(str(merge_result.plan.model_dump(mode="json")), limit=240)
+    logger.info(
+        "generate_copy normalized copy plan: original_items=%s, fallback_added=%s, final_items=%s, summary=%s",
+        merge_result.original_count,
+        merge_result.fallback_added_count,
+        len(merge_result.plan.items),
+        final_summary,
+    )
+    logs.append(
+        "[generate_copy] CopyPlan 校验完成："
+        f"original_items={merge_result.original_count}，"
+        f"fallback_added={merge_result.fallback_added_count}，"
+        f"final_items={len(merge_result.plan.items)}。"
+    )
+    return merge_result.plan
