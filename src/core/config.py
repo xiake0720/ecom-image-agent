@@ -83,10 +83,11 @@ class Settings(BaseSettings):
     )
     zhipu_api_key: str | None = Field(default=None, validation_alias="ZHIPU_API_KEY")
     zhipu_base_url: str = Field(
-        default="https://open.bigmodel.cn/api/paas/v4",
+        default="https://open.bigmodel.cn/api/paas/v4/",
         validation_alias="ZHIPU_BASE_URL",
     )
     ollama_base_url: str = Field(default="http://127.0.0.1:11434", validation_alias="OLLAMA_BASE_URL")
+    text_model: str | None = Field(default=None, validation_alias="ECOM_IMAGE_AGENT_TEXT_MODEL")
     text_model_id: str | None = None
     vision_model_id: str | None = None
     qwen_model_id: str = "qwen/qwen3.5-122b-a10b"
@@ -179,6 +180,7 @@ class Settings(BaseSettings):
             "vision_provider_source": vision_route.source,
             "image_provider_source": image_route.source,
             "text_model_provider": text_selection.provider_key,
+            "text_model_id": text_selection.model_id,
             "vision_model_provider": vision_selection.provider_key,
             "text_model_label": text_selection.label,
             "vision_model_label": vision_selection.label,
@@ -209,6 +211,14 @@ class Settings(BaseSettings):
         route = self.resolve_text_provider_route()
         legacy_model_provider = (self.text_model_provider or "qwen").strip().lower()
         provider_key = route.alias if route.alias != "mock" else legacy_model_provider
+        if self.text_model:
+            return ResolvedModelSelection(
+                capability="planning",
+                provider_key=provider_key or "custom",
+                model_id=self.text_model,
+                label=self._label_for_model(provider_key, self.text_model),
+                source="ECOM_IMAGE_AGENT_TEXT_MODEL",
+            )
         if self.text_model_id:
             return ResolvedModelSelection(
                 capability="planning",
@@ -275,13 +285,22 @@ class Settings(BaseSettings):
                 label="DashScope",
                 source=route.source,
             )
-        if provider_key == "zhipu":
-            model_id = self.text_model_id or "glm-4-flash"
+        if provider_key in {"zhipu", "zhipu_glm47_flash"}:
+            model_id = self.text_model or self.text_model_id or "glm-4.7-flash"
             return ResolvedModelSelection(
                 capability="planning",
                 provider_key="zhipu",
                 model_id=model_id,
-                label="Zhipu",
+                label="GLM-4.7-Flash",
+                source=route.source,
+            )
+        if provider_key == "zhipu_glm47":
+            model_id = self.text_model or self.text_model_id or "glm-4.7"
+            return ResolvedModelSelection(
+                capability="planning",
+                provider_key="zhipu",
+                model_id=model_id,
+                label="GLM-4.7",
                 source=route.source,
             )
         raise RuntimeError(
@@ -476,6 +495,10 @@ class Settings(BaseSettings):
         lowered = model_id.lower()
         if "glm5" in lowered:
             return "GLM-5"
+        if "glm-4.7-flash" in lowered:
+            return "GLM-4.7-Flash"
+        if "glm-4.7" in lowered:
+            return "GLM-4.7"
         if "qwen" in lowered:
             return "Qwen3.5"
         if normalized == "glm5":
@@ -534,7 +557,7 @@ class Settings(BaseSettings):
                 "vision_provider_mode": "mock",
                 "image_provider_mode": "mock",
                 "prompt_build_mode": "batch",
-                "text_provider": "ollama",
+                "text_provider": "zhipu_glm47_flash",
                 "vision_provider": "mock",
                 "image_provider": "mock",
             },
@@ -543,7 +566,7 @@ class Settings(BaseSettings):
                 "vision_provider_mode": "real",
                 "image_provider_mode": "real",
                 "prompt_build_mode": "batch",
-                "text_provider": "ollama",
+                "text_provider": "zhipu_glm47_flash",
                 "vision_provider": "zhipu",
                 "image_provider": "dashscope",
             },

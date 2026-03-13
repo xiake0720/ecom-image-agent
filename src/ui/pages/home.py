@@ -266,11 +266,12 @@ def _render_runtime_controls(settings, bindings) -> None:
             st.rerun()
         info_col.caption("修改环境变量或 .env 后，可点击此按钮清理缓存并重建 workflow。")
 
-        top_cols = st.columns(4)
+        top_cols = st.columns(5)
         top_cols[0].metric("Budget Mode", settings.resolve_budget_mode())
-        top_cols[1].metric("Text Alias", bindings.planning_route.alias)
-        top_cols[2].metric("Vision Alias", bindings.vision_route.alias)
-        top_cols[3].metric("Image Alias", bindings.image_route.alias)
+        top_cols[1].metric("Text Provider", bindings.planning_route.alias)
+        top_cols[2].metric("Text Model", bindings.planning_model_selection.model_id)
+        top_cols[3].metric("Vision Alias", bindings.vision_route.alias)
+        top_cols[4].metric("Image Alias", bindings.image_route.alias)
 
         mode_cols = st.columns(4)
         mode_cols[0].metric("Prompt Build", settings.resolve_prompt_build_mode())
@@ -280,6 +281,7 @@ def _render_runtime_controls(settings, bindings) -> None:
         ref_cols = st.columns(2)
         ref_cols[0].metric("Analyze Refs", str(settings.analyze_max_reference_images))
         ref_cols[1].metric("Render Refs", str(settings.render_max_reference_images))
+        st.caption(f"当前文本实现={bindings.planning_provider_name}，当前文本模型={bindings.planning_model_selection.model_id}")
 
         st.caption(
             f"节点缓存默认值: {'开启' if settings.enable_node_cache else '关闭'}，缓存目录: {settings.cache_dir}"
