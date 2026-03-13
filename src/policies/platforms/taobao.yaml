@@ -1,0 +1,9 @@
+platform: taobao
+display_name: 淘宝
+aesthetic_direction: 主体明确、卖点直给、留白可读
+commercial_focus:
+  - 转化导向
+  - 信息区清晰
+avoid:
+  - 过度概念化
+  - 留白不足

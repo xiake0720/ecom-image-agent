@@ -1,0 +1,50 @@
+category: tea
+display_name: 茶叶
+enabled: true
+core_shot_types:
+  - hero
+  - dry_leaf_detail
+  - tea_soup
+  - brewed_leaf_detail
+optional_shot_types:
+  - packaging_display
+  - gift_scene
+  - tea_table_scene
+  - origin_scene
+  - single_can_display
+  - multi_can_display
+scene_prop_boundaries:
+  allowed:
+    - 茶叶罐
+    - 茶汤杯盏
+    - 克制的木质或石质台面
+    - 少量服务主体的茶器
+  restricted:
+    - 竹编元素只能少量点到为止
+    - 花器只能作为远景弱化元素
+    - 中式器物不能抢主体
+  banned:
+    - 凉席
+    - 席面大面积铺陈
+    - 喧宾夺主花器
+    - 与茶无关的夸张装饰摆件
+avoid_style_directions:
+  - 过度新中式堆砌
+  - 道具舞台化
+  - 廉价节庆礼品感
+  - 纯海报概念图
+recommended_background_palettes:
+  - 灰绿
+  - 暖米白
+  - 深茶褐
+  - 岩石灰
+recommended_lighting_styles:
+  - 柔和侧光棚拍
+  - 稳定自然顶侧光
+  - 低反差高质感商业静物光
+group_style_anchor_rules:
+  - 整组色系统一围绕包装主色和茶类气质延展
+  - 道具只能辅助说明茶叶与冲泡，不得成为视觉主角
+  - 主图与细节图必须共享同一套商业摄影质感
+notes:
+  - 茶叶图组优先传达包装主体、茶叶形态和冲泡结果

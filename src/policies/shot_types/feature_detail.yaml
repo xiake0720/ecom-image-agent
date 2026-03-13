@@ -1,0 +1,9 @@
+shot_type: feature_detail
+display_name: 细节图
+intent: 放大包装或材质识别点
+composition_defaults:
+  - 允许近景
+  - 强化标签、材质、工艺
+prop_guidance:
+  - 道具退后
+text_space_guidance: 留白可更集中但必须可读

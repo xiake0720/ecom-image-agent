@@ -1,0 +1,5 @@
+category: apparel
+display_name: 服饰
+enabled: false
+notes:
+  - 预留接口，第一阶段未接入运行时策略

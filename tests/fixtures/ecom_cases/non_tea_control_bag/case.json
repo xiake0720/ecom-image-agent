@@ -1,0 +1,26 @@
+{
+  "case_name": "non_tea_control_bag",
+  "category": "bag",
+  "description": "非茶叶包袋对照 case",
+  "task": {
+    "brand_name": "Baseline Bag",
+    "product_name": "通勤托特包",
+    "platform": "tmall",
+    "output_size": "1440x1440",
+    "shot_count": 4,
+    "copy_tone": "简洁高级"
+  },
+  "input_count": 2,
+  "placeholder_inputs": [
+    {
+      "filename": "product_main.png",
+      "size": "1600x1600",
+      "color": [167, 140, 116]
+    },
+    {
+      "filename": "product_detail.png",
+      "size": "1600x1600",
+      "color": [118, 96, 78]
+    }
+  ]
+}

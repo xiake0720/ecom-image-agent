@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.core.paths import get_task_dir
-from src.domain.asset import Asset
 from src.core.config import ResolvedModelSelection
+from src.core.paths import get_task_dir
+from src.domain.asset import Asset, AssetType
 from src.domain.product_analysis import (
     MaterialGuess,
     PackagingStructure,
@@ -21,11 +21,12 @@ from src.workflows.state import WorkflowDependencies
 class FakeVisionProvider:
     def __init__(self) -> None:
         self.called = False
+        self.asset_ids: list[str] = []
 
     def generate_structured_from_assets(self, prompt: str, response_model, *, assets, system_prompt=None):
         self.called = True
+        self.asset_ids = [asset.asset_id for asset in assets]
         assert "SKU 级视觉分析" in prompt
-        assert assets
         return response_model(
             category="tea",
             subcategory="单丛茶",
@@ -44,17 +45,14 @@ class FakeVisionProvider:
                 style_impression=["东方雅致", "高级"],
                 must_preserve=["圆罐轮廓", "正面标签区", "金色主标题区域"],
             ),
-            material_guess=MaterialGuess(
-                container_material="metal",
-                label_material="paper",
-            ),
+            material_guess=MaterialGuess(container_material="metal", label_material="paper"),
             visual_constraints=VisualConstraints(
                 recommended_style_direction=["保留东方雅致气质", "延续深绿与金色关系"],
                 avoid=["不要改成透明袋装", "不要重设计标签版式"],
             ),
             visual_style_keywords=["东方雅致", "深绿金色", "金属茶罐"],
             recommended_focuses=["包装主体", "正面标签区", "盖子结构"],
-            source_asset_ids=["asset-01"],
+            source_asset_ids=self.asset_ids,
         )
 
 
@@ -66,13 +64,14 @@ class DummyOCRService:
     pass
 
 
-def test_analyze_product_real_mode_uses_vision_provider(tmp_path: Path) -> None:
+def test_analyze_product_real_mode_uses_selected_reference_assets_only(tmp_path: Path) -> None:
     task_dir = tmp_path / "task-001"
     task_dir.mkdir(parents=True, exist_ok=True)
+    vision_provider = FakeVisionProvider()
     deps = WorkflowDependencies(
         storage=LocalStorageService(),
         planning_provider=object(),
-        vision_analysis_provider=FakeVisionProvider(),
+        vision_analysis_provider=vision_provider,
         image_generation_provider=object(),
         text_renderer=DummyRenderer(),
         ocr_service=DummyOCRService(),
@@ -82,20 +81,8 @@ def test_analyze_product_real_mode_uses_vision_provider(tmp_path: Path) -> None:
         planning_provider_name="FakePlanningProvider",
         vision_provider_name="FakeVisionProvider",
         image_provider_name="FakeImageProvider",
-        planning_model_selection=ResolvedModelSelection(
-            capability="planning",
-            provider_key="qwen",
-            model_id="qwen/qwen3.5-122b-a10b",
-            label="Qwen3.5",
-            source="test",
-        ),
-        vision_model_selection=ResolvedModelSelection(
-            capability="vision",
-            provider_key="qwen",
-            model_id="qwen/qwen3.5-122b-a10b",
-            label="Qwen3.5",
-            source="test",
-        ),
+        planning_model_selection=ResolvedModelSelection("planning", "qwen", "qwen/qwen3.5-122b-a10b", "Qwen3.5", "test"),
+        vision_model_selection=ResolvedModelSelection("vision", "qwen", "qwen/qwen3.5-122b-a10b", "Qwen3.5", "test"),
     )
     task = Task(
         task_id="task-001",
@@ -109,12 +96,19 @@ def test_analyze_product_real_mode_uses_vision_provider(tmp_path: Path) -> None:
     )
     state = {
         "task": task,
-        "assets": [Asset(asset_id="asset-01", filename="demo.png", local_path=str(Path("demo.png")))],
+        "assets": [
+            Asset(asset_id="asset-01", filename="main.png", local_path=str(Path("main.png")), asset_type=AssetType.PRODUCT),
+            Asset(asset_id="asset-02", filename="detail.png", local_path=str(Path("detail.png")), asset_type=AssetType.DETAIL),
+            Asset(asset_id="asset-03", filename="other.png", local_path=str(Path("other.png")), asset_type=AssetType.OTHER),
+        ],
         "logs": [],
+        "analyze_max_reference_images": 2,
     }
 
     result = analyze_product(state, deps)
 
-    assert deps.vision_analysis_provider.called is True
-    assert result["product_analysis"].visual_identity.must_preserve[0] == "圆罐轮廓"
+    assert vision_provider.called is True
+    assert vision_provider.asset_ids == ["asset-01", "asset-02"]
+    assert result["product_analysis"].source_asset_ids == ["asset-01", "asset-02"]
+    assert any("asset-01" in log and "asset-02" in log for log in result["logs"])
     assert (get_task_dir(task.task_id) / "product_analysis.json").exists()

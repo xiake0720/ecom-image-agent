@@ -1,17 +1,25 @@
-"""图片提示词构建节点。
-
-当前节点负责输出 `ImagePromptPlan`。
-在 real 模式下，文本 provider 只负责生成结构化图片提示词；
-正式中文仍由 `overlay_text` 节点统一处理。
-"""
+"""图片提示词构建节点。"""
 
 from __future__ import annotations
 
 import logging
 
+from src.core.config import get_settings
 from src.domain.image_prompt_plan import ImagePrompt, ImagePromptPlan
 from src.domain.layout_plan import LayoutItem
 from src.domain.shot_plan import ShotSpec
+from src.services.prompting.context_builder import (
+    build_build_prompts_context,
+    collect_prompt_policy_signature,
+    infer_text_space_hint,
+)
+from src.workflows.nodes.cache_utils import (
+    build_node_cache_key,
+    hash_state_payload,
+    is_force_rerun,
+    planning_provider_identity,
+    should_use_cache,
+)
 from src.workflows.nodes.prompt_utils import describe_prompt_source, dump_pretty, load_prompt_text
 from src.workflows.state import WorkflowDependencies, WorkflowState
 
@@ -51,26 +59,104 @@ def build_prompts(state: WorkflowState, deps: WorkflowDependencies) -> dict:
     layout_map = {item.shot_id: item for item in state["layout_plan"].items}
     template_name = "build_image_prompts.md"
     template_source = describe_prompt_source(template_name)
+    prompt_build_mode = _resolve_prompt_build_mode(state)
+    provider_name, provider_model_id = planning_provider_identity(deps)
+    policy_signature = collect_prompt_policy_signature(
+        task=task,
+        product_analysis=state["product_analysis"],
+        shots=state["shot_plan"].shots,
+    )
+    cache_key, cache_context = build_node_cache_key(
+        node_name="build_prompts",
+        state=state,
+        deps=deps,
+        prompt_filename=template_name if deps.text_provider_mode == "real" else None,
+        prompt_version="mock-image-prompts-v1" if deps.text_provider_mode != "real" else None,
+        provider_name=provider_name,
+        model_id=provider_model_id,
+        extra_payload={
+            "prompt_build_mode": prompt_build_mode,
+            "product_analysis_hash": hash_state_payload(state["product_analysis"]),
+            "shot_plan_hash": hash_state_payload(state["shot_plan"]),
+            "copy_plan_hash": hash_state_payload(state["copy_plan"]),
+            "layout_plan_hash": hash_state_payload(state["layout_plan"]),
+            "policy_signature_hash": hash_state_payload(policy_signature),
+        },
+    )
     logger.info(
-        "build_prompts 当前为纯结构化推理模式，不向文本模型发送图片输入，模板来源=%s",
+        "build_prompts 当前为纯结构化推理模式，未向文本模型发送图片输入，模板来源=%s，prompt_build_mode=%s",
         template_source,
+        prompt_build_mode,
     )
     logs.extend(
         [
             "[build_prompts] 当前为纯结构化推理模式，仅基于 task、product_analysis、shot、copy、layout 生成提示词。",
             "[build_prompts] 当前未向模型发送图片输入；真正的商品参考图会在 render_images 节点发送给图片模型。",
             f"[build_prompts] 当前使用的模板来源文件：{template_source}。",
+            f"[build_prompts] 当前 prompt build mode：{prompt_build_mode}。",
         ]
     )
+    if should_use_cache(state):
+        cached_plan = deps.storage.load_cached_json_artifact("build_prompts", cache_key, ImagePromptPlan)
+        if cached_plan is not None:
+            _save_all_prompt_artifacts(
+                deps=deps,
+                task_id=task.task_id,
+                prompts=cached_plan.prompts,
+                shots=state["shot_plan"].shots,
+                copy_map=copy_map,
+                layout_map=layout_map,
+            )
+            deps.storage.save_json_artifact(task.task_id, "image_prompt_plan.json", cached_plan)
+            logs.extend(
+                [
+                    f"[build_prompts] cache hit，命中节点缓存，key={cache_key}。",
+                    f"[build_prompts] 已从缓存恢复 {prompt_build_mode} 模式的 aggregate 与 per-shot prompt 产物。",
+                ]
+            )
+            return {"image_prompt_plan": cached_plan, "logs": logs}
+        logs.append(f"[build_prompts] cache miss，未命中节点缓存，key={cache_key}。")
+    elif is_force_rerun(state):
+        logs.append("[build_prompts] ignore cache，已忽略缓存并强制重跑。")
+
+    if prompt_build_mode == "batch":
+        plan = _build_prompts_batch_mode(state, deps, logs, template_name)
+    else:
+        plan = _build_prompts_per_shot_mode(state, deps, logs, template_name)
+
+    deps.storage.save_json_artifact(task.task_id, "image_prompt_plan.json", plan)
+    _save_all_prompt_artifacts(
+        deps=deps,
+        task_id=task.task_id,
+        prompts=plan.prompts,
+        shots=state["shot_plan"].shots,
+        copy_map=copy_map,
+        layout_map=layout_map,
+    )
+    if state.get("cache_enabled"):
+        deps.storage.save_cached_json_artifact("build_prompts", cache_key, plan, metadata=cache_context)
+    prompt_shot_ids = ", ".join(item.shot_id for item in plan.prompts)
+    logs.extend(
+        [
+            f"[build_prompts] 图片提示词构建完成，数量={len(plan.prompts)}，shot_ids={prompt_shot_ids or '-'}。",
+            f"[build_prompts] 当前实际规划模型={deps.planning_model_selection.model_id if deps.planning_model_selection else '-'}。",
+            "[build_prompts] 已写入 image_prompt_plan.json。",
+        ]
+    )
+    return {"image_prompt_plan": plan, "logs": logs}
+
+
+def _build_prompts_per_shot_mode(
+    state: WorkflowState,
+    deps: WorkflowDependencies,
+    logs: list[str],
+    template_name: str,
+) -> ImagePromptPlan:
+    task = state["task"]
+    copy_map = {item.shot_id: item for item in state["copy_plan"].items}
+    layout_map = {item.shot_id: item for item in state["layout_plan"].items}
+    logs.append("[build_prompts] 当前使用 per_shot 模式，按单张 shot 逐次调用文本模型。")
     if deps.text_provider_mode == "real":
-        model_label = deps.planning_model_selection.label if deps.planning_model_selection else "-"
-        model_id = deps.planning_model_selection.model_id if deps.planning_model_selection else "-"
-        logger.info(
-            "build_prompts 采用逐张 shot 的 AI 生成方式，provider=%s，模型=%s，model_id=%s，不再一次性生成整组 prompts，且当前未发送图片输入",
-            deps.planning_provider_name or "unknown",
-            model_label,
-            model_id,
-        )
         prompts = []
         total_shots = len(state["shot_plan"].shots)
         for index, shot in enumerate(state["shot_plan"].shots, start=1):
@@ -83,108 +169,91 @@ def build_prompts(state: WorkflowState, deps: WorkflowDependencies) -> dict:
                 copy_item=copy_item,
                 layout_item=layout_item,
             )
-            logs.append(
-                f"[build_prompts] 当前采用 per-shot AI 生成，正在处理第 {index}/{total_shots} 张：{shot.shot_id}。"
-            )
-            logger.info("开始逐张生成图片提示词，第 %s/%s 张，shot_id=%s", index, total_shots, shot.shot_id)
+            logs.append(f"[build_prompts] 当前使用 per_shot 模式，正在生成第 {index}/{total_shots} 张：{shot.shot_id}。")
             shot_prompt = deps.planning_provider.generate_structured(
                 prompt_input,
                 ImagePrompt,
                 system_prompt=load_prompt_text(template_name),
             )
-            normalized_prompt = _normalize_image_prompt(
-                task_output_size=task.output_size,
-                shot=shot,
-                layout_item=layout_item,
-                product_analysis=state["product_analysis"],
-                prompt=shot_prompt,
+            prompts.append(
+                _normalize_image_prompt(
+                    task_output_size=task.output_size,
+                    shot=shot,
+                    layout_item=layout_item,
+                    product_analysis=state["product_analysis"],
+                    prompt=shot_prompt,
+                )
             )
-            prompts.append(normalized_prompt)
-            _save_shot_debug_artifacts(
-                deps=deps,
-                task_id=task.task_id,
+        return ImagePromptPlan(prompts=prompts)
+
+    prompts = []
+    total_shots = len(state["shot_plan"].shots)
+    for index, shot in enumerate(state["shot_plan"].shots, start=1):
+        copy_item = copy_map[shot.shot_id]
+        layout_item = layout_map[shot.shot_id]
+        logs.append(f"[build_prompts] 当前使用 per_shot 模式，正在生成第 {index}/{total_shots} 张：{shot.shot_id}。")
+        prompts.append(
+            _build_mock_prompt(
+                task=task,
+                product_analysis=state["product_analysis"],
                 shot=shot,
                 copy_item=copy_item,
                 layout_item=layout_item,
-                prompt=normalized_prompt,
             )
-            logs.append(
-                f"[build_prompts] 已完成第 {index}/{total_shots} 张提示词生成，并写入 artifacts/shots/{shot.shot_id}/prompt.json。"
-            )
-            logger.info(
-                "逐张提示词生成完成，第 %s/%s 张，shot_id=%s，prompt 文件=artifacts/shots/%s/prompt.json",
-                index,
-                total_shots,
-                shot.shot_id,
-                shot.shot_id,
-            )
-        plan = ImagePromptPlan(prompts=prompts)
-    else:
-        logger.info("build_prompts 当前为 mock 文本模式，按逐张 shot 生成本地占位提示词")
-        prompts = []
-        total_shots = len(state["shot_plan"].shots)
-        for index, shot in enumerate(state["shot_plan"].shots, start=1):
+        )
+    return ImagePromptPlan(prompts=prompts)
+
+
+def _build_prompts_batch_mode(
+    state: WorkflowState,
+    deps: WorkflowDependencies,
+    logs: list[str],
+    template_name: str,
+) -> ImagePromptPlan:
+    task = state["task"]
+    copy_map = {item.shot_id: item for item in state["copy_plan"].items}
+    layout_map = {item.shot_id: item for item in state["layout_plan"].items}
+    logs.append("[build_prompts] 当前使用 batch 模式，一次调用生成整组 ImagePromptPlan。")
+    if deps.text_provider_mode == "real":
+        batch_prompt_input = _build_batch_prompt_input(
+            task=task,
+            product_analysis=state["product_analysis"],
+            shots=state["shot_plan"].shots,
+            copy_map=copy_map,
+            layout_map=layout_map,
+        )
+        plan = deps.planning_provider.generate_structured(
+            batch_prompt_input,
+            ImagePromptPlan,
+            system_prompt=load_prompt_text(template_name),
+        )
+        normalized_prompts = []
+        for shot in state["shot_plan"].shots:
             layout_item = layout_map[shot.shot_id]
-            logs.append(
-                f"[build_prompts] 当前采用 per-shot 本地占位生成，正在处理第 {index}/{total_shots} 张：{shot.shot_id}。"
+            prompt = _find_prompt_by_shot_id(plan, shot.shot_id)
+            normalized_prompts.append(
+                _normalize_image_prompt(
+                    task_output_size=task.output_size,
+                    shot=shot,
+                    layout_item=layout_item,
+                    product_analysis=state["product_analysis"],
+                    prompt=prompt,
+                )
             )
-            normalized_prompt = _normalize_image_prompt(
-                task_output_size=task.output_size,
-                shot=shot,
-                layout_item=layout_item,
+        return ImagePromptPlan(prompts=normalized_prompts)
+
+    prompts = []
+    for shot in state["shot_plan"].shots:
+        prompts.append(
+            _build_mock_prompt(
+                task=task,
                 product_analysis=state["product_analysis"],
-                prompt=ImagePrompt(
-                    shot_id=shot.shot_id,
-                    shot_type=shot.shot_type,
-                    prompt=(
-                        f"Use the uploaded reference product as the exact hero subject, preserve the original package silhouette, "
-                        f"label placement and main colors, create a high-end e-commerce commercial still life scene for {shot.title}, "
-                        f"scene direction: {shot.scene_direction or shot.purpose}, focus on {shot.focus or shot.copy_goal}, "
-                        f"composition: {shot.composition_direction or shot.composition_hint}, "
-                        f"reserve clean readable negative space for Chinese e-commerce copy in the {_infer_text_space_hint(layout_item)} area, "
-                        f"soft studio lighting, realistic premium product texture, clean layered background, restrained props."
-                    ),
-                    negative_prompt=DEFAULT_NEGATIVE_PROMPTS,
-                    output_size=task.output_size,
-                    preserve_rules=state["product_analysis"].visual_identity.must_preserve,
-                    text_space_hint=_infer_text_space_hint(layout_item),
-                    composition_notes=[
-                        shot.composition_hint,
-                        shot.composition_direction or "主体清晰，留白可读，产品不要过小",
-                    ],
-                    style_notes=[
-                        *state["product_analysis"].visual_constraints.recommended_style_direction[:3],
-                        "高端电商商业摄影质感",
-                    ],
-                ),
-            )
-            prompts.append(normalized_prompt)
-            _save_shot_debug_artifacts(
-                deps=deps,
-                task_id=task.task_id,
                 shot=shot,
                 copy_item=copy_map[shot.shot_id],
-                layout_item=layout_item,
-                prompt=normalized_prompt,
+                layout_item=layout_map[shot.shot_id],
             )
-            logs.append(
-                f"[build_prompts] 已完成第 {index}/{total_shots} 张占位提示词生成，并写入 artifacts/shots/{shot.shot_id}/prompt.json。"
-            )
-        plan = ImagePromptPlan(prompts=prompts)
-    deps.storage.save_json_artifact(task.task_id, "image_prompt_plan.json", plan)
-    prompt_shot_ids = ", ".join(item.shot_id for item in plan.prompts)
-    logger.info("aggregate 图片提示词已更新，数量=%s，shot_ids=%s", len(plan.prompts), prompt_shot_ids or "-")
-    logs.extend(
-        [
-            f"[build_prompts] 图片提示词构建完成，数量={len(plan.prompts)}，shot_ids={prompt_shot_ids or '-'}。",
-            (
-                "[build_prompts] 当前实际规划模型="
-                f"{deps.planning_model_selection.model_id if deps.planning_model_selection else '-'}。"
-            ),
-            "[build_prompts] 已写入 image_prompt_plan.json。",
-        ]
-    )
-    return {"image_prompt_plan": plan, "logs": logs}
+        )
+    return ImagePromptPlan(prompts=prompts)
 
 
 def _build_single_shot_prompt_input(
@@ -195,25 +264,22 @@ def _build_single_shot_prompt_input(
     copy_item,
     layout_item: LayoutItem,
 ) -> str:
-    """构造单张图的 AI 提示词输入。"""
-    text_space_hint = _infer_text_space_hint(layout_item)
-    prompt_context = {
-        "task": task,
-        "product_analysis": product_analysis,
-        "current_shot": shot,
-        "current_copy": copy_item,
-        "current_layout": layout_item,
-        "build_prompt_rules": {
-            "mode": "structured_reasoning_only",
-            "image_input_sent_to_model": False,
-            "reference_image_stage": "render_images",
-            "platform_direction": _infer_platform_direction(task.platform),
-            "text_space_hint": text_space_hint,
-            "text_space_intent": "正式中文广告文案将由 Pillow 后贴字完成；当前图片必须预留干净、明亮、可读的文字区",
-            "preserve_priority": product_analysis.visual_identity.must_preserve,
-            "style_anchor": _build_shot_style_anchor(task.platform, product_analysis, shot),
-            "negative_prompt_must_cover": DEFAULT_NEGATIVE_PROMPTS,
-        },
+    prompt_context = build_build_prompts_context(
+        task=task,
+        product_analysis=product_analysis,
+        shot=shot,
+        copy_item=copy_item,
+        layout_item=layout_item,
+    )
+    prompt_context["build_prompt_rules"] = {
+        "mode": "structured_reasoning_only",
+        "prompt_build_mode": "per_shot",
+        "image_input_sent_to_model": False,
+        "reference_image_stage": "render_images",
+        "text_space_hint": infer_text_space_hint(layout_item),
+        "text_space_intent": "正式中文广告文案将由 Pillow 后贴字完成；当前图片必须预留干净、明亮、可读的文字区。",
+        "preserve_priority": product_analysis.visual_identity.must_preserve,
+        "negative_prompt_must_cover": DEFAULT_NEGATIVE_PROMPTS,
     }
     return (
         "当前处于 build_prompts 节点，只能基于结构化结果为单张图生成提示词。\n"
@@ -223,14 +289,92 @@ def _build_single_shot_prompt_input(
     )
 
 
-def _infer_text_space_hint(layout_item: LayoutItem) -> str:
-    """根据当前布局推断文案留白方向。"""
-    if not layout_item.blocks:
-        return "top_right_clean_space"
-    title_block = layout_item.blocks[0]
-    horizontal = "left" if title_block.x <= layout_item.canvas_width // 2 else "right"
-    vertical = "top" if title_block.y <= layout_item.canvas_height // 2 else "bottom"
-    return f"{vertical}_{horizontal}_clean_space"
+def _build_batch_prompt_input(
+    *,
+    task,
+    product_analysis,
+    shots: list[ShotSpec],
+    copy_map: dict[str, object],
+    layout_map: dict[str, LayoutItem],
+) -> str:
+    batch_context = {
+        "task": task,
+        "product_analysis": product_analysis,
+        "build_prompt_rules": {
+            "mode": "structured_reasoning_only",
+            "prompt_build_mode": "batch",
+            "image_input_sent_to_model": False,
+            "reference_image_stage": "render_images",
+            "output_schema": "ImagePromptPlan",
+            "must_keep_shot_ids": [shot.shot_id for shot in shots],
+            "negative_prompt_must_cover": DEFAULT_NEGATIVE_PROMPTS,
+        },
+        "shots": [
+            build_build_prompts_context(
+                task=task,
+                product_analysis=product_analysis,
+                shot=shot,
+                copy_item=copy_map[shot.shot_id],
+                layout_item=layout_map[shot.shot_id],
+            )
+            for shot in shots
+        ],
+    }
+    return (
+        "当前处于 build_prompts 节点，需要一次性为整组 shots 生成 ImagePromptPlan。\n"
+        "注意：本节点不会向模型发送任何图片输入；真实商品参考图会在 render_images 节点再发送给图片模型。\n"
+        "你必须仅基于结构化输入，为每个给定 shot_id 生成对应的 ImagePrompt，不能新增或遗漏 shot。\n"
+        "不要输出自由解释，只输出符合 ImagePromptPlan schema 的 JSON。\n\n"
+        f"{dump_pretty(batch_context)}"
+    )
+
+
+def _build_mock_prompt(
+    *,
+    task,
+    product_analysis,
+    shot: ShotSpec,
+    copy_item,
+    layout_item: LayoutItem,
+) -> ImagePrompt:
+    prompt_context = build_build_prompts_context(
+        task=task,
+        product_analysis=product_analysis,
+        shot=shot,
+        copy_item=copy_item,
+        layout_item=layout_item,
+    )
+    return _normalize_image_prompt(
+        task_output_size=task.output_size,
+        shot=shot,
+        layout_item=layout_item,
+        product_analysis=product_analysis,
+        prompt=ImagePrompt(
+            shot_id=shot.shot_id,
+            shot_type=shot.shot_type,
+            prompt=(
+                "Use the uploaded reference product as the exact hero subject, preserve the original package silhouette, "
+                "label placement and key identity points, keep the package basically unchanged, "
+                f"render a premium e-commerce shot for {shot.title}, "
+                f"follow category policy and platform policy: {dump_pretty(prompt_context['category_policy'])}, "
+                f"{dump_pretty(prompt_context['platform_policy'])}, "
+                f"scene and composition: {shot.scene_direction or shot.purpose}, {shot.composition_direction or shot.composition_hint}, "
+                f"reserve clean text space in the {infer_text_space_hint(layout_item)} area, restrained props, realistic premium lighting."
+            ),
+            negative_prompt=DEFAULT_NEGATIVE_PROMPTS,
+            output_size=task.output_size,
+            preserve_rules=product_analysis.visual_identity.must_preserve,
+            text_space_hint=infer_text_space_hint(layout_item),
+            composition_notes=[
+                shot.composition_hint,
+                *(prompt_context["shot_type_policy"].get("composition_defaults", [])),
+            ],
+            style_notes=[
+                prompt_context["style_anchor_summary"],
+                *(prompt_context["platform_policy"].get("commercial_focus", [])),
+            ],
+        ),
+    )
 
 
 def _normalize_image_prompt(
@@ -241,9 +385,8 @@ def _normalize_image_prompt(
     product_analysis,
     prompt: ImagePrompt,
 ) -> ImagePrompt:
-    """对单张提示词结果做兼容归一化。"""
     preserve_rules = prompt.preserve_rules or product_analysis.visual_identity.must_preserve
-    text_space_hint = prompt.text_space_hint or _infer_text_space_hint(layout_item)
+    text_space_hint = prompt.text_space_hint or infer_text_space_hint(layout_item)
     composition_notes = prompt.composition_notes or [
         shot.composition_hint,
         shot.composition_direction or "主体清晰稳定，留白区域干净可读",
@@ -255,6 +398,7 @@ def _normalize_image_prompt(
     negative_prompt = prompt.negative_prompt or DEFAULT_NEGATIVE_PROMPTS
     return prompt.model_copy(
         update={
+            "shot_id": prompt.shot_id or shot.shot_id,
             "shot_type": prompt.shot_type or shot.shot_type or shot.title,
             "output_size": prompt.output_size or task_output_size,
             "negative_prompt": negative_prompt,
@@ -266,30 +410,42 @@ def _normalize_image_prompt(
     )
 
 
-def _infer_platform_direction(platform: str) -> str:
-    """根据平台名称推断平台审美方向。"""
-    platform_map = {
-        "tmall": "天猫风格，商业感强、干净、质感稳定",
-        "taobao": "淘宝风格，主体明确、卖点直给、留白可读",
-        "jd": "京东风格，规整清晰、可信赖、信息表达直接",
-        "xiaohongshu": "小红书风格，生活方式感更强但仍需商业可用",
-    }
-    return platform_map.get(str(platform).lower(), f"{platform} 电商主图方向，强调主体清晰与商业转化")
+def _find_prompt_by_shot_id(plan: ImagePromptPlan, shot_id: str) -> ImagePrompt:
+    for prompt in plan.prompts:
+        if prompt.shot_id == shot_id:
+            return prompt
+    raise ValueError(f"Batch prompt output is missing shot_id={shot_id}")
 
 
-def _build_shot_style_anchor(platform: str, product_analysis, shot: ShotSpec) -> dict:
-    """构造单张图应继承的风格锚点。"""
-    return {
-        "platform": _infer_platform_direction(platform),
-        "recommended_style_direction": product_analysis.visual_constraints.recommended_style_direction[:3],
-        "avoid_direction": product_analysis.visual_constraints.avoid[:4],
-        "visual_keywords": product_analysis.visual_style_keywords[:4],
-        "dominant_colors": product_analysis.visual_identity.dominant_colors[:3],
-        "shot_goal": shot.goal,
-        "shot_focus": shot.focus,
-        "scene_direction": shot.scene_direction,
-        "composition_direction": shot.composition_direction,
-    }
+def _resolve_prompt_build_mode(state: WorkflowState) -> str:
+    explicit_value = str(state.get("prompt_build_mode") or "").strip().lower()
+    if explicit_value in {"per_shot", "batch"}:
+        return explicit_value
+    return get_settings().resolve_prompt_build_mode()
+
+
+def _save_all_prompt_artifacts(
+    *,
+    deps: WorkflowDependencies,
+    task_id: str,
+    prompts: list[ImagePrompt],
+    shots: list[ShotSpec],
+    copy_map: dict[str, object],
+    layout_map: dict[str, LayoutItem],
+) -> None:
+    prompt_map = {prompt.shot_id: prompt for prompt in prompts}
+    for shot in shots:
+        prompt = prompt_map.get(shot.shot_id)
+        if prompt is None:
+            continue
+        _save_shot_debug_artifacts(
+            deps=deps,
+            task_id=task_id,
+            shot=shot,
+            copy_item=copy_map[shot.shot_id],
+            layout_item=layout_map[shot.shot_id],
+            prompt=prompt,
+        )
 
 
 def _save_shot_debug_artifacts(
@@ -301,7 +457,6 @@ def _save_shot_debug_artifacts(
     layout_item: LayoutItem,
     prompt: ImagePrompt,
 ) -> None:
-    """为单张图写入调试用 JSON 产物。"""
     base_dir = f"artifacts/shots/{shot.shot_id}"
     deps.storage.save_json_artifact(task_id, f"{base_dir}/shot.json", shot)
     deps.storage.save_json_artifact(task_id, f"{base_dir}/copy.json", copy_item)

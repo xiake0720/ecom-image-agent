@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TypedDict
 
-from src.core.config import ResolvedModelSelection
+from src.core.config import ResolvedModelSelection, ResolvedProviderRoute
 from src.domain.asset import Asset
 from src.domain.copy_plan import CopyPlan
 from src.domain.generation_result import GenerationResult
@@ -29,6 +29,14 @@ class WorkflowState(TypedDict, total=False):
     task: Task
     assets: list[Asset]
     logs: list[str]
+    cache_enabled: bool
+    ignore_cache: bool
+    prompt_build_mode: str
+    render_mode: str
+    render_variant: str
+    analyze_max_reference_images: int
+    render_max_reference_images: int
+    preview_generation_result: GenerationResult
     product_analysis: ProductAnalysis
     shot_plan: ShotPlan
     copy_plan: CopyPlan
@@ -53,8 +61,15 @@ class WorkflowDependencies:
     planning_provider_name: str = ""
     vision_provider_name: str = ""
     image_provider_name: str = ""
+    planning_route: ResolvedProviderRoute | None = None
+    vision_route: ResolvedProviderRoute | None = None
+    image_route: ResolvedProviderRoute | None = None
+    planning_provider_status: str = ""
+    vision_provider_status: str = ""
+    image_provider_status: str = ""
     planning_model_selection: ResolvedModelSelection | None = None
     vision_model_selection: ResolvedModelSelection | None = None
+    image_model_selection: ResolvedModelSelection | None = None
 
 
 class WorkflowExecutionError(RuntimeError):

@@ -1,0 +1,26 @@
+{
+  "case_name": "tea_gift_box",
+  "category": "tea",
+  "description": "茶礼盒基线 case",
+  "task": {
+    "brand_name": "Baseline Tea",
+    "product_name": "节礼茶礼盒",
+    "platform": "tmall",
+    "output_size": "1440x1920",
+    "shot_count": 5,
+    "copy_tone": "礼赠高级"
+  },
+  "input_count": 2,
+  "placeholder_inputs": [
+    {
+      "filename": "product_main.png",
+      "size": "1600x1600",
+      "color": [174, 138, 120]
+    },
+    {
+      "filename": "product_detail.png",
+      "size": "1600x1600",
+      "color": [110, 72, 58]
+    }
+  ]
+}

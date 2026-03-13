@@ -1,0 +1,9 @@
+shot_type: brewed_leaf_detail
+display_name: 叶底细节
+intent: 展示叶底状态与品类特征
+composition_defaults:
+  - 近景细节
+  - 真实自然
+prop_guidance:
+  - 不要堆叠无关器物
+text_space_guidance: 留白区不能塞满纹理
