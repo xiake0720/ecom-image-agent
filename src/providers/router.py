@@ -1,9 +1,3 @@
-"""模型能力路由层。
-
-当前模块只负责最小能力选择，不引入多模型 fallback，也不改动 workflow 节点顺序。
-目标是把“模型开关”和“具体 provider 类”集中收敛到这里，减少后续切换模型时的改动量。
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -17,6 +11,7 @@ from src.providers.llm.base import BaseTextProvider
 from src.providers.llm.gemini_text import GeminiTextProvider
 from src.providers.llm.nvidia_text import NVIDIATextProvider
 from src.providers.llm.ollama_text import OllamaTextProvider
+from src.providers.llm.zhipu_text import ZhipuTextProvider
 from src.providers.vision.base import BaseVisionAnalysisProvider
 
 logger = logging.getLogger(__name__)
@@ -24,8 +19,6 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class CapabilityBindings:
-    """当前工作流各能力位的实际 provider 绑定结果。"""
-
     planning_provider: BaseTextProvider
     vision_analysis_provider: BaseVisionAnalysisProvider | None
     image_generation_provider: BaseImageProvider
@@ -44,7 +37,6 @@ class CapabilityBindings:
 
 
 def build_capability_bindings(settings: Settings) -> CapabilityBindings:
-    """根据当前配置构建能力层绑定结果。"""
     planning_provider, planning_route, planning_status, planning_selection = _build_planning_provider(settings)
     vision_provider, vision_route, vision_status, vision_selection = _build_vision_provider(settings)
     image_provider, image_route, image_status, image_selection = _build_image_provider(settings)
@@ -100,8 +92,11 @@ def _build_planning_provider(
     if route.alias == "ollama":
         logger.info("当前结构化规划能力切换为 Ollama，model_id=%s，来源=%s", selection.model_id, selection.source)
         return OllamaTextProvider(settings), route, "ready", selection
-    if route.alias in {"dashscope", "zhipu"}:
-        logger.warning("当前文本 provider 已进入配置路由，但阶段一尚未接线：alias=%s", route.alias)
+    if route.alias in {"zhipu", "zhipu_glm47_flash", "zhipu_glm47"}:
+        logger.info("当前结构化规划能力切换为 Zhipu，model_id=%s，来源=%s", selection.model_id, selection.source)
+        return ZhipuTextProvider(settings), route, "ready", selection
+    if route.alias == "dashscope":
+        logger.warning("当前文本 provider 已进入配置路由，但当前阶段尚未接线：alias=%s", route.alias)
         return _UnsupportedTextProvider(route.alias), route, "planned-not-wired", selection
     raise RuntimeError(f"Unsupported text provider alias: {route.alias}")
 
@@ -128,22 +123,18 @@ def _build_vision_provider(
             selection.model_id,
         )
         try:
-            from src.providers.vision.nvidia_product_analysis import (
-                NVIDIAVisionProductAnalysisProvider,
-            )
+            from src.providers.vision.nvidia_product_analysis import NVIDIAVisionProductAnalysisProvider
         except ModuleNotFoundError as exc:
-            logger.exception("真实视觉 provider 加载失败：缺少标准文件 src/providers/vision/nvidia_product_analysis.py")
             raise RuntimeError(
                 "ECOM_IMAGE_AGENT_VISION_PROVIDER_MODE=real, but the vision provider "
-                "module is missing. Expected file: src/providers/vision/"
-                "nvidia_product_analysis.py"
+                "module is missing. Expected file: src/providers/vision/nvidia_product_analysis.py"
             ) from exc
 
         logger.info("当前视觉分析模型：%s，model_id=%s，来源=%s", selection.label, selection.model_id, selection.source)
         return NVIDIAVisionProductAnalysisProvider(settings), route, "ready", selection
 
     if route.alias in {"dashscope", "zhipu"}:
-        logger.warning("当前视觉 provider 已进入配置路由，但阶段一尚未接线：alias=%s", route.alias)
+        logger.warning("当前视觉 provider 已进入配置路由，但当前阶段尚未接线：alias=%s", route.alias)
         return _UnsupportedVisionProvider(route.alias), route, "planned-not-wired", selection
 
     raise RuntimeError(f"Unsupported vision provider alias: {route.alias}")
@@ -161,14 +152,12 @@ def _build_image_provider(
         logger.info("当前图片生成能力继续使用 RunAPI，model_id=%s", settings.runapi_image_model)
         return RunApiGeminiImageProvider(settings), route, "ready", selection
     if route.alias in {"dashscope", "zhipu"}:
-        logger.warning("当前图片 provider 已进入配置路由，但阶段一尚未接线：alias=%s", route.alias)
+        logger.warning("当前图片 provider 已进入配置路由，但当前阶段尚未接线：alias=%s", route.alias)
         return _UnsupportedImageProvider(route.alias), route, "planned-not-wired", selection
     raise RuntimeError(f"Unsupported image provider alias: {route.alias}")
 
 
 class _UnsupportedTextProvider(BaseTextProvider):
-    """阶段一只接配置和路由，未接线 provider 在调用时显式报错。"""
-
     def __init__(self, alias: str) -> None:
         self.alias = alias
 
@@ -179,8 +168,6 @@ class _UnsupportedTextProvider(BaseTextProvider):
 
 
 class _UnsupportedVisionProvider(BaseVisionAnalysisProvider):
-    """阶段一未接线的视觉 provider。"""
-
     def __init__(self, alias: str) -> None:
         self.alias = alias
 
@@ -191,8 +178,6 @@ class _UnsupportedVisionProvider(BaseVisionAnalysisProvider):
 
 
 class _UnsupportedImageProvider(BaseImageProvider):
-    """阶段一未接线的图片 provider。"""
-
     def __init__(self, alias: str) -> None:
         self.alias = alias
 
