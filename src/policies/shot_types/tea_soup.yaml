@@ -1,0 +1,9 @@
+shot_type: tea_soup
+display_name: 茶汤图
+intent: 展示冲泡后的汤色与饮用氛围
+composition_defaults:
+  - 汤色清晰
+  - 器具克制
+prop_guidance:
+  - 避免复杂席面
+text_space_guidance: 杯盏周边保留干净背景

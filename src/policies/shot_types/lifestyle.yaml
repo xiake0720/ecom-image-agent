@@ -1,0 +1,9 @@
+shot_type: lifestyle
+display_name: 生活方式图
+intent: 建立使用情境
+composition_defaults:
+  - 场景真实可用
+  - 仍以商品为主
+prop_guidance:
+  - 场景必须服务商品
+text_space_guidance: 留白需要规避复杂纹理

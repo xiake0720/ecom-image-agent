@@ -3,14 +3,16 @@ from __future__ import annotations
 import json
 import shutil
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, TypeVar
 from uuid import uuid4
 
 from PIL import Image
 
-from src.core.paths import ensure_task_dirs
+from src.core.paths import ensure_task_dirs, get_cache_dir
 from src.domain.asset import Asset, AssetType
 from src.domain.task import Task
+
+ModelT = TypeVar("ModelT")
 
 
 class LocalStorageService:
@@ -67,6 +69,40 @@ class LocalStorageService:
         archive_base = exports_dir / output_name
         zip_path = shutil.make_archive(str(archive_base), "zip", root_dir=source_dir)
         return Path(zip_path)
+
+    def load_cached_json_artifact(self, node_name: str, cache_key: str, response_model: type[ModelT]) -> ModelT | None:
+        cache_path = self._get_cache_path(node_name, cache_key)
+        if not cache_path.exists():
+            return None
+        payload = json.loads(cache_path.read_text(encoding="utf-8"))
+        data = payload.get("payload", payload)
+        if hasattr(response_model, "model_validate"):
+            return response_model.model_validate(data)
+        return data
+
+    def save_cached_json_artifact(
+        self,
+        node_name: str,
+        cache_key: str,
+        payload: object,
+        *,
+        metadata: dict[str, object] | None = None,
+    ) -> Path:
+        cache_path = self._get_cache_path(node_name, cache_key)
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        if hasattr(payload, "model_dump"):
+            content = payload.model_dump(mode="json")
+        else:
+            content = payload
+        wrapped = {
+            "metadata": metadata or {},
+            "payload": content,
+        }
+        cache_path.write_text(json.dumps(wrapped, ensure_ascii=False, indent=2), encoding="utf-8")
+        return cache_path
+
+    def _get_cache_path(self, node_name: str, cache_key: str) -> Path:
+        return get_cache_dir() / node_name / f"{cache_key}.json"
 
     def _read_image_size(self, image_path: Path) -> tuple[int | None, int | None]:
         try:

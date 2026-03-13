@@ -1,24 +1,15 @@
-"""Workflow 图构建与节点执行包装模块。
-
-该模块是 LangGraph 在当前项目中的实际接入位置，负责：
-- 构建 LangGraph 图
-- 注入 provider / storage / renderer 等依赖
-- 根据配置选择 mock 或 real provider
-- 为每个节点补齐统一的开始 / 结束 / 失败 / 耗时日志
-
-它不改变既有 10 个节点的顺序和契约，只让调用链更容易理解和调试。
-"""
+"""Workflow 图构建与节点执行包装模块。"""
 
 from __future__ import annotations
 
-from functools import lru_cache
 import logging
+from functools import lru_cache
 from time import perf_counter
 from typing import Callable
 
 from langgraph.graph import END, StateGraph
 
-from src.core.config import get_settings
+from src.core.config import get_settings, reload_settings
 from src.core.logging import initialize_logging, log_context
 from src.providers.router import build_capability_bindings
 from src.services.ocr.paddle_ocr_service import PaddleOCRService
@@ -53,34 +44,17 @@ NODE_OUTPUT_HINTS: dict[str, str] = {
     "generate_copy": "copy_plan.json",
     "generate_layout": "layout_plan.json",
     "build_prompts": "image_prompt_plan.json, artifacts/shots/",
-    "render_images": "generated/",
-    "overlay_text": "final/, previews/",
-    "run_qc": "qc_report.json",
+    "render_images": "generated/ or generated_preview/",
+    "overlay_text": "final/ or final_preview/",
+    "run_qc": "qc_report.json or qc_report_preview.json",
     "finalize": "task.json, exports/",
 }
 
-def build_dependencies() -> WorkflowDependencies:
-    """构建 workflow 运行依赖。
 
-    provider mode 的选择集中放在这里，避免把 mock / real 分支散落到 UI 或节点外层。
-    """
+def build_dependencies() -> WorkflowDependencies:
     settings = get_settings()
     initialize_logging(settings)
-    logger.info(
-        "开始构建工作流依赖，文本模式=%s，视觉模式=%s，图片模式=%s",
-        settings.text_provider_mode,
-        settings.vision_provider_mode,
-        settings.image_provider_mode,
-    )
     bindings = build_capability_bindings(settings)
-    logger.info(
-        "工作流依赖构建完成，结构化规划 provider=%s，model=%s，视觉 provider=%s，model=%s，图片 provider=%s",
-        bindings.planning_provider_name,
-        bindings.planning_model_selection.model_id,
-        bindings.vision_provider_name,
-        bindings.vision_model_selection.model_id,
-        bindings.image_provider_name,
-    )
     return WorkflowDependencies(
         storage=LocalStorageService(),
         planning_provider=bindings.planning_provider,
@@ -88,20 +62,25 @@ def build_dependencies() -> WorkflowDependencies:
         image_generation_provider=bindings.image_generation_provider,
         text_renderer=TextRenderer(settings.default_font_path),
         ocr_service=PaddleOCRService(enabled=settings.enable_ocr_qc),
-        text_provider_mode=settings.text_provider_mode,
-        vision_provider_mode=settings.vision_provider_mode,
-        image_provider_mode=settings.image_provider_mode,
+        text_provider_mode=bindings.planning_route.mode,
+        vision_provider_mode=bindings.vision_route.mode,
+        image_provider_mode=bindings.image_route.mode,
         planning_provider_name=bindings.planning_provider_name,
         vision_provider_name=bindings.vision_provider_name,
         image_provider_name=bindings.image_provider_name,
+        planning_route=bindings.planning_route,
+        vision_route=bindings.vision_route,
+        image_route=bindings.image_route,
+        planning_provider_status=bindings.planning_provider_status,
+        vision_provider_status=bindings.vision_provider_status,
+        image_provider_status=bindings.image_provider_status,
         planning_model_selection=bindings.planning_model_selection,
         vision_model_selection=bindings.vision_model_selection,
+        image_model_selection=bindings.image_model_selection,
     )
 
 
 def _wrap_node(node_name: str, handler: NodeHandler, deps: WorkflowDependencies):
-    """为单个节点增加统一日志与异常包装。"""
-
     def _runner(state: WorkflowState) -> dict:
         task_id = get_task_id_from_state(state)
         with log_context(task_id=task_id, node_name=node_name):
@@ -114,18 +93,10 @@ def _wrap_node(node_name: str, handler: NodeHandler, deps: WorkflowDependencies)
                     f"text_provider_mode={deps.text_provider_mode}, "
                     f"vision_provider_mode={deps.vision_provider_mode}, "
                     f"image_provider_mode={deps.image_provider_mode}, "
-                    f"planning_model={deps.planning_model_selection.model_id if deps.planning_model_selection else '-'}, "
-                    f"vision_model={deps.vision_model_selection.model_id if deps.vision_model_selection else '-'}"
+                    f"text_provider_alias={deps.planning_route.alias if deps.planning_route else '-'}, "
+                    f"vision_provider_alias={deps.vision_route.alias if deps.vision_route else '-'}, "
+                    f"image_provider_alias={deps.image_route.alias if deps.image_route else '-'}"
                 ),
-            )
-            logger.info(
-                "节点开始：%s，文本模式=%s，视觉模式=%s，图片模式=%s，规划模型=%s，视觉模型=%s",
-                node_name,
-                deps.text_provider_mode,
-                deps.vision_provider_mode,
-                deps.image_provider_mode,
-                deps.planning_model_selection.model_id if deps.planning_model_selection else "-",
-                deps.vision_model_selection.model_id if deps.vision_model_selection else "-",
             )
             started_state: WorkflowState = {
                 **state,
@@ -144,7 +115,6 @@ def _wrap_node(node_name: str, handler: NodeHandler, deps: WorkflowDependencies)
                     elapsed_ms=elapsed_ms,
                     level="ERROR",
                 )
-                logger.exception("节点失败：%s，耗时=%sms，原因=%s", node_name, elapsed_ms, exc)
                 raise WorkflowExecutionError(
                     f"{node_name} failed for task {task_id}: {exc}",
                     logs=append_log(started_state.get("logs"), error_log),
@@ -153,20 +123,13 @@ def _wrap_node(node_name: str, handler: NodeHandler, deps: WorkflowDependencies)
                 ) from exc
 
             elapsed_ms = int((perf_counter() - started_at) * 1000)
-            output_hint = NODE_OUTPUT_HINTS.get(node_name)
             end_log = format_workflow_log(
                 task_id=task_id,
                 node_name=node_name,
                 event="finish",
-                output_hint=output_hint,
+                output_hint=NODE_OUTPUT_HINTS.get(node_name),
                 detail="节点执行完成",
                 elapsed_ms=elapsed_ms,
-            )
-            logger.info(
-                "节点完成：%s，耗时=%sms，输出=%s",
-                node_name,
-                elapsed_ms,
-                output_hint or "-",
             )
             return {
                 **updates,
@@ -178,12 +141,7 @@ def _wrap_node(node_name: str, handler: NodeHandler, deps: WorkflowDependencies)
 
 @lru_cache(maxsize=1)
 def build_workflow():
-    """构建并缓存 LangGraph 工作流。
-
-    返回值是已编译的图对象，供 UI 层直接 invoke。
-    """
     deps = build_dependencies()
-    logger.info("开始构建 LangGraph 工作流图")
     graph = StateGraph(WorkflowState)
     graph.add_node("ingest_assets", _wrap_node("ingest_assets", ingest_assets, deps))
     graph.add_node("analyze_product", _wrap_node("analyze_product", analyze_product, deps))
@@ -207,5 +165,29 @@ def build_workflow():
     graph.add_edge("overlay_text", "run_qc")
     graph.add_edge("run_qc", "finalize")
     graph.add_edge("finalize", END)
-    logger.info("LangGraph 工作流图构建完成，固定节点数=%s", 10)
     return graph.compile()
+
+
+def reload_runtime() -> None:
+    reload_settings()
+    build_workflow.cache_clear()
+    logger.info("配置缓存与 workflow 缓存已清理，下一次调用将按最新配置重建。")
+
+
+def run_render_stage_only(initial_state: WorkflowState) -> WorkflowState:
+    """仅执行 render_images 之后的渲染后半段，用于 preview 后继续生成正式成品。"""
+    deps = build_dependencies()
+    state = initial_state
+    for node_name, handler in (
+        ("render_images", render_images),
+        ("overlay_text", overlay_text),
+        ("run_qc", run_qc),
+        ("finalize", finalize),
+    ):
+        runner = _wrap_node(node_name, handler, deps)
+        updates = runner(state)
+        state = {
+            **state,
+            **updates,
+        }
+    return state

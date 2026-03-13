@@ -13,9 +13,12 @@ from __future__ import annotations
 
 import logging
 
+import streamlit as st
+
 from src.core.config import get_settings
 from src.core.logging import initialize_logging, log_application_startup
 from src.ui.pages.home import render_home_page
+from src.workflows.graph import reload_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +28,8 @@ def main() -> None:
 
     这里本身不承载业务逻辑，只作为 Streamlit 到 UI 页面层的最外层入口。
     """
+    if st.session_state.pop("_ecom_reload_runtime", False):
+        reload_runtime()
     settings = get_settings()
     initialize_logging(settings)
     log_application_startup(settings)

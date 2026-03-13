@@ -1,0 +1,9 @@
+shot_type: dry_leaf_detail
+display_name: 干茶细节
+intent: 展示干茶形态、条索和包装呼应
+composition_defaults:
+  - 局部近景
+  - 兼顾包装识别
+prop_guidance:
+  - 茶器和台面只做辅助
+text_space_guidance: 上方或侧方留白更稳定

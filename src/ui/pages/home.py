@@ -1,13 +1,4 @@
-"""首页与任务执行入口。
-
-该模块位于 `src/ui/pages/`，负责：
-- 渲染 Streamlit 首页
-- 收集上传和表单参数
-- 触发 workflow 执行
-- 将任务结果写入 session_state
-
-这里不直接实现 provider 细节，只负责 UI 到 workflow 的最小衔接。
-"""
+"""首页与任务执行入口。"""
 
 from __future__ import annotations
 
@@ -21,17 +12,22 @@ from src.core.constants import DEFAULT_CATEGORY
 from src.core.logging import (
     attach_task_file_handler,
     detach_task_file_handler,
+    get_task_log_path,
     initialize_logging,
     log_context,
 )
 from src.core.paths import ensure_task_dirs
+from src.domain.generation_result import GenerationResult
+from src.domain.qc_report import QCReport
 from src.domain.task import Task, TaskStatus
+from src.providers.router import build_capability_bindings
 from src.services.storage.local_storage import LocalStorageService
+from src.services.storage.task_loader import load_task_context
 from src.ui.components.upload_panel import render_upload_panel
 from src.ui.pages.result_view import render_result_view
 from src.ui.pages.task_form import render_task_form
 from src.ui.state import ensure_ui_state
-from src.workflows.graph import build_workflow
+from src.workflows.graph import build_workflow, run_render_stage_only
 from src.workflows.state import WorkflowExecutionError, format_workflow_log
 
 DEBUG_JSON_FILENAMES = [
@@ -42,53 +38,44 @@ DEBUG_JSON_FILENAMES = [
     "layout_plan.json",
     "image_prompt_plan.json",
     "qc_report.json",
+    "qc_report_preview.json",
 ]
 logger = logging.getLogger(__name__)
 
 
 def render_home_page() -> None:
-    """渲染首页并处理用户交互。"""
     settings = get_settings()
-    text_selection = settings.resolve_text_model_selection()
-    vision_selection = settings.resolve_vision_model_selection()
+    bindings = build_capability_bindings(settings)
     initialize_logging(settings)
     st.set_page_config(page_title="ecom-image-agent", layout="wide")
     ensure_ui_state()
-    logger.info(
-        "首页渲染完成，当前文本模式=%s，视觉模式=%s，图片模式=%s，默认规划模型=%s，默认视觉模型=%s",
-        settings.text_provider_mode,
-        settings.vision_provider_mode,
-        settings.image_provider_mode,
-        text_selection.model_id,
-        vision_selection.model_id,
-    )
 
     st.title("ecom-image-agent")
-    st.caption("本地运行的电商自动生图 MVP，当前优先支持茶叶品类。")
+    st.caption("本地运行的电商图片生成工具，支持预览优先与正式成品两阶段生成。")
+    _render_runtime_controls(settings, bindings)
 
     left, right = st.columns([1, 1])
-
     with left:
         st.subheader("任务参数")
         uploads = render_upload_panel()
         form_data = render_task_form()
-        submitted = st.button("开始生成", type="primary", use_container_width=True)
+        action_col1, action_col2 = st.columns(2)
+        preview_submitted = action_col1.button("先生成预览", use_container_width=True)
+        final_submitted = action_col2.button("生成正式成品", type="primary", use_container_width=True)
 
-        if submitted:
+        if preview_submitted:
             if not uploads:
-                logger.warning("页面提交失败：未上传任何图片")
                 st.session_state["task_error"] = "请至少上传 1 张图片。"
             else:
-                try:
-                    st.session_state["task_error"] = None
-                    st.session_state["task_state"] = _run_task(form_data, uploads)
-                except WorkflowExecutionError as exc:
-                    logger.exception("任务执行失败：%s", exc)
-                    st.session_state["task_error"] = str(exc)
-                    st.session_state["task_state"] = getattr(exc, "task_state", None)
-                except Exception as exc:
-                    logger.exception("页面层捕获到未包装异常：%s", exc)
-                    st.session_state["task_error"] = str(exc)
+                _submit_task(lambda: _run_task(form_data, uploads, forced_render_mode="preview"))
+
+        if final_submitted:
+            if _has_resumable_preview_state(st.session_state.get("task_state")):
+                _submit_task(lambda: _continue_final_from_existing_task(st.session_state.get("task_state")))
+            elif uploads:
+                _submit_task(lambda: _run_task(form_data, uploads, forced_render_mode="full_auto"))
+            else:
+                st.session_state["task_error"] = "请先上传图片，或先生成预览后再生成正式成品。"
 
         if st.session_state.get("task_error"):
             st.error(st.session_state["task_error"])
@@ -97,11 +84,20 @@ def render_home_page() -> None:
         render_result_view(st.session_state.get("task_state"))
 
 
-def _run_task(form_data: dict[str, object], uploads) -> dict:
-    """执行一次任务并返回可供 UI 展示的状态。
+def _submit_task(runner) -> None:
+    try:
+        st.session_state["task_error"] = None
+        st.session_state["task_state"] = runner()
+    except WorkflowExecutionError as exc:
+        logger.exception("任务执行失败：%s", exc)
+        st.session_state["task_error"] = str(exc)
+        st.session_state["task_state"] = getattr(exc, "task_state", None)
+    except Exception as exc:
+        logger.exception("页面层捕获到未包装异常：%s", exc)
+        st.session_state["task_error"] = str(exc)
 
-    失败时异常会继续向上抛给页面层显示，避免 silent failure。
-    """
+
+def _run_task(form_data: dict[str, object], uploads, *, forced_render_mode: str) -> dict:
     settings = get_settings()
     initialize_logging(settings)
     storage = LocalStorageService()
@@ -122,174 +118,169 @@ def _run_task(form_data: dict[str, object], uploads) -> dict:
     )
     try:
         with log_context(task_id=task_id):
-            with log_context(node_name="streamlit_entry"):
-                logger.info("任务开始执行，准备创建任务目录、写入 task.json 并保存上传素材")
-                if task_log_path:
-                    logger.info("任务文件日志已启用，日志路径=%s", task_log_path)
-                else:
-                    logger.info("任务文件日志已关闭，本次仅输出控制台日志和页面日志")
-
             storage.save_task_manifest(task)
             uploads_payload = [(upload.name, upload.getvalue()) for upload in uploads]
             assets = storage.save_uploads(task_id, uploads_payload)
             debug_info = _build_debug_info(task, settings, task_log_path)
-            upload_names = ", ".join(upload.name for upload in uploads)
             initial_logs = [
                 format_workflow_log(
                     task_id=task_id,
                     node_name="streamlit_entry",
                     event="start",
-                    detail="页面已提交，开始创建任务并保存输入素材",
-                ),
-                format_workflow_log(
-                    task_id=task_id,
-                    node_name="streamlit_entry",
-                    event="config",
-                    detail=(
-                        f"text_provider_mode={settings.text_provider_mode}, "
-                        f"vision_provider_mode={settings.vision_provider_mode}, "
-                        f"image_provider_mode={settings.image_provider_mode}, "
-                        f"text_model={settings.resolve_text_model_selection().model_id}, "
-                        f"vision_model={settings.resolve_vision_model_selection().model_id}, "
-                        f"log_level={settings.log_level.upper()}"
-                    ),
-                ),
-                format_workflow_log(
-                    task_id=task_id,
-                    node_name="streamlit_entry",
-                    event="paths",
-                    output_hint=task.task_dir,
-                    detail="任务目录已创建",
-                ),
-                format_workflow_log(
-                    task_id=task_id,
-                    node_name="streamlit_entry",
-                    event="uploads",
-                    detail=f"已保存上传素材：{upload_names}",
-                ),
-                format_workflow_log(
-                    task_id=task_id,
-                    node_name="langgraph_invoke",
-                    event="start",
-                    detail="开始调用 LangGraph 工作流",
+                    detail=f"页面已提交，开始创建任务并保存输入素材，render_mode={forced_render_mode}",
                 ),
             ]
-
-            with log_context(node_name="streamlit_entry"):
-                logger.info(
-                    "任务初始化完成，task_id=%s，输出目录=%s，上传文件=%s",
-                    task_id,
-                    task.task_dir,
-                    upload_names,
-                )
-
             workflow = build_workflow()
             initial_state = {
                 "task": task,
                 "assets": assets,
                 "logs": initial_logs,
+                "cache_enabled": bool(form_data.get("cache_enabled", settings.enable_node_cache)),
+                "ignore_cache": bool(form_data.get("ignore_cache", False)),
+                "prompt_build_mode": str(form_data.get("prompt_build_mode", settings.resolve_prompt_build_mode())),
+                "render_mode": forced_render_mode,
+                "analyze_max_reference_images": int(form_data.get("analyze_max_reference_images", settings.analyze_max_reference_images)),
+                "render_max_reference_images": int(form_data.get("render_max_reference_images", settings.render_max_reference_images)),
             }
-            try:
-                with log_context(node_name="langgraph_invoke"):
-                    logger.info("工作流开始执行")
-                    state = workflow.invoke(initial_state)
-            except WorkflowExecutionError as exc:
-                with log_context(node_name="langgraph_invoke"):
-                    logger.exception("工作流执行失败：%s", exc)
-                partial_state = {
-                    "task": task.model_dump(mode="json"),
-                    "logs": [
-                        *exc.logs,
-                        format_workflow_log(
-                            task_id=task_id,
-                            node_name="langgraph_invoke",
-                            event="error",
-                            detail=f"工作流执行失败：{exc}",
-                            level="ERROR",
-                        ),
-                    ],
-                    "debug": debug_info,
-                    "generation_result": {"images": []},
-                }
-                exc.task_state = partial_state
-                raise
-            except Exception as exc:
-                with log_context(node_name="langgraph_invoke"):
-                    logger.exception("工作流调用失败：%s", exc)
-                failure_logs = [
-                    *initial_logs,
-                    format_workflow_log(
-                        task_id=task_id,
-                        node_name="langgraph_invoke",
-                        event="error",
-                        detail=f"工作流调用失败：{exc}",
-                        level="ERROR",
-                    ),
-                ]
-                workflow_error = WorkflowExecutionError(
-                    f"workflow invoke failed for task {task_id}: {exc}",
-                    logs=failure_logs,
-                    task_id=task_id,
-                    node_name="langgraph_invoke",
-                )
-                workflow_error.task_state = {
-                    "task": task.model_dump(mode="json"),
-                    "logs": failure_logs,
-                    "debug": debug_info,
-                    "generation_result": {"images": []},
-                }
-                raise workflow_error from exc
-
-            state["task"] = state["task"].model_dump(mode="json")
-            state["generation_result"] = state["generation_result"].model_dump(mode="json")
-            if "qc_report" in state:
-                state["qc_report"] = state["qc_report"].model_dump(mode="json")
-            sample_path = Path(task_dirs["previews"]) / "text_render_test.png"
-            from src.services.rendering.text_renderer import TextRenderer
-
-            # 额外保留一张文本渲染样图，方便快速验证后贴字链路是否可用。
-            with log_context(node_name="streamlit_entry"):
-                TextRenderer().render_test_image(str(sample_path))
-                logger.info("文本渲染测试样图已生成，路径=%s", sample_path)
-
-            state["logs"].extend(
-                [
-                    format_workflow_log(
-                        task_id=task_id,
-                        node_name="streamlit_entry",
-                        event="artifact",
-                        output_hint=str(sample_path),
-                        detail="已生成文本渲染测试样图",
-                    ),
-                    format_workflow_log(
-                        task_id=task_id,
-                        node_name="langgraph_invoke",
-                        event="finish",
-                        detail="工作流执行完成，结果已归一化到页面状态",
-                    ),
-                ]
-            )
-            with log_context(node_name="langgraph_invoke"):
-                logger.info("工作流整体执行完成")
-            with log_context(node_name="streamlit_entry"):
-                logger.info("任务执行完成，task_id=%s，任务目录=%s", task_id, task.task_dir)
-
-            state["debug"] = debug_info
-            return state
+            state = workflow.invoke(initial_state)
+            normalized = _normalize_task_state(state, debug_info)
+            return normalized
     finally:
         detach_task_file_handler(task_id)
 
 
+def _continue_final_from_existing_task(existing_task_state: dict | None) -> dict:
+    if not existing_task_state:
+        raise RuntimeError("No preview task state available.")
+    settings = get_settings()
+    task_id = _extract_task_id(existing_task_state)
+    if not task_id:
+        raise RuntimeError("Cannot resolve task_id from preview task state.")
+    task_dir = ensure_task_dirs(task_id)["task"]
+    task_log_path = attach_task_file_handler(task_id, task_dir, settings=settings)
+    try:
+        loaded = load_task_context(task_id)
+        task = loaded["task"]
+        debug_info = _build_debug_info(task, settings, task_log_path)
+        preview_generation_result = _extract_generation_result(existing_task_state.get("preview_generation_result"))
+        initial_state = {
+            **loaded,
+            "logs": [
+                *existing_task_state.get("logs", []),
+                format_workflow_log(
+                    task_id=task_id,
+                    node_name="streamlit_entry",
+                    event="resume_final",
+                    detail="检测到已有预览任务，直接基于现有 image_prompt_plan 继续生成正式成品",
+                ),
+            ],
+            "render_mode": "final",
+            "render_variant": "final",
+            "preview_generation_result": preview_generation_result,
+            "analyze_max_reference_images": int(existing_task_state.get("analyze_max_reference_images", settings.analyze_max_reference_images)),
+            "render_max_reference_images": int(existing_task_state.get("render_max_reference_images", settings.render_max_reference_images)),
+        }
+        state = run_render_stage_only(initial_state)
+        normalized = _normalize_task_state(state, debug_info)
+        if preview_generation_result is not None:
+            normalized["preview_generation_result"] = preview_generation_result.model_dump(mode="json")
+        if existing_task_state.get("preview_export_zip_path"):
+            normalized["preview_export_zip_path"] = existing_task_state.get("preview_export_zip_path")
+        return normalized
+    finally:
+        detach_task_file_handler(task_id)
+
+
+def _normalize_task_state(state: dict, debug_info: dict[str, object]) -> dict:
+    normalized = dict(state)
+    if "task" in normalized and hasattr(normalized["task"], "model_dump"):
+        normalized["task"] = normalized["task"].model_dump(mode="json")
+    if "generation_result" in normalized and hasattr(normalized["generation_result"], "model_dump"):
+        normalized["generation_result"] = normalized["generation_result"].model_dump(mode="json")
+    if "preview_generation_result" in normalized and hasattr(normalized["preview_generation_result"], "model_dump"):
+        normalized["preview_generation_result"] = normalized["preview_generation_result"].model_dump(mode="json")
+    if "qc_report" in normalized and hasattr(normalized["qc_report"], "model_dump"):
+        normalized["qc_report"] = normalized["qc_report"].model_dump(mode="json")
+    if "preview_qc_report" in normalized and hasattr(normalized["preview_qc_report"], "model_dump"):
+        normalized["preview_qc_report"] = normalized["preview_qc_report"].model_dump(mode="json")
+    normalized["debug"] = debug_info
+    if "analyze_max_reference_images" in state:
+        normalized["analyze_max_reference_images"] = state["analyze_max_reference_images"]
+    if "render_max_reference_images" in state:
+        normalized["render_max_reference_images"] = state["render_max_reference_images"]
+    return normalized
+
+
+def _extract_generation_result(payload) -> GenerationResult | None:
+    if not payload:
+        return None
+    if isinstance(payload, GenerationResult):
+        return payload
+    return GenerationResult.model_validate(payload)
+
+
+def _extract_task_id(task_state: dict) -> str | None:
+    debug = task_state.get("debug", {})
+    if debug.get("task_id"):
+        return str(debug["task_id"])
+    task = task_state.get("task", {})
+    if isinstance(task, dict) and task.get("task_id"):
+        return str(task["task_id"])
+    return None
+
+
+def _has_resumable_preview_state(task_state: dict | None) -> bool:
+    if not task_state:
+        return False
+    return bool(task_state.get("preview_generation_result") or task_state.get("render_variant") == "preview" or task_state.get("preview_export_zip_path"))
+
+
 def _build_debug_info(task: Task, settings, task_log_path: Path | None) -> dict[str, object]:
-    """构建结果页调试区需要的静态信息。"""
+    bindings = build_capability_bindings(settings)
     task_dir = Path(task.task_dir)
     return {
         **settings.build_debug_summary(),
+        "text_provider_impl": bindings.planning_provider_name,
+        "vision_provider_impl": bindings.vision_provider_name,
+        "image_provider_impl": bindings.image_provider_name,
+        "text_provider_status": bindings.planning_provider_status,
+        "vision_provider_status": bindings.vision_provider_status,
+        "image_provider_status": bindings.image_provider_status,
         "task_id": task.task_id,
         "task_dir": str(task_dir),
-        "workflow_log_path": str(task_log_path) if task_log_path else "-",
-        "artifact_paths": {
-            filename: str(task_dir / filename)
-            for filename in DEBUG_JSON_FILENAMES
-        },
+        "workflow_log_path": str(task_log_path or get_task_log_path(task_dir)),
+        "node_cache_enabled_default": settings.enable_node_cache,
+        "prompt_build_mode_default": settings.resolve_prompt_build_mode(),
+        "render_mode_default": settings.resolve_render_mode(),
+        "analyze_max_reference_images_default": settings.analyze_max_reference_images,
+        "render_max_reference_images_default": settings.render_max_reference_images,
+        "artifact_paths": {filename: str(task_dir / filename) for filename in DEBUG_JSON_FILENAMES},
     }
+
+
+def _render_runtime_controls(settings, bindings) -> None:
+    with st.expander("当前 Provider 状态", expanded=True):
+        action_col, info_col = st.columns([1, 3])
+        if action_col.button("重新加载配置 / 重建 Workflow", use_container_width=True):
+            st.session_state["_ecom_reload_runtime"] = True
+            st.rerun()
+        info_col.caption("修改环境变量或 .env 后，可点击此按钮清理缓存并重建 workflow。")
+
+        top_cols = st.columns(4)
+        top_cols[0].metric("Budget Mode", settings.resolve_budget_mode())
+        top_cols[1].metric("Text Alias", bindings.planning_route.alias)
+        top_cols[2].metric("Vision Alias", bindings.vision_route.alias)
+        top_cols[3].metric("Image Alias", bindings.image_route.alias)
+
+        mode_cols = st.columns(4)
+        mode_cols[0].metric("Prompt Build", settings.resolve_prompt_build_mode())
+        mode_cols[1].metric("Render Mode", settings.resolve_render_mode())
+        mode_cols[2].metric("Preview Shots", str(settings.preview_shot_count))
+        mode_cols[3].metric("Preview Size", settings.preview_output_size)
+        ref_cols = st.columns(2)
+        ref_cols[0].metric("Analyze Refs", str(settings.analyze_max_reference_images))
+        ref_cols[1].metric("Render Refs", str(settings.render_max_reference_images))
+
+        st.caption(
+            f"节点缓存默认值: {'开启' if settings.enable_node_cache else '关闭'}，缓存目录: {settings.cache_dir}"
+        )

@@ -1,0 +1,21 @@
+{
+  "case_name": "tea_single_can",
+  "category": "tea",
+  "description": "标准茶叶单罐基线 case",
+  "task": {
+    "brand_name": "Baseline Tea",
+    "product_name": "高山乌龙单罐",
+    "platform": "taobao",
+    "output_size": "1440x1440",
+    "shot_count": 4,
+    "copy_tone": "专业自然"
+  },
+  "input_count": 1,
+  "placeholder_inputs": [
+    {
+      "filename": "product_main.png",
+      "size": "1600x1600",
+      "color": [214, 192, 154]
+    }
+  ]
+}

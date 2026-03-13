@@ -31,3 +31,23 @@ def test_environment_variable_overrides_streamlit_secrets(monkeypatch) -> None:
     settings = config_module.Settings().with_streamlit_secrets()
 
     assert settings.nvidia_api_key == "secret-from-env"
+
+
+def test_non_prefixed_provider_envs_are_supported(monkeypatch) -> None:
+    """DashScope / Zhipu / Ollama 配置允许使用非 ECOM 前缀环境变量。"""
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "dashscope-secret")
+    monkeypatch.setenv("ZHIPU_BASE_URL", "https://example.zhipu.test")
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11435")
+
+    settings = config_module.Settings().with_streamlit_secrets()
+
+    assert settings.dashscope_api_key == "dashscope-secret"
+    assert settings.zhipu_base_url == "https://example.zhipu.test"
+    assert settings.ollama_base_url == "http://localhost:11435"
+
+
+def test_prompt_build_mode_defaults_follow_budget_mode() -> None:
+    assert config_module.Settings(budget_mode="local").resolve_prompt_build_mode() == "batch"
+    assert config_module.Settings(budget_mode="cheap").resolve_prompt_build_mode() == "batch"
+    assert config_module.Settings(budget_mode="balanced").resolve_prompt_build_mode() == "per_shot"
+    assert config_module.Settings(budget_mode="production").resolve_prompt_build_mode() == "per_shot"

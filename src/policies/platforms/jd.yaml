@@ -1,0 +1,9 @@
+platform: jd
+display_name: 京东
+aesthetic_direction: 规整清晰、可信赖、信息表达直接
+commercial_focus:
+  - 结构明确
+  - 品控感
+avoid:
+  - 情绪化过强
+  - 杂乱背景

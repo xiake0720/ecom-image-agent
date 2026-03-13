@@ -17,8 +17,20 @@ def get_task_generated_dir(task_id: str) -> Path:
     return get_task_dir(task_id) / "generated"
 
 
+def get_task_generated_preview_dir(task_id: str) -> Path:
+    return get_task_dir(task_id) / "generated_preview"
+
+
+def get_cache_dir() -> Path:
+    return get_settings().cache_dir
+
+
 def get_task_final_dir(task_id: str) -> Path:
     return get_task_dir(task_id) / "final"
+
+
+def get_task_final_preview_dir(task_id: str) -> Path:
+    return get_task_dir(task_id) / "final_preview"
 
 
 def get_task_preview_dir(task_id: str) -> Path:
@@ -34,11 +46,12 @@ def ensure_task_dirs(task_id: str) -> dict[str, Path]:
         "task": get_task_dir(task_id),
         "inputs": get_task_inputs_dir(task_id),
         "generated": get_task_generated_dir(task_id),
+        "generated_preview": get_task_generated_preview_dir(task_id),
         "final": get_task_final_dir(task_id),
+        "final_preview": get_task_final_preview_dir(task_id),
         "previews": get_task_preview_dir(task_id),
         "exports": get_task_exports_dir(task_id),
     }
     for path in dirs.values():
         path.mkdir(parents=True, exist_ok=True)
     return dirs
-

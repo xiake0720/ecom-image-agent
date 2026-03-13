@@ -189,11 +189,18 @@ def log_application_startup(settings: Settings | None = None) -> None:
     logger.info("应用启动，准备初始化配置")
     logger.info("日志系统初始化完成，当前日志级别=%s，任务文件日志=%s", settings.log_level.upper(), "开启" if settings.enable_file_log else "关闭")
     logger.info("应用启动成功，Python 版本=%s，运行环境=%s", sys.version.split()[0], settings.env)
+    text_route = settings.resolve_text_provider_route()
+    vision_route = settings.resolve_vision_provider_route()
+    image_route = settings.resolve_image_provider_route()
     logger.info(
-        "当前 provider 模式：文本=%s，视觉=%s，图片=%s",
-        settings.text_provider_mode,
-        settings.vision_provider_mode,
-        settings.image_provider_mode,
+        "当前 provider 路由：budget=%s，文本=%s/%s，视觉=%s/%s，图片=%s/%s",
+        settings.resolve_budget_mode(),
+        text_route.alias,
+        text_route.mode,
+        vision_route.alias,
+        vision_route.mode,
+        image_route.alias,
+        image_route.mode,
     )
     logger.info("输出根目录=%s，任务目录=%s", settings.outputs_dir, settings.tasks_dir)
     logger.info("环境变量代理状态：%s", describe_proxy_status())

@@ -1,0 +1,9 @@
+platform: xiaohongshu
+display_name: 小红书
+aesthetic_direction: 生活方式感更强，但仍需商业可用
+commercial_focus:
+  - 氛围感
+  - 分享感
+avoid:
+  - 过度硬广
+  - 失真滤镜感

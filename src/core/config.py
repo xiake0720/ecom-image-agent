@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -29,6 +30,17 @@ class ResolvedModelSelection:
     capability: str
     provider_key: str
     model_id: str
+    label: str
+    source: str
+
+
+@dataclass(frozen=True)
+class ResolvedProviderRoute:
+    """解析后的 provider 路由结果。"""
+
+    capability: str
+    alias: str
+    mode: str
     label: str
     source: str
 
@@ -46,6 +58,17 @@ class Settings(BaseSettings):
     env: str = "dev"
     enable_mock_providers: bool = True
     enable_ocr_qc: bool = False
+    enable_node_cache: bool = True
+    budget_mode: str = "production"
+    prompt_build_mode: str | None = None
+    render_mode: str | None = None
+    preview_shot_count: int = 2
+    preview_output_size: str = "1024x1024"
+    analyze_max_reference_images: int = 2
+    render_max_reference_images: int = 2
+    text_provider: str | None = None
+    vision_provider: str | None = None
+    image_provider: str | None = None
     text_provider_mode: str = "mock"
     vision_provider_mode: str = "mock"
     image_provider_mode: str = "mock"
@@ -53,6 +76,17 @@ class Settings(BaseSettings):
     vision_model_provider: str = "qwen"
     nvidia_api_key: str | None = None
     nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
+    dashscope_api_key: str | None = Field(default=None, validation_alias="DASHSCOPE_API_KEY")
+    dashscope_base_url: str = Field(
+        default="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        validation_alias="DASHSCOPE_BASE_URL",
+    )
+    zhipu_api_key: str | None = Field(default=None, validation_alias="ZHIPU_API_KEY")
+    zhipu_base_url: str = Field(
+        default="https://open.bigmodel.cn/api/paas/v4",
+        validation_alias="ZHIPU_BASE_URL",
+    )
+    ollama_base_url: str = Field(default="http://127.0.0.1:11434", validation_alias="OLLAMA_BASE_URL")
     text_model_id: str | None = None
     vision_model_id: str | None = None
     qwen_model_id: str = "qwen/qwen3.5-122b-a10b"
@@ -70,6 +104,7 @@ class Settings(BaseSettings):
     default_font_path: Path = Path("assets/fonts/NotoSansSC-Regular.otf")
     outputs_dir: Path = Path("outputs")
     tasks_dir: Path = Path("outputs/tasks")
+    cache_dir: Path = Path("outputs/cache")
     previews_dir: Path = Path("outputs/previews")
     exports_dir: Path = Path("outputs/exports")
     assets_dir: Path = Path("assets")
@@ -82,6 +117,9 @@ class Settings(BaseSettings):
     @classmethod
     def env_name_for(cls, field_name: str) -> str:
         """返回字段对应的完整环境变量名。"""
+        field = cls.model_fields.get(field_name)
+        if field is not None and isinstance(field.validation_alias, str):
+            return field.validation_alias
         return f"ECOM_IMAGE_AGENT_{field_name.upper()}"
 
     def with_streamlit_secrets(self) -> "Settings":
@@ -115,36 +153,62 @@ class Settings(BaseSettings):
 
     def ensure_directories(self) -> None:
         """确保本地运行所需目录存在。"""
-        for path in (self.outputs_dir, self.tasks_dir, self.previews_dir, self.exports_dir, self.assets_dir):
+        for path in (self.outputs_dir, self.tasks_dir, self.cache_dir, self.previews_dir, self.exports_dir, self.assets_dir):
             path.mkdir(parents=True, exist_ok=True)
 
     def build_debug_summary(self) -> dict[str, str]:
         """返回适合 UI 调试区展示的关键运行配置摘要。"""
+        text_route = self.resolve_text_provider_route()
+        vision_route = self.resolve_vision_provider_route()
+        image_route = self.resolve_image_provider_route()
         text_selection = self.resolve_text_model_selection()
         vision_selection = self.resolve_vision_model_selection()
+        image_selection = self.resolve_image_model_selection()
         return {
+            "budget_mode": self.resolve_budget_mode(),
             "text_provider_mode": self.text_provider_mode,
             "vision_provider_mode": self.vision_provider_mode,
             "image_provider_mode": self.image_provider_mode,
+            "effective_text_provider_mode": text_route.mode,
+            "effective_vision_provider_mode": vision_route.mode,
+            "effective_image_provider_mode": image_route.mode,
+            "text_provider_alias": text_route.alias,
+            "vision_provider_alias": vision_route.alias,
+            "image_provider_alias": image_route.alias,
+            "text_provider_source": text_route.source,
+            "vision_provider_source": vision_route.source,
+            "image_provider_source": image_route.source,
             "text_model_provider": text_selection.provider_key,
             "vision_model_provider": vision_selection.provider_key,
             "text_model_label": text_selection.label,
             "vision_model_label": vision_selection.label,
+            "image_model_label": image_selection.label,
             "text_model_source": text_selection.source,
             "vision_model_source": vision_selection.source,
             "log_level": self.log_level,
+            "prompt_build_mode": self.resolve_prompt_build_mode(),
+            "render_mode": self.resolve_render_mode(),
+            "preview_shot_count": str(self.preview_shot_count),
+            "preview_output_size": self.preview_output_size,
+            "analyze_max_reference_images": str(self.analyze_max_reference_images),
+            "render_max_reference_images": str(self.render_max_reference_images),
+            "enable_node_cache": "true" if self.enable_node_cache else "false",
             "enable_file_log": "true" if self.enable_file_log else "false",
             "proxy_enabled": "true" if self.is_proxy_enabled() else "false",
             "nvidia_text_model": text_selection.model_id,
             "nvidia_vision_model": vision_selection.model_id,
+            "image_model_id": image_selection.model_id,
             "runapi_image_model": self.runapi_image_model,
             "outputs_dir": str(self.outputs_dir),
             "tasks_dir": str(self.tasks_dir),
+            "cache_dir": str(self.cache_dir),
         }
 
     def resolve_text_model_selection(self) -> ResolvedModelSelection:
         """解析当前结构化规划能力实际使用的模型。"""
-        provider_key = (self.text_model_provider or "qwen").strip().lower()
+        route = self.resolve_text_provider_route()
+        legacy_model_provider = (self.text_model_provider or "qwen").strip().lower()
+        provider_key = route.alias if route.alias != "mock" else legacy_model_provider
         if self.text_model_id:
             return ResolvedModelSelection(
                 capability="planning",
@@ -153,13 +217,29 @@ class Settings(BaseSettings):
                 label=self._label_for_model(provider_key, self.text_model_id),
                 source="ECOM_IMAGE_AGENT_TEXT_MODEL_ID",
             )
-        if self.nvidia_text_model:
+        if provider_key == "nvidia" and self.nvidia_text_model:
             return ResolvedModelSelection(
                 capability="planning",
                 provider_key=provider_key or "legacy",
                 model_id=self.nvidia_text_model,
                 label=self._label_for_model(provider_key, self.nvidia_text_model),
                 source="ECOM_IMAGE_AGENT_NVIDIA_TEXT_MODEL",
+            )
+        if provider_key == "nvidia" and legacy_model_provider == "qwen":
+            return ResolvedModelSelection(
+                capability="planning",
+                provider_key="nvidia",
+                model_id=self.qwen_model_id,
+                label="Qwen3.5",
+                source=route.source,
+            )
+        if provider_key == "nvidia" and legacy_model_provider == "glm5":
+            return ResolvedModelSelection(
+                capability="planning",
+                provider_key="nvidia",
+                model_id=self.glm5_model_id,
+                label="GLM-5",
+                source=route.source,
             )
         if provider_key == "qwen":
             return ResolvedModelSelection(
@@ -177,15 +257,44 @@ class Settings(BaseSettings):
                 label="GLM-5",
                 source="ECOM_IMAGE_AGENT_TEXT_MODEL_PROVIDER",
             )
+        if provider_key == "ollama":
+            model_id = self.text_model_id or "qwen2.5:7b-instruct"
+            return ResolvedModelSelection(
+                capability="planning",
+                provider_key="ollama",
+                model_id=model_id,
+                label="Ollama",
+                source=route.source,
+            )
+        if provider_key == "dashscope":
+            model_id = self.text_model_id or "dashscope-auto-text"
+            return ResolvedModelSelection(
+                capability="planning",
+                provider_key="dashscope",
+                model_id=model_id,
+                label="DashScope",
+                source=route.source,
+            )
+        if provider_key == "zhipu":
+            model_id = self.text_model_id or "glm-4-flash"
+            return ResolvedModelSelection(
+                capability="planning",
+                provider_key="zhipu",
+                model_id=model_id,
+                label="Zhipu",
+                source=route.source,
+            )
         raise RuntimeError(
             "不支持的文本模型开关："
-            f"{provider_key}。当前仅支持 qwen 或 glm5，"
+            f"{provider_key}。当前仅支持 nvidia / ollama / dashscope / zhipu，"
             "如需自定义模型，请显式设置 ECOM_IMAGE_AGENT_TEXT_MODEL_ID。"
         )
 
     def resolve_vision_model_selection(self) -> ResolvedModelSelection:
         """解析当前视觉分析能力实际使用的模型。"""
-        provider_key = (self.vision_model_provider or "qwen").strip().lower()
+        route = self.resolve_vision_provider_route()
+        legacy_model_provider = (self.vision_model_provider or "qwen").strip().lower()
+        provider_key = route.alias if route.alias != "mock" else legacy_model_provider
         if self.vision_model_id:
             return ResolvedModelSelection(
                 capability="vision",
@@ -194,13 +303,21 @@ class Settings(BaseSettings):
                 label=self._label_for_model(provider_key, self.vision_model_id),
                 source="ECOM_IMAGE_AGENT_VISION_MODEL_ID",
             )
-        if self.nvidia_vision_model:
+        if provider_key == "nvidia" and self.nvidia_vision_model:
             return ResolvedModelSelection(
                 capability="vision",
                 provider_key=provider_key or "legacy",
                 model_id=self.nvidia_vision_model,
                 label=self._label_for_model(provider_key, self.nvidia_vision_model),
                 source="ECOM_IMAGE_AGENT_NVIDIA_VISION_MODEL",
+            )
+        if provider_key == "nvidia" and legacy_model_provider == "qwen":
+            return ResolvedModelSelection(
+                capability="vision",
+                provider_key="nvidia",
+                model_id=self.qwen_model_id,
+                label="Qwen3.5",
+                source=route.source,
             )
         if provider_key == "qwen":
             return ResolvedModelSelection(
@@ -210,10 +327,147 @@ class Settings(BaseSettings):
                 label="Qwen3.5",
                 source="ECOM_IMAGE_AGENT_VISION_MODEL_PROVIDER",
             )
+        if provider_key == "dashscope":
+            model_id = self.vision_model_id or "dashscope-vl-auto"
+            return ResolvedModelSelection(
+                capability="vision",
+                provider_key="dashscope",
+                model_id=model_id,
+                label="DashScope VL",
+                source=route.source,
+            )
+        if provider_key == "zhipu":
+            model_id = self.vision_model_id or "glm-4v-flash"
+            return ResolvedModelSelection(
+                capability="vision",
+                provider_key="zhipu",
+                model_id=model_id,
+                label="Zhipu Flash Vision",
+                source=route.source,
+            )
         raise RuntimeError(
             "不支持的视觉模型开关："
-            f"{provider_key}。当前默认视觉链路仅支持 qwen，"
+            f"{provider_key}。当前默认视觉链路仅支持 nvidia / dashscope / zhipu，"
             "如需自定义视觉模型，请显式设置 ECOM_IMAGE_AGENT_VISION_MODEL_ID。"
+        )
+
+    def resolve_image_model_selection(self) -> ResolvedModelSelection:
+        """解析当前图片能力实际使用的模型。"""
+        route = self.resolve_image_provider_route()
+        provider_key = route.alias
+        if provider_key == "runapi":
+            return ResolvedModelSelection(
+                capability="image",
+                provider_key="runapi",
+                model_id=self.runapi_image_model,
+                label="RunAPI",
+                source=route.source,
+            )
+        if provider_key == "dashscope":
+            return ResolvedModelSelection(
+                capability="image",
+                provider_key="dashscope",
+                model_id="wanx-auto",
+                label="DashScope Wanx",
+                source=route.source,
+            )
+        if provider_key == "zhipu":
+            return ResolvedModelSelection(
+                capability="image",
+                provider_key="zhipu",
+                model_id="cogview-auto",
+                label="Zhipu Image",
+                source=route.source,
+            )
+        return ResolvedModelSelection(
+            capability="image",
+            provider_key="mock",
+            model_id="mock-local",
+            label="Mock Local",
+            source=route.source,
+        )
+
+    def resolve_budget_mode(self) -> str:
+        """返回标准化后的预算模式。"""
+        normalized = str(self.budget_mode or "production").strip().lower()
+        allowed = {"local", "cheap", "balanced", "production"}
+        if normalized not in allowed:
+            raise RuntimeError(
+                "不支持的预算模式："
+                f"{normalized}。当前仅支持 local / cheap / balanced / production。"
+            )
+        return normalized
+
+    def resolve_prompt_build_mode(self) -> str:
+        explicit_value = self.prompt_build_mode
+        allowed = {"per_shot", "batch"}
+        if explicit_value:
+            normalized = str(explicit_value).strip().lower()
+            if normalized not in allowed:
+                raise RuntimeError(
+                    "不支持的 prompt build mode："
+                    f"{normalized}。当前仅支持 per_shot / batch。"
+                )
+            return normalized
+        budget_mode = self.resolve_budget_mode()
+        if budget_mode in {"local", "cheap"}:
+            return "batch"
+        return "per_shot"
+
+    def resolve_render_mode(self) -> str:
+        explicit_value = self.render_mode
+        allowed = {"preview", "final", "full_auto"}
+        if explicit_value:
+            normalized = str(explicit_value).strip().lower()
+            if normalized not in allowed:
+                raise RuntimeError(
+                    "不支持的 render mode："
+                    f"{normalized}。当前仅支持 preview / final / full_auto。"
+                )
+            return normalized
+        return "full_auto"
+
+    def resolve_text_provider_route(self) -> ResolvedProviderRoute:
+        """解析当前文本 provider 路由。"""
+        mode = self._resolve_effective_provider_mode("text")
+        alias, source = self._resolve_effective_provider_alias("text")
+        if mode != "real":
+            alias = "mock"
+        return ResolvedProviderRoute(
+            capability="planning",
+            alias=alias,
+            mode=mode,
+            label=alias.upper() if alias != "mock" else "Mock Local",
+            source=source,
+        )
+
+    def resolve_vision_provider_route(self) -> ResolvedProviderRoute:
+        """解析当前视觉 provider 路由。"""
+        mode = self._resolve_effective_provider_mode("vision")
+        alias, source = self._resolve_effective_provider_alias("vision")
+        if mode != "real":
+            alias = "mock"
+        return ResolvedProviderRoute(
+            capability="vision",
+            alias=alias,
+            mode=mode,
+            label=alias.upper() if alias != "mock" else "Mock Local",
+            source=source,
+        )
+
+    def resolve_image_provider_route(self) -> ResolvedProviderRoute:
+        """解析当前图片 provider 路由。"""
+        mode = self._resolve_effective_provider_mode("image")
+        alias, source = self._resolve_effective_provider_alias("image")
+        if mode != "real" or alias == "mock":
+            alias = "mock"
+            mode = "mock"
+        return ResolvedProviderRoute(
+            capability="image",
+            alias=alias,
+            mode=mode,
+            label=alias.upper() if alias != "mock" else "Mock Local",
+            source=source,
         )
 
     def _label_for_model(self, provider_key: str, model_id: str) -> str:
@@ -241,6 +495,78 @@ class Settings(BaseSettings):
             "all_proxy",
         )
         return any(os.getenv(name) for name in proxy_names)
+
+    def _resolve_effective_provider_mode(self, capability: str) -> str:
+        """解析预算模式作用后的有效 provider mode。"""
+        field_name = f"{capability}_provider_mode"
+        raw_mode = str(getattr(self, field_name) or "mock").strip().lower()
+        if raw_mode not in {"mock", "real"}:
+            raise RuntimeError(f"不支持的 {capability} provider mode: {raw_mode}")
+        if field_name in self.model_fields_set or not self._should_apply_budget_defaults():
+            return raw_mode
+        return self._budget_defaults()[field_name]
+
+    def _resolve_effective_provider_alias(self, capability: str) -> tuple[str, str]:
+        """解析预算模式作用后的有效 provider alias。"""
+        field_name = f"{capability}_provider"
+        explicit_value = getattr(self, field_name)
+        if explicit_value:
+            return str(explicit_value).strip().lower(), self.env_name_for(field_name)
+        if self._should_apply_budget_defaults():
+            return self._budget_defaults()[field_name], self.env_name_for("budget_mode")
+        default_alias_map = {
+            "text": "nvidia",
+            "vision": "nvidia",
+            "image": "runapi" if self.image_provider_mode == "real" else "mock",
+        }
+        return default_alias_map[capability], "legacy-default"
+
+    def _should_apply_budget_defaults(self) -> bool:
+        """判断当前是否启用预算模式默认路由。"""
+        return self.resolve_budget_mode() in {"local", "cheap", "balanced"} or "budget_mode" in self.model_fields_set
+
+    def _budget_defaults(self) -> dict[str, str]:
+        """返回预算模式对应的 provider 默认路由。"""
+        budget_mode = self.resolve_budget_mode()
+        presets = {
+            "local": {
+                "text_provider_mode": "real",
+                "vision_provider_mode": "mock",
+                "image_provider_mode": "mock",
+                "prompt_build_mode": "batch",
+                "text_provider": "ollama",
+                "vision_provider": "mock",
+                "image_provider": "mock",
+            },
+            "cheap": {
+                "text_provider_mode": "real",
+                "vision_provider_mode": "real",
+                "image_provider_mode": "real",
+                "prompt_build_mode": "batch",
+                "text_provider": "ollama",
+                "vision_provider": "zhipu",
+                "image_provider": "dashscope",
+            },
+            "balanced": {
+                "text_provider_mode": "real",
+                "vision_provider_mode": "real",
+                "image_provider_mode": "real",
+                "prompt_build_mode": "per_shot",
+                "text_provider": "nvidia",
+                "vision_provider": "nvidia",
+                "image_provider": "runapi",
+            },
+            "production": {
+                "text_provider_mode": "real",
+                "vision_provider_mode": "real",
+                "image_provider_mode": "real",
+                "prompt_build_mode": "per_shot",
+                "text_provider": "nvidia",
+                "vision_provider": "nvidia",
+                "image_provider": "runapi",
+            },
+        }
+        return presets[budget_mode]
 
 
 def _read_streamlit_secrets() -> dict[str, Any]:
@@ -271,3 +597,9 @@ def get_settings() -> Settings:
     settings = Settings().with_streamlit_secrets()
     settings.ensure_directories()
     return settings
+
+
+def reload_settings() -> Settings:
+    """清理配置缓存并重新加载设置。"""
+    get_settings.cache_clear()
+    return get_settings()

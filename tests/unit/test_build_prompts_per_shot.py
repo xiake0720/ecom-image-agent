@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.core.paths import get_task_dir
 from src.core.config import ResolvedModelSelection
+from src.core.paths import get_task_dir
 from src.domain.asset import Asset
 from src.domain.copy_plan import CopyItem, CopyPlan
-from src.domain.image_prompt_plan import ImagePrompt
+from src.domain.image_prompt_plan import ImagePromptPlan
 from src.domain.layout_plan import LayoutBlock, LayoutItem, LayoutPlan
 from src.domain.product_analysis import (
     MaterialGuess,
@@ -22,12 +22,41 @@ from src.workflows.nodes.build_prompts import build_prompts
 from src.workflows.state import WorkflowDependencies
 
 
-class FakePerShotTextProvider:
+class FakePromptProvider:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
     def generate_structured(self, prompt: str, response_model, *, system_prompt: str | None = None):
         self.calls.append(prompt)
+        if response_model is ImagePromptPlan:
+            return response_model.model_validate(
+                {
+                    "prompts": [
+                        {
+                            "shot_id": "shot-01",
+                            "shot_type": "hero",
+                            "prompt": "batch prompt for shot-01",
+                            "negative_prompt": ["garbled text", "wrong packaging"],
+                            "output_size": "1440x1440",
+                            "preserve_rules": ["保持包装主体", "保持标签位置"],
+                            "text_space_hint": "top_right_clean_space",
+                            "composition_notes": ["主体清晰", "右侧留白"],
+                            "style_notes": ["高端商业摄影", "真实棚拍质感"],
+                        },
+                        {
+                            "shot_id": "shot-02",
+                            "shot_type": "feature_detail",
+                            "prompt": "batch prompt for shot-02",
+                            "negative_prompt": ["garbled text", "wrong packaging"],
+                            "output_size": "1440x1440",
+                            "preserve_rules": ["保持包装主体", "保持标签位置"],
+                            "text_space_hint": "top_left_clean_space",
+                            "composition_notes": ["主体清晰", "左侧留白"],
+                            "style_notes": ["高端商业摄影", "真实棚拍质感"],
+                        },
+                    ]
+                }
+            )
         shot_id = "shot-01" if "shot-01" in prompt else "shot-02"
         return response_model.model_validate(
             {
@@ -56,8 +85,71 @@ def test_build_prompts_real_mode_uses_per_shot_generation_and_saves_debug_artifa
     storage = LocalStorageService()
     task_dir = tmp_path / "task-001"
     task_dir.mkdir(parents=True, exist_ok=True)
-    text_provider = FakePerShotTextProvider()
-    deps = WorkflowDependencies(
+    text_provider = FakePromptProvider()
+    deps = _build_deps(storage, text_provider)
+    task = _build_task("task-001", str(task_dir))
+    state = _build_state(task, tmp_path, prompt_build_mode="per_shot", cache_enabled=False)
+
+    result = build_prompts(state, deps)
+
+    assert len(text_provider.calls) == 2
+    assert all("image_input_sent_to_model" in call for call in text_provider.calls)
+    assert all('"image_input_sent_to_model": false' in call for call in text_provider.calls)
+    assert all("render_images" in call for call in text_provider.calls)
+    assert all("demo.png" not in call for call in text_provider.calls)
+    assert len(result["image_prompt_plan"].prompts) == 2
+    assert any("当前 prompt build mode：per_shot" in log for log in result["logs"])
+    assert any("当前使用 per_shot 模式" in log for log in result["logs"])
+    real_task_dir = get_task_dir(task.task_id)
+    assert (real_task_dir / "image_prompt_plan.json").exists()
+    assert (real_task_dir / "artifacts" / "shots" / "shot-01" / "prompt.json").exists()
+    assert result["image_prompt_plan"].prompts[0].prompt == "detailed prompt for shot-01"
+
+
+def test_build_prompts_real_mode_uses_batch_generation_and_writes_per_shot_artifacts(tmp_path: Path) -> None:
+    storage = LocalStorageService()
+    task_dir = tmp_path / "task-batch"
+    task_dir.mkdir(parents=True, exist_ok=True)
+    text_provider = FakePromptProvider()
+    deps = _build_deps(storage, text_provider)
+    task = _build_task("task-batch", str(task_dir))
+    state = _build_state(task, tmp_path, prompt_build_mode="batch", cache_enabled=False)
+
+    result = build_prompts(state, deps)
+
+    assert len(text_provider.calls) == 1
+    assert '"prompt_build_mode": "batch"' in text_provider.calls[0]
+    assert len(result["image_prompt_plan"].prompts) == 2
+    assert result["image_prompt_plan"].prompts[0].prompt == "batch prompt for shot-01"
+    assert any("当前 prompt build mode：batch" in log for log in result["logs"])
+    assert any("当前使用 batch 模式" in log for log in result["logs"])
+    real_task_dir = get_task_dir(task.task_id)
+    assert (real_task_dir / "artifacts" / "shots" / "shot-01" / "prompt.json").exists()
+    assert (real_task_dir / "artifacts" / "shots" / "shot-02" / "prompt.json").exists()
+
+
+def test_build_prompts_uses_node_cache_on_second_run(tmp_path: Path) -> None:
+    demo_path = tmp_path / "demo-cache.png"
+    demo_path.write_bytes(b"cache-demo-image")
+    storage = LocalStorageService()
+    text_provider = FakePromptProvider()
+    deps = _build_deps(storage, text_provider)
+    task = _build_task(f"task-cache-{tmp_path.name}", str(tmp_path / "task-cache"))
+    state = _build_state(task, tmp_path, prompt_build_mode="per_shot", cache_enabled=True)
+    state["assets"] = [Asset(asset_id="asset-01", filename="demo-cache.png", local_path=str(demo_path))]
+
+    first_result = build_prompts(state, deps)
+    second_result = build_prompts(state, deps)
+
+    assert len(text_provider.calls) == 2
+    assert len(first_result["image_prompt_plan"].prompts) == 2
+    assert len(second_result["image_prompt_plan"].prompts) == 2
+    assert any("cache miss" in log for log in first_result["logs"])
+    assert any("cache hit" in log for log in second_result["logs"])
+
+
+def _build_deps(storage: LocalStorageService, text_provider: FakePromptProvider) -> WorkflowDependencies:
+    return WorkflowDependencies(
         storage=storage,
         planning_provider=text_provider,
         vision_analysis_provider=None,
@@ -67,7 +159,7 @@ def test_build_prompts_real_mode_uses_per_shot_generation_and_saves_debug_artifa
         text_provider_mode="real",
         vision_provider_mode="mock",
         image_provider_mode="mock",
-        planning_provider_name="FakePerShotTextProvider",
+        planning_provider_name="FakePromptProvider",
         vision_provider_name="None",
         image_provider_name="FakeImageProvider",
         planning_model_selection=ResolvedModelSelection(
@@ -85,17 +177,23 @@ def test_build_prompts_real_mode_uses_per_shot_generation_and_saves_debug_artifa
             source="test",
         ),
     )
-    task = Task(
-        task_id="task-001",
+
+
+def _build_task(task_id: str, task_dir: str) -> Task:
+    return Task(
+        task_id=task_id,
         brand_name="品牌A",
         product_name="产品A",
         platform="taobao",
         output_size="1440x1440",
         shot_count=2,
         copy_tone="专业自然",
-        task_dir=str(task_dir),
+        task_dir=task_dir,
     )
-    state = {
+
+
+def _build_state(task: Task, tmp_path: Path, *, prompt_build_mode: str, cache_enabled: bool) -> dict:
+    return {
         "task": task,
         "assets": [Asset(asset_id="asset-01", filename="demo.png", local_path=str(tmp_path / "demo.png"))],
         "product_analysis": ProductAnalysis(
@@ -153,8 +251,8 @@ def test_build_prompts_real_mode_uses_per_shot_generation_and_saves_debug_artifa
         ),
         "copy_plan": CopyPlan(
             items=[
-                CopyItem(shot_id="shot-01", title="标题1", subtitle="副标题1"),
-                CopyItem(shot_id="shot-02", title="标题2", subtitle="副标题2"),
+                CopyItem(shot_id="shot-01", title="标题1", subtitle="副标题"),
+                CopyItem(shot_id="shot-02", title="标题2", subtitle="副标题"),
             ]
         ),
         "layout_plan": LayoutPlan(
@@ -174,24 +272,7 @@ def test_build_prompts_real_mode_uses_per_shot_generation_and_saves_debug_artifa
             ]
         ),
         "logs": [],
+        "cache_enabled": cache_enabled,
+        "ignore_cache": False,
+        "prompt_build_mode": prompt_build_mode,
     }
-
-    result = build_prompts(state, deps)
-
-    assert len(text_provider.calls) == 2
-    assert all("image_input_sent_to_model" in call for call in text_provider.calls)
-    assert all('"image_input_sent_to_model": false' in call for call in text_provider.calls)
-    assert all("render_images" in call for call in text_provider.calls)
-    assert all("demo.png" not in call for call in text_provider.calls)
-    assert all("参考素材" not in call for call in text_provider.calls)
-    assert len(result["image_prompt_plan"].prompts) == 2
-    assert any("当前未向模型发送图片输入" in log for log in result["logs"])
-    assert any("build_image_prompts.md" in log for log in result["logs"])
-    real_task_dir = get_task_dir(task.task_id)
-    assert (real_task_dir / "image_prompt_plan.json").exists()
-    assert (real_task_dir / "artifacts" / "shots" / "shot-01" / "shot.json").exists()
-    assert (real_task_dir / "artifacts" / "shots" / "shot-01" / "copy.json").exists()
-    assert (real_task_dir / "artifacts" / "shots" / "shot-01" / "layout.json").exists()
-    assert (real_task_dir / "artifacts" / "shots" / "shot-01" / "prompt.json").exists()
-    assert result["image_prompt_plan"].prompts[0].prompt == "detailed prompt for shot-01"
-    assert result["image_prompt_plan"].prompts[1].text_space_hint == "top_right_clean_space" or result["image_prompt_plan"].prompts[1].text_space_hint == "top_left_clean_space"

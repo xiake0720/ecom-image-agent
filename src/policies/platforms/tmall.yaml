@@ -1,0 +1,9 @@
+platform: tmall
+display_name: 天猫
+aesthetic_direction: 质感稳定、商业感强、画面规整
+commercial_focus:
+  - 主体清晰
+  - 质感可信
+avoid:
+  - 画面花哨
+  - 低价促销感

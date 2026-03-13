@@ -1,0 +1,10 @@
+shot_type: hero
+display_name: 主图
+intent: 建立主视觉和商品识别
+composition_defaults:
+  - 主体清晰稳定
+  - 商品占比不小
+  - 留出干净商业文字区
+prop_guidance:
+  - 道具克制
+text_space_guidance: 优先保留右侧或上方干净留白
