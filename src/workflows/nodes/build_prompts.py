@@ -5,9 +5,11 @@ from __future__ import annotations
 import logging
 
 from src.core.config import get_settings
+from src.domain.copy_plan import CopyItem
 from src.domain.image_prompt_plan import ImagePrompt, ImagePromptPlan
 from src.domain.layout_plan import LayoutItem
 from src.domain.shot_plan import ShotSpec
+from src.services.fallbacks.copy_fallback import build_default_copy_item_for_shot
 from src.services.prompting.context_builder import (
     build_build_prompts_context,
     collect_prompt_policy_signature,
@@ -84,14 +86,14 @@ def build_prompts(state: WorkflowState, deps: WorkflowDependencies) -> dict:
         },
     )
     logger.info(
-        "build_prompts 当前为纯结构化推理模式，未向文本模型发送图片输入，模板来源=%s，prompt_build_mode=%s",
+        "build_prompts running in structured prompt-building mode, template_source=%s, prompt_build_mode=%s",
         template_source,
         prompt_build_mode,
     )
     logs.extend(
         [
             "[build_prompts] 当前为纯结构化推理模式，仅基于 task、product_analysis、shot、copy、layout 生成提示词。",
-            "[build_prompts] 当前未向模型发送图片输入；真正的商品参考图会在 render_images 节点发送给图片模型。",
+            "[build_prompts] 当前不会向模型发送图片输入；真实商品参考图会在 render_images 节点发送给图片模型。",
             f"[build_prompts] 当前使用的模板来源文件：{template_source}。",
             f"[build_prompts] 当前 prompt build mode：{prompt_build_mode}。",
         ]
@@ -160,7 +162,7 @@ def _build_prompts_per_shot_mode(
         prompts = []
         total_shots = len(state["shot_plan"].shots)
         for index, shot in enumerate(state["shot_plan"].shots, start=1):
-            copy_item = copy_map[shot.shot_id]
+            copy_item = _get_copy_item_for_shot(shot=shot, copy_map=copy_map, logs=logs)
             layout_item = layout_map[shot.shot_id]
             prompt_input = _build_single_shot_prompt_input(
                 task=task,
@@ -189,7 +191,7 @@ def _build_prompts_per_shot_mode(
     prompts = []
     total_shots = len(state["shot_plan"].shots)
     for index, shot in enumerate(state["shot_plan"].shots, start=1):
-        copy_item = copy_map[shot.shot_id]
+        copy_item = _get_copy_item_for_shot(shot=shot, copy_map=copy_map, logs=logs)
         layout_item = layout_map[shot.shot_id]
         logs.append(f"[build_prompts] 当前使用 per_shot 模式，正在生成第 {index}/{total_shots} 张：{shot.shot_id}。")
         prompts.append(
@@ -221,6 +223,7 @@ def _build_prompts_batch_mode(
             shots=state["shot_plan"].shots,
             copy_map=copy_map,
             layout_map=layout_map,
+            logs=logs,
         )
         plan = deps.planning_provider.generate_structured(
             batch_prompt_input,
@@ -249,7 +252,7 @@ def _build_prompts_batch_mode(
                 task=task,
                 product_analysis=state["product_analysis"],
                 shot=shot,
-                copy_item=copy_map[shot.shot_id],
+                copy_item=_get_copy_item_for_shot(shot=shot, copy_map=copy_map, logs=logs),
                 layout_item=layout_map[shot.shot_id],
             )
         )
@@ -261,7 +264,7 @@ def _build_single_shot_prompt_input(
     task,
     product_analysis,
     shot: ShotSpec,
-    copy_item,
+    copy_item: CopyItem,
     layout_item: LayoutItem,
 ) -> str:
     prompt_context = build_build_prompts_context(
@@ -294,9 +297,21 @@ def _build_batch_prompt_input(
     task,
     product_analysis,
     shots: list[ShotSpec],
-    copy_map: dict[str, object],
+    copy_map: dict[str, CopyItem],
     layout_map: dict[str, LayoutItem],
+    logs: list[str],
 ) -> str:
+    batch_context_shots = []
+    for shot in shots:
+        batch_context_shots.append(
+            build_build_prompts_context(
+                task=task,
+                product_analysis=product_analysis,
+                shot=shot,
+                copy_item=_get_copy_item_for_shot(shot=shot, copy_map=copy_map, logs=logs),
+                layout_item=layout_map[shot.shot_id],
+            )
+        )
     batch_context = {
         "task": task,
         "product_analysis": product_analysis,
@@ -309,16 +324,7 @@ def _build_batch_prompt_input(
             "must_keep_shot_ids": [shot.shot_id for shot in shots],
             "negative_prompt_must_cover": DEFAULT_NEGATIVE_PROMPTS,
         },
-        "shots": [
-            build_build_prompts_context(
-                task=task,
-                product_analysis=product_analysis,
-                shot=shot,
-                copy_item=copy_map[shot.shot_id],
-                layout_item=layout_map[shot.shot_id],
-            )
-            for shot in shots
-        ],
+        "shots": batch_context_shots,
     }
     return (
         "当前处于 build_prompts 节点，需要一次性为整组 shots 生成 ImagePromptPlan。\n"
@@ -334,7 +340,7 @@ def _build_mock_prompt(
     task,
     product_analysis,
     shot: ShotSpec,
-    copy_item,
+    copy_item: CopyItem,
     layout_item: LayoutItem,
 ) -> ImagePrompt:
     prompt_context = build_build_prompts_context(
@@ -424,13 +430,29 @@ def _resolve_prompt_build_mode(state: WorkflowState) -> str:
     return get_settings().resolve_prompt_build_mode()
 
 
+def _get_copy_item_for_shot(
+    *,
+    shot: ShotSpec,
+    copy_map: dict[str, CopyItem],
+    logs: list[str] | None = None,
+) -> CopyItem:
+    copy_item = copy_map.get(shot.shot_id)
+    if copy_item is not None:
+        return copy_item
+    fallback_item = build_default_copy_item_for_shot(shot)
+    logger.warning("build_prompts missing copy for shot_id=%s, using fallback copy item", shot.shot_id)
+    if logs is not None:
+        logs.append(f"[build_prompts] warning: shot_id={shot.shot_id} 缺少 copy item，已使用默认 fallback 文案。")
+    return fallback_item
+
+
 def _save_all_prompt_artifacts(
     *,
     deps: WorkflowDependencies,
     task_id: str,
     prompts: list[ImagePrompt],
     shots: list[ShotSpec],
-    copy_map: dict[str, object],
+    copy_map: dict[str, CopyItem],
     layout_map: dict[str, LayoutItem],
 ) -> None:
     prompt_map = {prompt.shot_id: prompt for prompt in prompts}
@@ -442,7 +464,7 @@ def _save_all_prompt_artifacts(
             deps=deps,
             task_id=task_id,
             shot=shot,
-            copy_item=copy_map[shot.shot_id],
+            copy_item=copy_map.get(shot.shot_id) or build_default_copy_item_for_shot(shot),
             layout_item=layout_map[shot.shot_id],
             prompt=prompt,
         )
@@ -453,7 +475,7 @@ def _save_shot_debug_artifacts(
     deps: WorkflowDependencies,
     task_id: str,
     shot: ShotSpec,
-    copy_item,
+    copy_item: CopyItem,
     layout_item: LayoutItem,
     prompt: ImagePrompt,
 ) -> None:

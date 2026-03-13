@@ -133,7 +133,13 @@ def _build_vision_provider(
         logger.info("当前视觉分析模型：%s，model_id=%s，来源=%s", selection.label, selection.model_id, selection.source)
         return NVIDIAVisionProductAnalysisProvider(settings), route, "ready", selection
 
-    if route.alias in {"dashscope", "zhipu"}:
+    if route.alias == "zhipu":
+        from src.providers.vision.zhipu_vision import ZhipuVisionProvider
+
+        logger.info("当前视觉分析能力切换为 Zhipu，model_id=%s，来源=%s", selection.model_id, selection.source)
+        return ZhipuVisionProvider(settings), route, "ready", selection
+
+    if route.alias == "dashscope":
         logger.warning("当前视觉 provider 已进入配置路由，但当前阶段尚未接线：alias=%s", route.alias)
         return _UnsupportedVisionProvider(route.alias), route, "planned-not-wired", selection
 

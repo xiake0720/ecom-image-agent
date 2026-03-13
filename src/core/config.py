@@ -89,6 +89,7 @@ class Settings(BaseSettings):
     ollama_base_url: str = Field(default="http://127.0.0.1:11434", validation_alias="OLLAMA_BASE_URL")
     text_model: str | None = Field(default=None, validation_alias="ECOM_IMAGE_AGENT_TEXT_MODEL")
     text_model_id: str | None = None
+    vision_model: str | None = Field(default=None, validation_alias="ECOM_IMAGE_AGENT_VISION_MODEL")
     vision_model_id: str | None = None
     qwen_model_id: str = "qwen/qwen3.5-122b-a10b"
     glm5_model_id: str = "z-ai/glm5"
@@ -314,6 +315,14 @@ class Settings(BaseSettings):
         route = self.resolve_vision_provider_route()
         legacy_model_provider = (self.vision_model_provider or "qwen").strip().lower()
         provider_key = route.alias if route.alias != "mock" else legacy_model_provider
+        if self.vision_model:
+            return ResolvedModelSelection(
+                capability="vision",
+                provider_key=provider_key or "custom",
+                model_id=self.vision_model,
+                label=self._label_for_model(provider_key, self.vision_model),
+                source="ECOM_IMAGE_AGENT_VISION_MODEL",
+            )
         if self.vision_model_id:
             return ResolvedModelSelection(
                 capability="vision",
@@ -347,7 +356,7 @@ class Settings(BaseSettings):
                 source="ECOM_IMAGE_AGENT_VISION_MODEL_PROVIDER",
             )
         if provider_key == "dashscope":
-            model_id = self.vision_model_id or "dashscope-vl-auto"
+            model_id = self.vision_model or self.vision_model_id or "dashscope-vl-auto"
             return ResolvedModelSelection(
                 capability="vision",
                 provider_key="dashscope",
@@ -356,7 +365,7 @@ class Settings(BaseSettings):
                 source=route.source,
             )
         if provider_key == "zhipu":
-            model_id = self.vision_model_id or "glm-4v-flash"
+            model_id = self.vision_model or self.vision_model_id or "glm-4.6v-flash"
             return ResolvedModelSelection(
                 capability="vision",
                 provider_key="zhipu",
