@@ -1,4 +1,4 @@
-"""商品分析节点。"""
+"""Product analysis node."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import logging
 from src.core.config import get_settings
 from src.domain.product_analysis import ProductAnalysis
 from src.services.analysis.product_analyzer import build_mock_product_analysis
-from src.services.assets.reference_selector import select_reference_assets
+from src.services.assets.reference_selector import ReferenceSelection, select_reference_bundle
 from src.workflows.nodes.cache_utils import (
     build_node_cache_key,
     is_force_rerun,
@@ -21,12 +21,13 @@ logger = logging.getLogger(__name__)
 
 
 def analyze_product(state: WorkflowState, deps: WorkflowDependencies) -> dict:
-    """生成并落盘商品分析结果。"""
+    """Generate and persist product analysis."""
     task = state["task"]
-    logs = [*state.get("logs", []), f"[analyze_product] 开始商品分析，模式={deps.vision_provider_mode}。"]
+    logs = [*state.get("logs", []), f"[analyze_product] start mode={deps.vision_provider_mode}"]
     provider_name, provider_model_id = vision_provider_identity(deps)
-    selected_assets = _select_analysis_assets(state)
-    selected_asset_ids = [asset.asset_id for asset in selected_assets]
+    selection = _select_analysis_assets(state)
+    selected_assets = selection.selected_assets
+    selected_asset_ids = selection.selected_asset_ids
     cache_key, cache_context = build_node_cache_key(
         node_name="analyze_product",
         state=state,
@@ -40,6 +41,7 @@ def analyze_product(state: WorkflowState, deps: WorkflowDependencies) -> dict:
             "analyze_max_reference_images": _resolve_analyze_max_reference_images(state),
         },
     )
+    logs.extend(_format_selection_logs(node_name="analyze_product", selection=selection))
 
     if should_use_cache(state):
         cached_analysis = deps.storage.load_cached_json_artifact("analyze_product", cache_key, ProductAnalysis)
@@ -47,15 +49,32 @@ def analyze_product(state: WorkflowState, deps: WorkflowDependencies) -> dict:
             deps.storage.save_json_artifact(task.task_id, "product_analysis.json", cached_analysis)
             logs.extend(
                 [
-                    f"[analyze_product] cache hit，命中节点缓存，key={cache_key}。",
-                    f"[analyze_product] 本次视觉分析实际参考图 asset_id={selected_asset_ids or ['-']}。",
-                    "[analyze_product] 已从缓存恢复结果并写入 product_analysis.json。",
+                    f"[analyze_product] cache hit key={cache_key}",
+                    f"[cache] node=analyze_product status=hit key={cache_key}",
+                    "[analyze_product] restored cached product_analysis.json",
                 ]
             )
-            return {"product_analysis": cached_analysis, "logs": logs}
-        logs.append(f"[analyze_product] cache miss，未命中节点缓存，key={cache_key}。")
+            return {
+                "product_analysis": cached_analysis,
+                "analyze_reference_asset_ids": selected_asset_ids,
+                "analyze_selected_main_asset_id": selection.selected_main_asset_id,
+                "analyze_selected_detail_asset_id": selection.selected_detail_asset_id,
+                "analyze_reference_selection_reason": selection.selection_reason,
+                "logs": logs,
+            }
+        logs.extend(
+            [
+                f"[analyze_product] cache miss key={cache_key}",
+                f"[cache] node=analyze_product status=miss key={cache_key}",
+            ]
+        )
     elif is_force_rerun(state):
-        logs.append("[analyze_product] ignore cache，已忽略缓存并强制重跑。")
+        logs.extend(
+            [
+                "[analyze_product] ignore cache requested",
+                "[cache] node=analyze_product status=ignored key=-",
+            ]
+        )
 
     if deps.vision_provider_mode == "real":
         assets_payload = [
@@ -85,27 +104,32 @@ def analyze_product(state: WorkflowState, deps: WorkflowDependencies) -> dict:
         analysis = analysis.model_copy(update={"source_asset_ids": selected_asset_ids})
     else:
         analysis = build_mock_product_analysis(state.get("assets", []), task.product_name)
+        analysis = analysis.model_copy(update={"source_asset_ids": selected_asset_ids})
 
     deps.storage.save_json_artifact(task.task_id, "product_analysis.json", analysis)
     if state.get("cache_enabled"):
         deps.storage.save_cached_json_artifact("analyze_product", cache_key, analysis, metadata=cache_context)
     logs.extend(
         [
-            f"[analyze_product] 本次视觉分析实际参考图 asset_id={selected_asset_ids or ['-']}。",
             (
-                "[analyze_product] 商品分析完成，"
-                f"category={analysis.category}, subcategory={analysis.subcategory}, "
-                f"product_form={analysis.product_form}, "
-                f"must_preserve={len(analysis.visual_identity.must_preserve)}。"
+                "[analyze_product] completed "
+                f"category={analysis.category} "
+                f"subcategory={analysis.subcategory} "
+                f"product_form={analysis.product_form} "
+                f"must_preserve={len(analysis.visual_identity.must_preserve)}"
             ),
-            (
-                "[analyze_product] 当前实际视觉模型="
-                f"{deps.vision_model_selection.model_id if deps.vision_model_selection else '-'}。"
-            ),
-            "[analyze_product] 已写入 product_analysis.json。",
+            f"[analyze_product] vision_model={deps.vision_model_selection.model_id if deps.vision_model_selection else '-'}",
+            "[analyze_product] saved product_analysis.json",
         ]
     )
-    return {"product_analysis": analysis, "logs": logs}
+    return {
+        "product_analysis": analysis,
+        "analyze_reference_asset_ids": selected_asset_ids,
+        "analyze_selected_main_asset_id": selection.selected_main_asset_id,
+        "analyze_selected_detail_asset_id": selection.selected_detail_asset_id,
+        "analyze_reference_selection_reason": selection.selection_reason,
+        "logs": logs,
+    }
 
 
 def _resolve_analyze_max_reference_images(state: WorkflowState) -> int:
@@ -115,8 +139,19 @@ def _resolve_analyze_max_reference_images(state: WorkflowState) -> int:
     return max(1, int(get_settings().analyze_max_reference_images))
 
 
-def _select_analysis_assets(state: WorkflowState) -> list:
-    return select_reference_assets(
+def _select_analysis_assets(state: WorkflowState) -> ReferenceSelection:
+    return select_reference_bundle(
         state.get("assets", []),
         max_images=_resolve_analyze_max_reference_images(state),
     )
+
+
+def _format_selection_logs(*, node_name: str, selection: ReferenceSelection) -> list[str]:
+    return [
+        (
+            f"[{node_name}] selected_main_asset_id={selection.selected_main_asset_id or '-'} "
+            f"selected_detail_asset_id={selection.selected_detail_asset_id or '-'} "
+            f"selected_reference_asset_ids={selection.selected_asset_ids or []}"
+        ),
+        f"[{node_name}] selection_reason={selection.selection_reason}",
+    ]

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.domain.asset import Asset, AssetType
 from src.core.config import ResolvedModelSelection
+from src.domain.asset import Asset, AssetType
 from src.domain.generation_result import GenerationResult
 from src.domain.image_prompt_plan import ImagePrompt, ImagePromptPlan
 from src.domain.task import Task
@@ -79,25 +79,32 @@ def test_render_images_preview_mode_renders_only_preview_subset(tmp_path: Path) 
         ],
         "image_prompt_plan": ImagePromptPlan(
             prompts=[
-                ImagePrompt(shot_id="shot-01", shot_type="hero", prompt="a", output_size="1440x1440"),
-                ImagePrompt(shot_id="shot-02", shot_type="detail", prompt="b", output_size="1440x1440"),
-                ImagePrompt(shot_id="shot-03", shot_type="detail", prompt="c", output_size="1440x1440"),
+            ImagePrompt(shot_id="shot-01", shot_type="hero", prompt="a", edit_instruction="edit a", keep_subject_rules=["keep pack"], editable_regions=["background"], text_safe_zone="top_right", output_size="1440x1440"),
+            ImagePrompt(shot_id="shot-02", shot_type="detail", prompt="b", edit_instruction="edit b", keep_subject_rules=["keep label"], editable_regions=["lighting"], text_safe_zone="top_left", output_size="1440x1440"),
+            ImagePrompt(shot_id="shot-03", shot_type="detail", prompt="c", edit_instruction="edit c", keep_subject_rules=["keep structure"], editable_regions=["props"], text_safe_zone="left_center", output_size="1440x1440"),
             ]
         ),
         "logs": [],
         "render_mode": "preview",
-        "render_max_reference_images": 2,
     }
 
     result = render_images(state, deps)
 
     assert result["render_variant"] == "preview"
+    assert result["render_generation_mode"] == "image_edit"
+    assert result["render_reference_asset_ids"] == ["asset-01"]
+    assert result["render_selected_main_asset_id"] == "asset-01"
+    assert result["render_selected_detail_asset_id"] is None
     assert isinstance(result["generation_result"], GenerationResult)
     assert len(result["generation_result"].images) == 2
     assert all(image.width == 1024 and image.height == 1024 for image in result["generation_result"].images)
     assert any("render_mode=preview" in log for log in result["logs"])
-    assert image_provider.reference_asset_ids == ["asset-01", "asset-02"]
-    assert any("asset-01" in log and "asset-02" in log for log in result["logs"])
+    assert any("render_generation_mode=image_edit" in log for log in result["logs"])
+    assert any("keep_subject_rules=['keep pack']" in log for log in result["logs"])
+    assert any("editable_regions=['background']" in log for log in result["logs"])
+    assert any("text_safe_zone=top_right" in log for log in result["logs"])
+    assert image_provider.reference_asset_ids == ["asset-01"]
+    assert any("selected_main_asset_id=asset-01" in log for log in result["logs"])
 
 
 def test_render_images_final_mode_renders_all_prompts(tmp_path: Path) -> None:
@@ -134,19 +141,22 @@ def test_render_images_final_mode_renders_all_prompts(tmp_path: Path) -> None:
         ],
         "image_prompt_plan": ImagePromptPlan(
             prompts=[
-                ImagePrompt(shot_id="shot-01", shot_type="hero", prompt="a", output_size="1440x1440"),
-                ImagePrompt(shot_id="shot-02", shot_type="detail", prompt="b", output_size="1440x1440"),
-                ImagePrompt(shot_id="shot-03", shot_type="detail", prompt="c", output_size="1440x1440"),
+            ImagePrompt(shot_id="shot-01", shot_type="hero", prompt="a", edit_instruction="edit a", keep_subject_rules=["keep pack"], editable_regions=["background"], text_safe_zone="top_right", output_size="1440x1440"),
+            ImagePrompt(shot_id="shot-02", shot_type="detail", prompt="b", edit_instruction="edit b", keep_subject_rules=["keep label"], editable_regions=["lighting"], text_safe_zone="top_left", output_size="1440x1440"),
+            ImagePrompt(shot_id="shot-03", shot_type="detail", prompt="c", edit_instruction="edit c", keep_subject_rules=["keep structure"], editable_regions=["props"], text_safe_zone="left_center", output_size="1440x1440"),
             ]
         ),
         "logs": [],
         "render_mode": "final",
-        "render_max_reference_images": 1,
     }
 
     result = render_images(state, deps)
 
     assert result["render_variant"] == "final"
+    assert result["render_generation_mode"] == "image_edit"
+    assert result["render_reference_asset_ids"] == ["asset-01", "asset-02"]
+    assert result["render_selected_main_asset_id"] == "asset-01"
+    assert result["render_selected_detail_asset_id"] == "asset-02"
     assert len(result["generation_result"].images) == 3
     assert all(image.width == 1440 and image.height == 1440 for image in result["generation_result"].images)
-    assert image_provider.reference_asset_ids == ["asset-01"]
+    assert image_provider.reference_asset_ids == ["asset-01", "asset-02"]

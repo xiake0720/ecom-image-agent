@@ -11,7 +11,11 @@ from src.services.qc.ocr_qc import build_ocr_check
 from src.services.qc.task_qc import (
     build_dir_exists_check,
     build_file_exists_check,
+    build_product_consistency_risk_check,
+    build_safe_zone_overlap_risk_check,
     build_task_output_dimension_check,
+    build_text_area_complexity_check,
+    build_text_background_contrast_check,
     build_text_overflow_risk_check,
 )
 from src.workflows.state import WorkflowDependencies, WorkflowState
@@ -26,6 +30,8 @@ def run_qc(state: WorkflowState, deps: WorkflowDependencies) -> dict:
     checks = []
     copy_map = {item.shot_id: item for item in state["copy_plan"].items}
     layout_map = {item.shot_id: item for item in state["layout_plan"].items}
+    shot_map = {item.shot_id: item for item in state["shot_plan"].shots}
+    prompt_map = {item.shot_id: item for item in state["image_prompt_plan"].prompts}
 
     checks.extend(_build_task_structure_checks(task_dir=task_dir, render_variant=render_variant))
     for image in state["generation_result"].images:
@@ -33,20 +39,32 @@ def run_qc(state: WorkflowState, deps: WorkflowDependencies) -> dict:
         if render_variant == "final":
             checks.append(build_task_output_dimension_check(image, expected_size=task.output_size))
         copy_item = copy_map[image.shot_id]
-        checks.append(build_text_overflow_risk_check(copy_item, layout_map[image.shot_id]))
+        layout_item = layout_map[image.shot_id]
+        prompt_item = prompt_map[image.shot_id]
+        expected_generation_mode = str(getattr(prompt_item, "generation_mode", "") or state["image_prompt_plan"].generation_mode or "t2i")
+        actual_generation_mode = str(state.get("render_generation_mode") or "t2i")
+        checks.append(build_text_overflow_risk_check(copy_item, layout_item))
+        checks.append(build_text_background_contrast_check(image, layout_item))
+        checks.append(build_text_area_complexity_check(image, layout_item))
+        checks.append(build_safe_zone_overlap_risk_check(layout_item, shot_map.get(image.shot_id)))
+        checks.append(
+            build_product_consistency_risk_check(
+                shot_id=image.shot_id,
+                expected_generation_mode=expected_generation_mode,
+                actual_generation_mode=actual_generation_mode,
+                reference_asset_ids=list(state.get("render_reference_asset_ids", [])),
+                prompt_generation_mode=str(getattr(prompt_item, "generation_mode", "") or state["image_prompt_plan"].generation_mode or "t2i"),
+            )
+        )
         checks.append(build_ocr_check(deps.ocr_service, image.image_path, copy_item))
 
     filename = "qc_report_preview.json" if render_variant == "preview" else "qc_report.json"
-    report = QCReport(passed=all(check.passed for check in checks), review_required=not all(check.passed for check in checks), checks=checks)
+    report = _build_qc_report(checks)
     deps.storage.save_json_artifact(task.task_id, filename, report)
 
     # 保存后再做一次报告文件存在性检查，确保最终报告里包含自身产物检查。
     final_checks = [*checks, build_file_exists_check(shot_id="task", path=task_dir / filename, check_name=filename.replace(".json", "_exists"))]
-    report = QCReport(
-        passed=all(check.passed for check in final_checks),
-        review_required=not all(check.passed for check in final_checks),
-        checks=final_checks,
-    )
+    report = _build_qc_report(final_checks)
     deps.storage.save_json_artifact(task.task_id, filename, report)
 
     updates = {
@@ -90,3 +108,13 @@ def _build_task_structure_checks(*, task_dir: Path, render_variant: str) -> list
             ]
         )
     return checks
+
+
+def _build_qc_report(checks: list) -> QCReport:
+    has_failed = any(getattr(check, "status", None) == "failed" for check in checks)
+    review_required = any(getattr(check, "status", None) in {"warning", "failed"} for check in checks)
+    return QCReport(
+        passed=not has_failed,
+        review_required=review_required,
+        checks=checks,
+    )

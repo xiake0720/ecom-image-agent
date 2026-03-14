@@ -25,12 +25,13 @@ def generate_layout(state: WorkflowState, deps: WorkflowDependencies) -> dict:
         node_name="generate_layout",
         state=state,
         deps=deps,
-        prompt_version="layout-rule-v1",
+        prompt_version="layout-rule-v2",
         provider_name="rule_layout_generator",
         model_id="rule-layout",
         extra_payload={
             "shot_plan_hash": hash_state_payload(state["shot_plan"]),
             "output_size": task.output_size,
+            "product_analysis_hash": hash_state_payload(state.get("product_analysis")),
         },
     )
     if should_use_cache(state):
@@ -51,7 +52,11 @@ def generate_layout(state: WorkflowState, deps: WorkflowDependencies) -> dict:
         logger.info("generate_layout ignore cache，forced rerun")
         logs.append("[generate_layout] ignore cache，已忽略缓存并强制重跑。")
 
-    layout_plan = build_mock_layout_plan(state["shot_plan"], task.output_size)
+    layout_plan = build_mock_layout_plan(
+        state["shot_plan"],
+        task.output_size,
+        product_analysis=state.get("product_analysis"),
+    )
     deps.storage.save_json_artifact(task.task_id, "layout_plan.json", layout_plan)
     if state.get("cache_enabled"):
         deps.storage.save_cached_json_artifact(
@@ -61,6 +66,29 @@ def generate_layout(state: WorkflowState, deps: WorkflowDependencies) -> dict:
             metadata=cache_context,
         )
     logger.info("布局生成完成，布局条目数=%s，输出尺寸=%s", len(layout_plan.items), task.output_size)
+    for item in layout_plan.items:
+        score_summary = ", ".join(
+            (
+                f"{score.zone}:{score.total_score:.2f}"
+                f"(distance={score.distance_from_subject_score:.2f},"
+                f"uniformity={score.background_uniformity_score:.2f},"
+                f"readability={score.text_readability_score:.2f},"
+                f"label_penalty={score.label_overlap_penalty:.2f},"
+                f"bias={score.composition_bias_score:.2f})"
+            )
+            for score in item.safe_zone_score_breakdown
+        )
+        rejected_summary = ", ".join(item.rejected_zones) if item.rejected_zones else "-"
+        logs.append(
+            (
+                "[generate_layout] "
+                f"shot_id={item.shot_id} "
+                f"chosen_text_safe_zone={item.text_safe_zone} "
+                f"selection_reason={item.selection_reason} "
+                f"safe_zone_score_breakdown={score_summary or '-'} "
+                f"rejected_zones={rejected_summary}"
+            )
+        )
     logs.extend(
         [
             f"[generate_layout] 布局生成完成，items={len(layout_plan.items)}。",

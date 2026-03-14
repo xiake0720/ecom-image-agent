@@ -96,6 +96,17 @@ class Settings(BaseSettings):
     vision_model_id: str | None = None
     image_model: str | None = Field(default=None, validation_alias="ECOM_IMAGE_AGENT_IMAGE_MODEL")
     image_model_id: str | None = None
+    image_edit_provider: str | None = Field(default=None, validation_alias="ECOM_IMAGE_AGENT_IMAGE_EDIT_PROVIDER")
+    image_edit_model: str | None = Field(default=None, validation_alias="ECOM_IMAGE_AGENT_IMAGE_EDIT_MODEL")
+    image_edit_enabled: bool = Field(default=True, validation_alias="ECOM_IMAGE_AGENT_IMAGE_EDIT_ENABLED")
+    image_edit_prefer_multi_image: bool = Field(
+        default=True,
+        validation_alias="ECOM_IMAGE_AGENT_IMAGE_EDIT_PREFER_MULTI_IMAGE",
+    )
+    image_edit_max_reference_images: int | None = Field(
+        default=None,
+        validation_alias="ECOM_IMAGE_AGENT_IMAGE_EDIT_MAX_REFERENCE_IMAGES",
+    )
     image_allow_mock_fallback: bool = Field(
         default=False,
         validation_alias="ECOM_IMAGE_AGENT_IMAGE_ALLOW_MOCK_FALLBACK",
@@ -113,6 +124,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     enable_file_log: bool = True
     default_font_path: Path = Path("assets/fonts/NotoSansSC-Regular.otf")
+    text_render_preset: str = "premium_minimal"
+    text_render_adaptive_style_enabled: bool = True
     outputs_dir: Path = Path("outputs")
     tasks_dir: Path = Path("outputs/tasks")
     cache_dir: Path = Path("outputs/cache")
@@ -172,9 +185,11 @@ class Settings(BaseSettings):
         text_route = self.resolve_text_provider_route()
         vision_route = self.resolve_vision_provider_route()
         image_route = self.resolve_image_provider_route()
+        image_edit_route = self.resolve_image_edit_provider_route()
         text_selection = self.resolve_text_model_selection()
         vision_selection = self.resolve_vision_model_selection()
         image_selection = self.resolve_image_model_selection()
+        image_edit_selection = self.resolve_image_edit_model_selection()
         return {
             "budget_mode": self.resolve_budget_mode(),
             "text_provider_mode": self.text_provider_mode,
@@ -186,21 +201,27 @@ class Settings(BaseSettings):
             "text_provider_alias": text_route.alias,
             "vision_provider_alias": vision_route.alias,
             "image_provider_alias": image_route.alias,
+            "image_edit_provider_alias": image_edit_route.alias,
             "text_provider_source": text_route.source,
             "vision_provider_source": vision_route.source,
             "image_provider_source": image_route.source,
+            "image_edit_provider_source": image_edit_route.source,
             "text_model_provider": text_selection.provider_key,
             "text_model_id": text_selection.model_id,
             "vision_model_provider": vision_selection.provider_key,
             "vision_model_id": vision_selection.model_id,
             "image_model_provider": image_selection.provider_key,
             "image_model_id": image_selection.model_id,
+            "image_edit_model_provider": image_edit_selection.provider_key,
+            "image_edit_model_id": image_edit_selection.model_id,
             "text_model_label": text_selection.label,
             "vision_model_label": vision_selection.label,
             "image_model_label": image_selection.label,
+            "image_edit_model_label": image_edit_selection.label,
             "text_model_source": text_selection.source,
             "vision_model_source": vision_selection.source,
             "image_model_source": image_selection.source,
+            "image_edit_model_source": image_edit_selection.source,
             "log_level": self.log_level,
             "prompt_build_mode": self.resolve_prompt_build_mode(),
             "render_mode": self.resolve_render_mode(),
@@ -208,8 +229,13 @@ class Settings(BaseSettings):
             "preview_output_size": self.preview_output_size,
             "analyze_max_reference_images": str(self.analyze_max_reference_images),
             "render_max_reference_images": str(self.render_max_reference_images),
+            "image_edit_enabled": "true" if self.image_edit_enabled else "false",
+            "image_edit_prefer_multi_image": "true" if self.image_edit_prefer_multi_image else "false",
+            "image_edit_max_reference_images": str(self.resolve_image_edit_max_reference_images()),
             "enable_node_cache": "true" if self.enable_node_cache else "false",
             "enable_file_log": "true" if self.enable_file_log else "false",
+            "text_render_preset": self.resolve_text_render_preset(),
+            "text_render_adaptive_style_enabled": "true" if self.text_render_adaptive_style_enabled else "false",
             "proxy_enabled": "true" if self.is_proxy_enabled() else "false",
             "dashscope_api_key_loaded": "true" if bool(self.dashscope_api_key) else "false",
             "dashscope_base_url": self.dashscope_base_url,
@@ -429,6 +455,79 @@ class Settings(BaseSettings):
             source=route.source,
         )
 
+    def resolve_image_edit_provider_route(self) -> ResolvedProviderRoute:
+        """Resolve the effective image edit/reference provider route."""
+        base_route = self.resolve_image_provider_route()
+        if base_route.mode != "real":
+            return ResolvedProviderRoute(
+                capability="image_edit",
+                alias="mock",
+                mode="mock",
+                label="Mock Local",
+                source=base_route.source,
+            )
+        if self.image_edit_provider:
+            alias = str(self.image_edit_provider).strip().lower()
+            source = self.env_name_for("image_edit_provider")
+        else:
+            alias = base_route.alias
+            source = base_route.source
+        return ResolvedProviderRoute(
+            capability="image_edit",
+            alias=alias,
+            mode="real",
+            label=alias.upper(),
+            source=source,
+        )
+
+    def resolve_image_edit_model_selection(self) -> ResolvedModelSelection:
+        """Resolve the effective image edit/reference model selection."""
+        route = self.resolve_image_edit_provider_route()
+        if route.mode != "real" or route.alias == "mock":
+            return ResolvedModelSelection(
+                capability="image_edit",
+                provider_key="mock",
+                model_id="mock-local",
+                label="Mock Local",
+                source=route.source,
+            )
+        if route.alias == "dashscope":
+            model_id = self.image_edit_model or "wan2.6-image"
+            source = "ECOM_IMAGE_AGENT_IMAGE_EDIT_MODEL" if self.image_edit_model else route.source
+            return ResolvedModelSelection(
+                capability="image_edit",
+                provider_key="dashscope",
+                model_id=model_id,
+                label=self._label_for_model(route.alias, model_id),
+                source=source,
+            )
+        if route.alias == "runapi":
+            model_id = self.image_edit_model or self.runapi_image_model
+            source = "ECOM_IMAGE_AGENT_IMAGE_EDIT_MODEL" if self.image_edit_model else "ECOM_IMAGE_AGENT_RUNAPI_IMAGE_MODEL"
+            return ResolvedModelSelection(
+                capability="image_edit",
+                provider_key="runapi",
+                model_id=model_id,
+                label="RunAPI",
+                source=source,
+            )
+        model_id = self.image_edit_model or self.resolve_image_model_selection().model_id
+        source = "ECOM_IMAGE_AGENT_IMAGE_EDIT_MODEL" if self.image_edit_model else route.source
+        return ResolvedModelSelection(
+            capability="image_edit",
+            provider_key=route.alias,
+            model_id=model_id,
+            label=self._label_for_model(route.alias, model_id),
+            source=source,
+        )
+
+    def resolve_image_edit_max_reference_images(self) -> int:
+        """Resolve the maximum number of reference images allowed for image edit."""
+        explicit_value = self.image_edit_max_reference_images
+        if explicit_value is not None:
+            return max(1, int(explicit_value))
+        return max(1, int(self.render_max_reference_images))
+
     def resolve_budget_mode(self) -> str:
         """返回标准化后的预算模式。"""
         normalized = str(self.budget_mode or "production").strip().lower()
@@ -468,6 +567,15 @@ class Settings(BaseSettings):
                 )
             return normalized
         return "full_auto"
+
+    def resolve_text_render_preset(self) -> str:
+        explicit_value = str(self.text_render_preset or "premium_minimal").strip().lower()
+        allowed = {"premium_minimal", "commercial_balanced"}
+        if explicit_value not in allowed:
+            raise RuntimeError(
+                f"Unsupported text render preset: {explicit_value}. Current supported presets: premium_minimal / commercial_balanced."
+            )
+        return explicit_value
 
     def resolve_text_provider_route(self) -> ResolvedProviderRoute:
         """解析当前文本 provider 路由。"""
@@ -518,6 +626,10 @@ class Settings(BaseSettings):
         lowered = model_id.lower()
         if "glm5" in lowered:
             return "GLM-5"
+        if "wan2.6-image" in lowered:
+            return "Wan 2.6 Image"
+        if "wanx2.1-imageedit" in lowered:
+            return "Wanx 2.1 Image Edit"
         if "wanx2.1-t2i-turbo" in lowered:
             return "Wanx 2.1 Turbo"
         if "qwen3-vl-flash" in lowered:

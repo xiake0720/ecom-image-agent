@@ -8,15 +8,23 @@ from src.core.constants import DEFAULT_COPY_TONE, DEFAULT_SHOT_COUNT, OUTPUT_SIZ
 
 def render_task_form() -> dict[str, object]:
     settings = get_settings()
-    brand_name = st.text_input("品牌名", value="醒千峰")
+    debug_mode = str(settings.env or "dev").strip().lower() in {"dev", "debug", "local"}
+
+    brand_name = st.text_input("品牌名", value="阅千峰")
     product_name = st.text_input("产品名", value="凤凰单丛")
     platform = st.selectbox("平台", PLATFORM_OPTIONS, index=0)
     output_size = st.selectbox("尺寸", OUTPUT_SIZE_OPTIONS, index=0)
     shot_count = st.slider("张数", min_value=1, max_value=6, value=DEFAULT_SHOT_COUNT)
     copy_tone = st.text_input("文案风格", value=DEFAULT_COPY_TONE)
+
     st.caption("运行控制")
     cache_enabled = st.checkbox("启用缓存", value=bool(settings.enable_node_cache))
-    ignore_cache = st.checkbox("忽略缓存强制重跑", value=False)
+    ignore_cache = st.checkbox("忽略缓存强制重跑", value=debug_mode)
+    if cache_enabled and not ignore_cache:
+        st.warning("当前启用缓存且未忽略缓存，本次调试可能命中旧结果。")
+    elif ignore_cache:
+        st.info("当前将忽略节点缓存，适合调试 provider / prompt / 贴字变更。")
+
     with st.expander("高级选项", expanded=False):
         prompt_build_mode = st.selectbox(
             "Prompt 生成模式",
@@ -36,6 +44,7 @@ def render_task_form() -> dict[str, object]:
             index=0 if settings.render_max_reference_images <= 1 else 1,
             help="默认优先 1 张主参考图，可选再带 1 张 detail 图。",
         )
+
     return {
         "brand_name": brand_name.strip(),
         "product_name": product_name.strip(),

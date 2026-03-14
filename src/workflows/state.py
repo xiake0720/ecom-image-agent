@@ -34,6 +34,17 @@ class WorkflowState(TypedDict, total=False):
     prompt_build_mode: str
     render_mode: str
     render_variant: str
+    render_generation_mode: str
+    render_reference_asset_ids: list[str]
+    render_image_provider_impl: str
+    render_image_model_id: str
+    render_selected_main_asset_id: str
+    render_selected_detail_asset_id: str
+    render_reference_selection_reason: str
+    analyze_reference_asset_ids: list[str]
+    analyze_selected_main_asset_id: str
+    analyze_selected_detail_asset_id: str
+    analyze_reference_selection_reason: str
     analyze_max_reference_images: int
     render_max_reference_images: int
     preview_generation_result: GenerationResult

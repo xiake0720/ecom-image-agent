@@ -38,3 +38,51 @@ def test_text_renderer_outputs_image_and_shrinks_text(tmp_path: Path) -> None:
     assert output_path.exists()
     assert report.blocks[0].used_font_size <= report.blocks[0].requested_font_size
 
+
+def test_dark_background_prefers_light_text() -> None:
+    renderer = TextRenderer()
+    token = renderer._get_typography_token("title")
+    region = Image.new("RGB", (200, 120), color=(18, 20, 24))
+
+    style = renderer._resolve_adaptive_style_from_region(region, token)
+
+    assert style.prefer_light_text is True
+    assert style.text_color[0] > 200
+
+
+def test_light_background_prefers_dark_text() -> None:
+    renderer = TextRenderer()
+    token = renderer._get_typography_token("title")
+    region = Image.new("RGB", (200, 120), color=(245, 244, 240))
+
+    style = renderer._resolve_adaptive_style_from_region(region, token)
+
+    assert style.prefer_light_text is False
+    assert style.text_color[0] < 80
+
+
+def test_title_requested_font_size_is_larger_than_subtitle() -> None:
+    renderer = TextRenderer()
+    layout = LayoutItem(
+        shot_id="shot-01",
+        canvas_width=1440,
+        canvas_height=1440,
+        blocks=[],
+    )
+    title_block = LayoutBlock(kind="title", x=0, y=0, width=400, height=120, font_size=64)
+    subtitle_block = LayoutBlock(kind="subtitle", x=0, y=140, width=400, height=100, font_size=64)
+
+    title_size = renderer._requested_font_size(title_block, renderer._get_typography_token("title"), layout)
+    subtitle_size = renderer._requested_font_size(subtitle_block, renderer._get_typography_token("subtitle"), layout)
+
+    assert title_size > subtitle_size
+
+
+def test_background_plate_can_be_triggered_on_busy_mid_tone_region() -> None:
+    renderer = TextRenderer(preset_name="commercial_balanced")
+    token = renderer._get_typography_token("title")
+    region = Image.effect_noise((240, 160), 100).convert("RGB")
+
+    style = renderer._resolve_adaptive_style_from_region(region, token)
+
+    assert style.plate.enabled is True
