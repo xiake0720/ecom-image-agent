@@ -1,4 +1,17 @@
-"""Result display and debug panels."""
+"""结果展示页。
+
+文件位置：
+- `src/ui/pages/result_view.py`
+
+核心职责：
+- 展示预览结果和正式成品
+- 展示日志、QC、debug 信息
+- 展示“本次真实生成链路”
+- 调用下载面板组件
+
+主要调用方：
+- `src/ui/pages/home.py`
+"""
 
 from __future__ import annotations
 
@@ -11,6 +24,7 @@ from src.ui.components.preview_grid import render_preview_grid
 
 
 def render_result_view(task_state: dict | None) -> None:
+    """渲染任务结果页。"""
     if not task_state:
         st.subheader("结果")
         render_preview_grid([])
@@ -62,12 +76,14 @@ def render_result_view(task_state: dict | None) -> None:
 
 
 def resolve_result_image_paths(task_state: dict) -> tuple[list[str], list[str]]:
+    """根据 render_variant 决定结果页应展示哪些图片。"""
     render_variant = str(task_state.get("render_variant") or "")
     preview_result = task_state.get("preview_generation_result", {"images": []})
     final_result = task_state.get("generation_result", {"images": []})
     if render_variant == "preview":
         if not preview_result.get("images"):
             preview_result = final_result
+        # preview 模式下不能把同一批预览图再重复当成正式成品展示。
         final_result = {"images": []}
     preview_paths = [image["image_path"] if isinstance(image, dict) else image.image_path for image in preview_result.get("images", [])]
     final_paths = [image["image_path"] if isinstance(image, dict) else image.image_path for image in final_result.get("images", [])]
@@ -75,6 +91,7 @@ def resolve_result_image_paths(task_state: dict) -> tuple[list[str], list[str]]:
 
 
 def _render_generation_chain(debug_info: dict) -> None:
+    """渲染“本次真实生成链路”摘要。"""
     if not debug_info:
         st.info("当前还没有可展示的生成链路信息。")
         return
@@ -101,6 +118,7 @@ def _render_generation_chain(debug_info: dict) -> None:
 
 
 def _render_debug_panel(debug_info: dict, logs: list[str]) -> None:
+    """渲染调试信息面板。"""
     if not debug_info:
         st.caption("当前任务未附带额外调试信息。")
         return
@@ -126,6 +144,10 @@ def _render_debug_panel(debug_info: dict, logs: list[str]) -> None:
             [
                 f"cache_hit_nodes: {debug_info.get('cache_hit_nodes', [])}",
                 f"render_reference_asset_ids: {debug_info.get('render_reference_asset_ids', [])}",
+                f"connected_contract_files: {debug_info.get('connected_contract_files', [])}",
+                f"style_architecture_connected: {debug_info.get('style_architecture_connected', False)}",
+                f"shot_prompt_specs_available_for_render: {debug_info.get('shot_prompt_specs_available_for_render', False)}",
+                f"product_lock_connected: {debug_info.get('product_lock_connected', False)}",
             ]
         ),
         language="text",

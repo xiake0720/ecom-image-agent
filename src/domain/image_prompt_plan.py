@@ -1,3 +1,24 @@
+"""兼容渲染链路的图片 prompt contract。
+
+文件位置：
+- `src/domain/image_prompt_plan.py`
+
+核心职责：
+- 承载 `build_prompts` 生成的兼容型 prompt plan
+- 兼容旧的单层 prompt 渲染链路，同时承载新的 image_edit 字段
+
+主要调用方：
+- `src/workflows/nodes/build_prompts.py`
+
+主要依赖方：
+- `render_images`
+- 单张 shot 调试产物落盘
+
+关键输入/输出：
+- 输入来自结构化 spec 映射
+- 输出到 `image_prompt_plan.json`
+"""
+
 from __future__ import annotations
 
 from typing import Literal
@@ -6,6 +27,13 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class ImagePrompt(BaseModel):
+    """单张图片的兼容型 prompt 对象。
+
+    为什么需要这个类：
+    - 历史代码已经围绕 `ImagePromptPlan -> render_images` 组织
+    - 当前升级到结构化视觉导演架构后，仍需要一个兼容桥接层
+    """
+
     shot_id: str
     shot_type: str = ""
     prompt: str
@@ -37,6 +65,7 @@ class ImagePrompt(BaseModel):
     )
     @classmethod
     def _normalize_list_fields(cls, value):
+        """兼容模型/代码返回字符串或列表两种写法。"""
         if value is None:
             return []
         if isinstance(value, str):
@@ -52,5 +81,7 @@ class ImagePrompt(BaseModel):
 
 
 class ImagePromptPlan(BaseModel):
+    """整组图片的兼容型 prompt plan。"""
+
     generation_mode: Literal["t2i", "image_edit"] = "t2i"
     prompts: list[ImagePrompt] = Field(default_factory=list)

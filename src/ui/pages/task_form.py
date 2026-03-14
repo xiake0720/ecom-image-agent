@@ -1,3 +1,16 @@
+"""任务参数表单页。
+
+文件位置：
+- `src/ui/pages/task_form.py`
+
+核心职责：
+- 收集品牌、产品、平台、尺寸、张数、文案风格等基础参数
+- 收集缓存、prompt 构建模式、参考图数量等调试参数
+
+主要调用方：
+- `src/ui/pages/home.py`
+"""
+
 from __future__ import annotations
 
 import streamlit as st
@@ -7,11 +20,12 @@ from src.core.constants import DEFAULT_COPY_TONE, DEFAULT_SHOT_COUNT, OUTPUT_SIZ
 
 
 def render_task_form() -> dict[str, object]:
+    """渲染任务表单并返回 workflow 初始参数。"""
     settings = get_settings()
     debug_mode = str(settings.env or "dev").strip().lower() in {"dev", "debug", "local"}
 
     brand_name = st.text_input("品牌名", value="阅千峰")
-    product_name = st.text_input("产品名", value="凤凰单丛")
+    product_name = st.text_input("产品名", value="凤尾单丛")
     platform = st.selectbox("平台", PLATFORM_OPTIONS, index=0)
     output_size = st.selectbox("尺寸", OUTPUT_SIZE_OPTIONS, index=0)
     shot_count = st.slider("张数", min_value=1, max_value=6, value=DEFAULT_SHOT_COUNT)

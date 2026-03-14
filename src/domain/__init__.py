@@ -4,8 +4,17 @@ from src.domain.generation_result import GeneratedImage, GenerationResult
 from src.domain.image_prompt_plan import ImagePrompt, ImagePromptPlan
 from src.domain.layout_plan import LayoutBlock, LayoutItem, LayoutPlan, SafeZoneScore
 from src.domain.product_analysis import ProductAnalysis
+from src.domain.shot_prompt_specs import (
+    CopyIntentSpec,
+    LayoutConstraintSpec,
+    ProductLockSpec,
+    RenderConstraintSpec,
+    ShotPromptSpec,
+    ShotPromptSpecPlan,
+)
 from src.domain.qc_report import QCCheck, QCReport
 from src.domain.shot_plan import ShotPlan, ShotSpec
+from src.domain.style_architecture import StyleArchitecture
 from src.domain.task import Task, TaskStatus
 
 __all__ = [
@@ -22,10 +31,17 @@ __all__ = [
     "LayoutPlan",
     "SafeZoneScore",
     "ProductAnalysis",
+    "ProductLockSpec",
+    "ShotPromptSpec",
+    "ShotPromptSpecPlan",
+    "LayoutConstraintSpec",
+    "RenderConstraintSpec",
+    "CopyIntentSpec",
     "QCCheck",
     "QCReport",
     "ShotPlan",
     "ShotSpec",
+    "StyleArchitecture",
     "Task",
     "TaskStatus",
 ]

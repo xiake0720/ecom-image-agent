@@ -1,4 +1,17 @@
-"""首页与任务执行入口。"""
+"""首页与任务执行入口。
+
+文件位置：
+- `src/ui/pages/home.py`
+
+核心职责：
+- 渲染上传区、任务表单、结果区
+- 触发 preview / final 两种运行方式
+- 把 workflow 返回结果归一化到 `st.session_state`
+- 追加页面级可观测性信息，例如缓存命中和真实生成链路
+
+主要调用方：
+- `streamlit_app.py`
+"""
 
 from __future__ import annotations
 
@@ -18,7 +31,6 @@ from src.core.logging import (
 )
 from src.core.paths import ensure_task_dirs
 from src.domain.generation_result import GenerationResult
-from src.domain.qc_report import QCReport
 from src.domain.task import Task, TaskStatus
 from src.providers.router import build_capability_bindings
 from src.services.storage.local_storage import LocalStorageService
@@ -28,14 +40,20 @@ from src.ui.pages.result_view import render_result_view
 from src.ui.pages.task_form import render_task_form
 from src.ui.state import ensure_ui_state
 from src.workflows.graph import build_workflow, run_render_stage_only
-from src.workflows.state import WorkflowExecutionError, format_workflow_log
+from src.workflows.state import (
+    WorkflowExecutionError,
+    build_connected_contract_summary,
+    format_workflow_log,
+)
 
 DEBUG_JSON_FILENAMES = [
     "task.json",
     "product_analysis.json",
+    "style_architecture.json",
     "shot_plan.json",
     "copy_plan.json",
     "layout_plan.json",
+    "shot_prompt_specs.json",
     "image_prompt_plan.json",
     "qc_report.json",
     "qc_report_preview.json",
@@ -44,6 +62,12 @@ logger = logging.getLogger(__name__)
 
 
 def render_home_page() -> None:
+    """渲染首页。
+
+    页面结构：
+    - 左侧：上传、表单、运行按钮
+    - 右侧：结果、日志、调试信息
+    """
     settings = get_settings()
     bindings = build_capability_bindings(settings)
     initialize_logging(settings)
@@ -85,6 +109,7 @@ def render_home_page() -> None:
 
 
 def _submit_task(runner) -> None:
+    """统一包装页面层任务提交和异常展示。"""
     try:
         st.session_state["task_error"] = None
         st.session_state["task_state"] = runner()
@@ -98,6 +123,7 @@ def _submit_task(runner) -> None:
 
 
 def _run_task(form_data: dict[str, object], uploads, *, forced_render_mode: str) -> dict:
+    """创建任务目录、写入输入文件并执行整条 workflow。"""
     settings = get_settings()
     initialize_logging(settings)
     storage = LocalStorageService()
@@ -150,6 +176,7 @@ def _run_task(form_data: dict[str, object], uploads, *, forced_render_mode: str)
 
 
 def _continue_final_from_existing_task(existing_task_state: dict | None) -> dict:
+    """基于已存在的 preview 任务继续执行 final 阶段。"""
     if not existing_task_state:
         raise RuntimeError("No preview task state available.")
     settings = get_settings()
@@ -194,6 +221,7 @@ def _continue_final_from_existing_task(existing_task_state: dict | None) -> dict
 
 
 def _normalize_task_state(state: dict, debug_info: dict[str, object]) -> dict:
+    """把 workflow 结果归一化成适合 `st.session_state` 的结构。"""
     normalized = dict(state)
     if "task" in normalized and hasattr(normalized["task"], "model_dump"):
         normalized["task"] = normalized["task"].model_dump(mode="json")
@@ -216,6 +244,7 @@ def _normalize_task_state(state: dict, debug_info: dict[str, object]) -> dict:
 
 
 def _extract_generation_result(payload) -> GenerationResult | None:
+    """把字典或对象统一转回 `GenerationResult`。"""
     if not payload:
         return None
     if isinstance(payload, GenerationResult):
@@ -224,6 +253,7 @@ def _extract_generation_result(payload) -> GenerationResult | None:
 
 
 def _extract_task_id(task_state: dict) -> str | None:
+    """从页面保存的 task_state 中解析 task_id。"""
     debug = task_state.get("debug", {})
     if debug.get("task_id"):
         return str(debug["task_id"])
@@ -234,12 +264,14 @@ def _extract_task_id(task_state: dict) -> str | None:
 
 
 def _has_resumable_preview_state(task_state: dict | None) -> bool:
+    """判断页面当前是否已有可继续生成 final 的 preview 状态。"""
     if not task_state:
         return False
     return bool(task_state.get("preview_generation_result") or task_state.get("render_variant") == "preview" or task_state.get("preview_export_zip_path"))
 
 
 def _build_debug_info(task: Task, settings, task_log_path: Path | None) -> dict[str, object]:
+    """构建结果页会展示的运行时调试信息。"""
     bindings = build_capability_bindings(settings)
     task_dir = Path(task.task_dir)
     return {
@@ -263,7 +295,9 @@ def _build_debug_info(task: Task, settings, task_log_path: Path | None) -> dict[
 
 
 def _merge_runtime_debug_info(debug_info: dict[str, object], state: dict, logs: list[str]) -> dict[str, object]:
+    """把静态 debug 信息和本次运行时状态合并到结果页调试区。"""
     merged = dict(debug_info)
+    contract_summary = build_connected_contract_summary(state)
     merged.update(
         {
             "cache_enabled": bool(state.get("cache_enabled", False)),
@@ -275,6 +309,10 @@ def _merge_runtime_debug_info(debug_info: dict[str, object], state: dict, logs: 
             "render_reference_asset_ids": list(state.get("render_reference_asset_ids", []) or []),
             "image_provider_impl": str(state.get("render_image_provider_impl") or merged.get("image_provider_impl", "-")),
             "image_model_id": str(state.get("render_image_model_id") or merged.get("image_model_id", "-")),
+            "connected_contract_files": contract_summary["connected_contract_files"],
+            "style_architecture_connected": contract_summary["style_architecture_connected"],
+            "shot_prompt_specs_available_for_render": contract_summary["shot_prompt_specs_available_for_render"],
+            "product_lock_connected": contract_summary["product_lock_connected"],
         }
     )
     merged["real_generation_chain"] = {
@@ -289,6 +327,7 @@ def _merge_runtime_debug_info(debug_info: dict[str, object], state: dict, logs: 
 
 
 def _append_observability_summaries(logs: list[str], state: dict) -> list[str]:
+    """补齐 cache/render 摘要日志，方便结果页统一展示。"""
     normalized_logs = list(logs or [])
     summary_lines: list[str] = []
     seen_lines = set(normalized_logs)
@@ -310,6 +349,7 @@ def _append_observability_summaries(logs: list[str], state: dict) -> list[str]:
 
 
 def _build_cache_summary_logs(logs: list[str]) -> list[str]:
+    """从节点日志中提取统一的 cache hit/miss/ignored 摘要。"""
     summaries: list[str] = []
     seen: set[str] = set()
     for line in logs:
@@ -325,6 +365,7 @@ def _build_cache_summary_logs(logs: list[str]) -> list[str]:
 
 
 def _extract_cache_hit_nodes(logs: list[str]) -> list[str]:
+    """抽取命中缓存的节点名列表。"""
     hit_nodes: list[str] = []
     seen: set[str] = set()
     for line in logs:
@@ -337,6 +378,7 @@ def _extract_cache_hit_nodes(logs: list[str]) -> list[str]:
 
 
 def _parse_cache_log(line: str) -> dict[str, str] | None:
+    """兼容历史日志格式和当前统一 cache 日志格式。"""
     if line.startswith("[cache] "):
         payload = line[len("[cache] ") :]
         parts = dict(
@@ -361,17 +403,18 @@ def _parse_cache_log(line: str) -> dict[str, str] | None:
     key = "-"
     marker = "key="
     if marker in line:
-        key = line.split(marker, maxsplit=1)[1].split()[0].strip("。.,")
+        key = line.split(marker, maxsplit=1)[1].split()[0].strip("。,")
     return {"node": node, "status": status, "key": key}
 
 
 def _render_runtime_controls(settings, bindings) -> None:
+    """渲染首页顶部运行时调试区。"""
     with st.expander("当前 Provider 状态", expanded=True):
         action_col, info_col = st.columns([1, 3])
         if action_col.button("重新加载配置 / 重建 Workflow", width="stretch"):
             st.session_state["_ecom_reload_runtime"] = True
             st.rerun()
-        info_col.caption("修改环境变量或 .env 后必须重启 Streamlit 进程；此按钮只清理当前进程内的 settings/workflow 缓存。")
+        info_col.caption("修改环境变量或 .env 后必须重载 runtime；此按钮会清理当前进程内的 settings/workflow 缓存。")
 
         top_cols = st.columns(4)
         top_cols[0].metric("Budget Mode", settings.resolve_budget_mode())
@@ -419,5 +462,5 @@ def _render_runtime_controls(settings, bindings) -> None:
         )
 
         st.caption(
-            f"节点缓存默认值: {'开启' if settings.enable_node_cache else '关闭'}，缓存目录: {settings.cache_dir}"
+            f"节点缓存默认值：{'开启' if settings.enable_node_cache else '关闭'}，缓存目录 {settings.cache_dir}"
         )

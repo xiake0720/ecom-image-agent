@@ -6,7 +6,6 @@ from src.core.config import ResolvedModelSelection
 from src.core.paths import get_task_dir
 from src.domain.asset import Asset
 from src.domain.copy_plan import CopyItem, CopyPlan
-from src.domain.image_prompt_plan import ImagePromptPlan
 from src.domain.layout_plan import LayoutBlock, LayoutItem, LayoutPlan
 from src.domain.product_analysis import (
     MaterialGuess,
@@ -15,62 +14,13 @@ from src.domain.product_analysis import (
     VisualConstraints,
     VisualIdentity,
 )
+from src.domain.shot_prompt_specs import ShotPromptSpec, ShotPromptSpecPlan
 from src.domain.shot_plan import ShotPlan, ShotSpec
+from src.domain.style_architecture import StyleArchitecture
 from src.domain.task import Task
 from src.services.storage.local_storage import LocalStorageService
 from src.workflows.nodes.build_prompts import build_prompts
 from src.workflows.state import WorkflowDependencies
-
-
-class FakePromptProvider:
-    def __init__(self) -> None:
-        self.calls: list[str] = []
-
-    def generate_structured(self, prompt: str, response_model, *, system_prompt: str | None = None):
-        self.calls.append(prompt)
-        if response_model is ImagePromptPlan:
-            return response_model.model_validate(
-                {
-                    "prompts": [
-                        {
-                            "shot_id": "shot-01",
-                            "shot_type": "hero",
-                            "prompt": "batch prompt for shot-01",
-                            "negative_prompt": ["garbled text", "wrong packaging"],
-                            "output_size": "1440x1440",
-                            "preserve_rules": ["保持包装主体", "保持标签位置"],
-                            "text_space_hint": "top_right",
-                            "composition_notes": ["主体清晰", "右侧留白"],
-                            "style_notes": ["高端商业摄影", "真实棚拍质感"],
-                        },
-                        {
-                            "shot_id": "shot-02",
-                            "shot_type": "feature_detail",
-                            "prompt": "batch prompt for shot-02",
-                            "negative_prompt": ["garbled text", "wrong packaging"],
-                            "output_size": "1440x1440",
-                            "preserve_rules": ["保持包装主体", "保持标签位置"],
-                            "text_space_hint": "top_left",
-                            "composition_notes": ["主体清晰", "左侧留白"],
-                            "style_notes": ["高端商业摄影", "真实棚拍质感"],
-                        },
-                    ]
-                }
-            )
-        shot_id = "shot-01" if "shot-01" in prompt else "shot-02"
-        return response_model.model_validate(
-            {
-                "shot_id": shot_id,
-                "shot_type": "hero" if shot_id == "shot-01" else "feature_detail",
-                "prompt": f"detailed prompt for {shot_id}",
-                "negative_prompt": ["garbled text", "wrong packaging"],
-                "output_size": "1440x1440",
-                "preserve_rules": ["保持包装主体", "保持标签位置"],
-                "text_space_hint": "top_right",
-                "composition_notes": ["主体清晰", "右侧留白"],
-                "style_notes": ["高端商业摄影", "真实棚拍质感"],
-            }
-        )
 
 
 class FakeImageGenerationProvider:
@@ -100,107 +50,51 @@ class DummyOCRService:
     pass
 
 
-def test_build_prompts_real_mode_uses_per_shot_generation_and_saves_debug_artifacts(tmp_path: Path) -> None:
+def test_build_prompts_maps_structured_shot_specs_to_legacy_prompt_plan(tmp_path: Path) -> None:
     storage = LocalStorageService()
-    task_dir = tmp_path / "task-001"
-    task_dir.mkdir(parents=True, exist_ok=True)
-    text_provider = FakePromptProvider()
-    deps = _build_deps(storage, text_provider, generation_mode="image_edit")
-    task = _build_task("task-001", str(task_dir))
-    state = _build_state(task, tmp_path, prompt_build_mode="per_shot", cache_enabled=False)
+    deps = _build_deps(storage, generation_mode="image_edit")
+    task = _build_task("task-001", str(tmp_path / "task-001"))
+    state = _build_state(task, tmp_path, cache_enabled=False)
 
     result = build_prompts(state, deps)
     first_prompt = result["image_prompt_plan"].prompts[0]
 
-    assert len(text_provider.calls) == 2
-    assert all("image_input_sent_to_model" in call for call in text_provider.calls)
-    assert all('"image_input_sent_to_model": false' in call for call in text_provider.calls)
-    assert all("render_images" in call for call in text_provider.calls)
-    assert all("demo.png" not in call for call in text_provider.calls)
     assert len(result["image_prompt_plan"].prompts) == 2
     assert result["image_prompt_plan"].generation_mode == "image_edit"
     assert first_prompt.generation_mode == "image_edit"
-    assert first_prompt.prompt == "detailed prompt for shot-01"
-    assert first_prompt.edit_instruction
-    assert first_prompt.edit_instruction != first_prompt.prompt
+    assert "Use the uploaded reference product as the exact hero subject" in first_prompt.prompt
+    assert "strict product lock" in first_prompt.edit_instruction
     assert first_prompt.keep_subject_rules
     assert first_prompt.editable_regions
     assert first_prompt.locked_regions
     assert first_prompt.text_safe_zone == first_prompt.text_space_hint
-    assert any("target_generation_mode=image_edit" in log for log in result["logs"])
+    assert any("style_architecture_present=True" in log for log in result["logs"])
+    assert any("shot_prompt_specs_present=True" in log for log in result["logs"])
     real_task_dir = get_task_dir(task.task_id)
     assert (real_task_dir / "image_prompt_plan.json").exists()
     assert (real_task_dir / "artifacts" / "shots" / "shot-01" / "prompt.json").exists()
 
 
-def test_build_prompts_real_mode_uses_batch_generation_and_writes_per_shot_artifacts(tmp_path: Path) -> None:
-    storage = LocalStorageService()
-    task_dir = tmp_path / "task-batch"
-    task_dir.mkdir(parents=True, exist_ok=True)
-    text_provider = FakePromptProvider()
-    deps = _build_deps(storage, text_provider, generation_mode="image_edit")
-    task = _build_task("task-batch", str(task_dir))
-    state = _build_state(task, tmp_path, prompt_build_mode="batch", cache_enabled=False)
-
-    result = build_prompts(state, deps)
-
-    assert len(text_provider.calls) == 1
-    assert '"prompt_build_mode": "batch"' in text_provider.calls[0]
-    assert len(result["image_prompt_plan"].prompts) == 2
-    assert result["image_prompt_plan"].generation_mode == "image_edit"
-    assert result["image_prompt_plan"].prompts[0].prompt == "batch prompt for shot-01"
-    assert result["image_prompt_plan"].prompts[0].edit_instruction
-    assert any("using batch mode target_generation_mode=image_edit" in log for log in result["logs"])
-    real_task_dir = get_task_dir(task.task_id)
-    assert (real_task_dir / "artifacts" / "shots" / "shot-01" / "prompt.json").exists()
-    assert (real_task_dir / "artifacts" / "shots" / "shot-02" / "prompt.json").exists()
-
-
 def test_build_prompts_uses_node_cache_on_second_run(tmp_path: Path) -> None:
-    demo_path = tmp_path / "demo-cache.png"
-    demo_path.write_bytes(b"cache-demo-image")
     storage = LocalStorageService()
-    text_provider = FakePromptProvider()
-    deps = _build_deps(storage, text_provider, generation_mode="image_edit")
+    deps = _build_deps(storage, generation_mode="image_edit")
     task = _build_task(f"task-cache-{tmp_path.name}", str(tmp_path / "task-cache"))
-    state = _build_state(task, tmp_path, prompt_build_mode="per_shot", cache_enabled=True)
-    state["assets"] = [Asset(asset_id="asset-01", filename="demo-cache.png", local_path=str(demo_path))]
+    state = _build_state(task, tmp_path, cache_enabled=True)
 
     first_result = build_prompts(state, deps)
     second_result = build_prompts(state, deps)
 
-    assert len(text_provider.calls) == 2
     assert len(first_result["image_prompt_plan"].prompts) == 2
     assert len(second_result["image_prompt_plan"].prompts) == 2
     assert any("cache miss" in log for log in first_result["logs"])
     assert any("cache hit" in log for log in second_result["logs"])
 
 
-def test_build_prompts_t2i_mode_keeps_legacy_prompt_fields_compatible(tmp_path: Path) -> None:
+def test_build_prompts_keeps_layout_text_safe_zone_authoritative(tmp_path: Path) -> None:
     storage = LocalStorageService()
-    text_provider = FakePromptProvider()
-    deps = _build_deps(storage, text_provider, generation_mode="t2i")
-    task = _build_task("task-t2i", str(tmp_path / "task-t2i"))
-    state = _build_state(task, tmp_path, prompt_build_mode="per_shot", cache_enabled=False)
-    state["assets"] = []
-
-    result = build_prompts(state, deps)
-    first_prompt = result["image_prompt_plan"].prompts[0]
-
-    assert result["image_prompt_plan"].generation_mode == "t2i"
-    assert first_prompt.generation_mode == "t2i"
-    assert first_prompt.prompt == "detailed prompt for shot-01"
-    assert first_prompt.negative_prompt
-    assert first_prompt.preserve_rules
-    assert first_prompt.edit_instruction
-
-
-def test_build_prompts_uses_layout_text_safe_zone_without_reinferring(tmp_path: Path) -> None:
-    storage = LocalStorageService()
-    text_provider = FakePromptProvider()
-    deps = _build_deps(storage, text_provider, generation_mode="image_edit")
+    deps = _build_deps(storage, generation_mode="image_edit")
     task = _build_task("task-layout-zone", str(tmp_path / "task-layout-zone"))
-    state = _build_state(task, tmp_path, prompt_build_mode="per_shot", cache_enabled=False)
+    state = _build_state(task, tmp_path, cache_enabled=False)
     state["layout_plan"].items[0] = LayoutItem(
         shot_id="shot-01",
         canvas_width=1440,
@@ -214,40 +108,34 @@ def test_build_prompts_uses_layout_text_safe_zone_without_reinferring(tmp_path: 
     first_prompt = result["image_prompt_plan"].prompts[0]
     assert first_prompt.text_safe_zone == "bottom_right"
     assert first_prompt.text_space_hint == "bottom_right"
-    assert any('"layout_text_safe_zone": "bottom_right"' in call for call in text_provider.calls)
 
 
-def _build_deps(
-    storage: LocalStorageService,
-    text_provider: FakePromptProvider,
-    *,
-    generation_mode: str,
-) -> WorkflowDependencies:
+def _build_deps(storage: LocalStorageService, *, generation_mode: str) -> WorkflowDependencies:
     return WorkflowDependencies(
         storage=storage,
-        planning_provider=text_provider,
+        planning_provider=object(),
         vision_analysis_provider=None,
         image_generation_provider=FakeImageGenerationProvider(generation_mode),
         text_renderer=DummyRenderer(),
         ocr_service=DummyOCRService(),
-        text_provider_mode="real",
+        text_provider_mode="mock",
         vision_provider_mode="mock",
         image_provider_mode="mock",
-        planning_provider_name="FakePromptProvider",
+        planning_provider_name="StructuredMapper",
         vision_provider_name="None",
         image_provider_name="FakeImageProvider",
         planning_model_selection=ResolvedModelSelection(
             capability="planning",
-            provider_key="qwen",
-            model_id="qwen/qwen3.5-122b-a10b",
-            label="Qwen3.5",
+            provider_key="mock",
+            model_id="structured-mapper",
+            label="StructuredMapper",
             source="test",
         ),
         vision_model_selection=ResolvedModelSelection(
             capability="vision",
-            provider_key="qwen",
-            model_id="qwen/qwen3.5-122b-a10b",
-            label="Qwen3.5",
+            provider_key="mock",
+            model_id="mock-vision",
+            label="MockVision",
             source="test",
         ),
     )
@@ -266,7 +154,7 @@ def _build_task(task_id: str, task_dir: str) -> Task:
     )
 
 
-def _build_state(task: Task, tmp_path: Path, *, prompt_build_mode: str, cache_enabled: bool) -> dict:
+def _build_state(task: Task, tmp_path: Path, *, cache_enabled: bool) -> dict:
     return {
         "task": task,
         "assets": [Asset(asset_id="asset-01", filename="demo.png", local_path=str(tmp_path / "demo.png"))],
@@ -277,7 +165,7 @@ def _build_state(task: Task, tmp_path: Path, *, prompt_build_mode: str, cache_en
             product_form="packaged_tea",
             packaging_structure=PackagingStructure(
                 primary_container="tea_can",
-                has_outer_box="no",
+                has_outer_box="yes",
                 has_visible_lid="yes",
                 container_count="1",
             ),
@@ -286,14 +174,32 @@ def _build_state(task: Task, tmp_path: Path, *, prompt_build_mode: str, cache_en
                 label_position="front_center",
                 label_ratio="medium",
                 style_impression=["东方雅致"],
-                must_preserve=["包装主体轮廓", "标签位置"],
+                must_preserve=["package silhouette", "label position"],
             ),
             material_guess=MaterialGuess(container_material="metal", label_material="paper"),
             visual_constraints=VisualConstraints(
-                recommended_style_direction=["高端静物棚拍", "保留东方气质"],
-                avoid=["纯白背景", "包装变形"],
+                recommended_style_direction=["premium still life", "keep package stable"],
+                avoid=["plain white background", "package deformation"],
             ),
-            recommended_focuses=["包装主体", "标签区"],
+            recommended_focuses=["package", "label"],
+            locked_elements=["package silhouette", "front label layout"],
+            editable_elements=["background", "lighting", "props"],
+            package_type="gift_box",
+            primary_color="red",
+            material="paper gift box",
+            label_structure="front-centered hero label",
+        ),
+        "style_architecture": StyleArchitecture(
+            platform="taobao",
+            user_preferences=["premium", "gift", "light_background"],
+            style_theme="premium tea gift box visual world",
+            color_strategy=["keep the product as the only saturated center"],
+            lighting_strategy=["main light direction fixed at upper-left"],
+            lens_strategy=["50mm commercial lens feel"],
+            prop_system=["tea tray", "neutral ceramic ware"],
+            background_strategy=["ivory and warm gray only"],
+            text_strategy=["reserve explicit text safe zones"],
+            global_negative_rules=["do not redesign the label"],
         ),
         "shot_plan": ShotPlan(
             shots=[
@@ -303,11 +209,11 @@ def _build_state(task: Task, tmp_path: Path, *, prompt_build_mode: str, cache_en
                     purpose="展示主视觉",
                     composition_hint="主体居中",
                     copy_goal="突出品牌",
-                    shot_type="hero",
-                    goal="突出品牌主视觉",
-                    focus="包装主体",
-                    scene_direction="高级棚拍场景",
-                    composition_direction="主体居中，右侧留白",
+                    shot_type="hero_brand",
+                    goal="show hero gift box",
+                    focus="package hero",
+                    scene_direction="premium still life",
+                    composition_direction="subject centered, top-right safe zone",
                 ),
                 ShotSpec(
                     shot_id="shot-02",
@@ -315,11 +221,11 @@ def _build_state(task: Task, tmp_path: Path, *, prompt_build_mode: str, cache_en
                     purpose="展示标签细节",
                     composition_hint="局部近景",
                     copy_goal="强调卖点",
-                    shot_type="feature_detail",
-                    goal="强调包装细节",
-                    focus="标签与材质",
-                    scene_direction="包装细节近景场景",
-                    composition_direction="主体靠左，右侧留白",
+                    shot_type="dry_leaf_detail",
+                    goal="show dry leaf detail",
+                    focus="dry leaf and package cue",
+                    scene_direction="detail still life",
+                    composition_direction="subject near left, top-left safe zone",
                 ),
             ]
         ),
@@ -335,18 +241,58 @@ def _build_state(task: Task, tmp_path: Path, *, prompt_build_mode: str, cache_en
                     shot_id="shot-01",
                     canvas_width=1440,
                     canvas_height=1440,
+                    text_safe_zone="top_right",
                     blocks=[LayoutBlock(kind="title", x=900, y=120, width=300, height=200)],
                 ),
                 LayoutItem(
                     shot_id="shot-02",
                     canvas_width=1440,
                     canvas_height=1440,
+                    text_safe_zone="top_left",
                     blocks=[LayoutBlock(kind="title", x=80, y=100, width=300, height=200)],
+                ),
+            ]
+        ),
+        "shot_prompt_specs": ShotPromptSpecPlan(
+            specs=[
+                ShotPromptSpec(
+                    shot_id="shot-01",
+                    shot_type="hero_brand",
+                    goal="show hero gift box",
+                    product_lock=["package silhouette", "front label layout"],
+                    subject_prompt="Use the uploaded reference product as the exact hero subject.",
+                    package_appearance_prompt="Keep gift box shape, red package color, and front-centered label unchanged.",
+                    composition_prompt="Subject centered, text-safe zone at top_right.",
+                    background_prompt="Muted ivory background.",
+                    lighting_prompt="Upper-left soft commercial light.",
+                    style_prompt="premium tea gift box visual world",
+                    quality_prompt="high-end commercial photography",
+                    negative_prompt=["do not redesign the label"],
+                    layout_constraints=["must reserve text safe zone at top_right"],
+                    render_constraints=["image_edit mode should preserve product lock strictly"],
+                    copy_intent="突出品牌",
+                ),
+                ShotPromptSpec(
+                    shot_id="shot-02",
+                    shot_type="dry_leaf_detail",
+                    goal="show dry leaf detail",
+                    product_lock=["package silhouette", "front label layout"],
+                    subject_prompt="Use the uploaded reference product with visible tea detail linkage.",
+                    package_appearance_prompt="Keep package body and label unchanged.",
+                    composition_prompt="Subject near left, text-safe zone at top_left.",
+                    background_prompt="Muted warm gray background.",
+                    lighting_prompt="Upper-left soft commercial light.",
+                    style_prompt="premium tea gift box visual world",
+                    quality_prompt="premium macro detail photography",
+                    negative_prompt=["do not redesign the label"],
+                    layout_constraints=["must reserve text safe zone at top_left"],
+                    render_constraints=["image_edit mode should preserve product lock strictly"],
+                    copy_intent="强调卖点",
                 ),
             ]
         ),
         "logs": [],
         "cache_enabled": cache_enabled,
         "ignore_cache": False,
-        "prompt_build_mode": prompt_build_mode,
+        "prompt_build_mode": "per_shot",
     }

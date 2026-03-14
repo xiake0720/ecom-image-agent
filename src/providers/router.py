@@ -1,3 +1,18 @@
+"""Provider 总路由入口。
+
+文件位置：
+- `src/providers/router.py`
+
+核心职责：
+- 根据 `Settings` 解析文本、视觉、图片三类能力应绑定的 provider
+- 集中管理 mock / real 路由
+- 为图片生成额外注入 `RoutedImageProvider`，统一处理 `t2i / image_edit` 分流
+
+主要调用方：
+- `src/workflows/graph.py`
+- `src/ui/pages/home.py` 的运行时调试面板
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -24,6 +39,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class CapabilityBindings:
+    """workflow 运行时会消费的 provider 绑定结果。"""
+
     planning_provider: BaseTextProvider
     vision_analysis_provider: BaseVisionAnalysisProvider | None
     image_generation_provider: BaseImageProvider
@@ -42,6 +59,7 @@ class CapabilityBindings:
 
 
 def build_capability_bindings(settings: Settings) -> CapabilityBindings:
+    """按配置构建三类能力的 provider 绑定结果。"""
     planning_provider, planning_route, planning_status, planning_selection = _build_planning_provider(settings)
     vision_provider, vision_route, vision_status, vision_selection = _build_vision_provider(settings)
     image_provider, image_route, image_status, image_selection = _build_image_provider(settings)
@@ -136,6 +154,7 @@ def _build_dashscope_image_provider(
     route: ResolvedProviderRoute,
     selection: ResolvedModelSelection,
 ) -> tuple[BaseImageProvider, ResolvedProviderRoute, str, ResolvedModelSelection]:
+    """构建 DashScope 图片链路，并按需接通 image_edit 分支。"""
     edit_route = settings.resolve_image_edit_provider_route()
     edit_selection = settings.resolve_image_edit_model_selection()
     edit_provider: BaseImageProvider | None = None

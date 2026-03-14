@@ -1,3 +1,18 @@
+"""参考图选择器。
+
+文件位置：
+- `src/services/assets/reference_selector.py`
+
+核心职责：
+- 用统一规则选择主参考图和细节参考图
+- 同时服务 `analyze_product` 和 `render_images`
+
+设计目标：
+- 避免把细节图误当主图
+- 保证 preview / final 只是数量不同，选择规则本身保持一致
+- 不引入重型 CV 模型，只做稳定的规则排序
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -7,6 +22,13 @@ from src.domain.asset import Asset, AssetType
 
 @dataclass(frozen=True)
 class ReferenceSelection:
+    """参考图选择结果。
+
+    典型使用场景：
+    - analyze_product 记录“分析到底看了哪几张图”
+    - render_images 记录“image_edit 实际用了哪几张参考图”
+    """
+
     main_asset: Asset | None
     detail_asset: Asset | None
     selected_assets: list[Asset]
@@ -17,10 +39,18 @@ class ReferenceSelection:
 
 
 def select_reference_assets(assets: list[Asset], *, max_images: int) -> list[Asset]:
+    """只返回最终选择好的参考图列表。"""
     return select_reference_bundle(assets, max_images=max_images).selected_assets
 
 
 def select_reference_bundle(assets: list[Asset], *, max_images: int) -> ReferenceSelection:
+    """选择主图、细节图和最终参考图列表。
+
+    选择策略：
+    - 主图优先完整 packshot / PRODUCT
+    - 细节图优先 DETAIL
+    - OTHER / 杂图不会压过主图
+    """
     if max_images <= 0 or not assets:
         return ReferenceSelection(
             main_asset=None,
@@ -66,6 +96,7 @@ def select_reference_bundle(assets: list[Asset], *, max_images: int) -> Referenc
 
 
 def _select_main_asset(assets: list[Asset]) -> tuple[Asset | None, str]:
+    """按主图优先级选择最稳定的包装主体图。"""
     packshot_candidates = [asset for asset in assets if _looks_like_main_packshot(asset)]
     if packshot_candidates:
         ranked = sorted(packshot_candidates, key=_main_sort_key)
@@ -90,6 +121,7 @@ def _select_main_asset(assets: list[Asset]) -> tuple[Asset | None, str]:
 
 
 def _select_detail_asset(assets: list[Asset], main_asset_id: str | None) -> tuple[Asset | None, str]:
+    """按细节图优先级选择标签、材质、局部结构图。"""
     detail_type_candidates = [
         asset
         for asset in assets
@@ -112,6 +144,7 @@ def _select_detail_asset(assets: list[Asset], main_asset_id: str | None) -> tupl
 
 
 def _rank_remaining_assets(assets: list[Asset], *, existing_ids: set[str]) -> list[Asset]:
+    """补齐剩余参考图时，仍然优先 PRODUCT / DETAIL，而不是杂图。"""
     candidates = [asset for asset in assets if asset.asset_id not in existing_ids]
     return sorted(candidates, key=_remaining_sort_key)
 
@@ -144,6 +177,7 @@ def _remaining_sort_key(asset: Asset) -> tuple[int, int, int, str]:
 
 
 def _looks_like_main_packshot(asset: Asset) -> bool:
+    """根据文件名、标签和 asset_type 判断是否像完整主图。"""
     text = _asset_text(asset)
     if _looks_like_detail_reference(asset):
         return False
@@ -164,6 +198,7 @@ def _looks_like_main_packshot(asset: Asset) -> bool:
 
 
 def _looks_like_detail_reference(asset: Asset) -> bool:
+    """判断图片是否更像标签、材质、局部结构这类细节参考。"""
     text = _asset_text(asset)
     detail_keywords = (
         "detail",
@@ -185,6 +220,7 @@ def _looks_like_detail_reference(asset: Asset) -> bool:
 
 
 def _looks_subject_complete(asset: Asset) -> bool:
+    """通过启发式关键词过滤明显裁切过深的细节图。"""
     text = _asset_text(asset)
     negative_keywords = ("detail", "closeup", "macro", "crop", "label", "texture", "partial")
     if _contains_any(text, negative_keywords):
@@ -193,6 +229,7 @@ def _looks_subject_complete(asset: Asset) -> bool:
 
 
 def _asset_text(asset: Asset) -> str:
+    """把文件名和标签拼成统一检索文本。"""
     tags_text = " ".join(asset.tags or [])
     return f"{asset.filename} {tags_text}".strip().lower()
 

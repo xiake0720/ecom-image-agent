@@ -1,12 +1,24 @@
-"""Streamlit 程序入口。
+"""Streamlit 应用入口。
 
-当前项目只有一个 UI 入口文件：`streamlit_app.py`。
-开发者通过：
+文件位置：
+- 仓库根目录 `streamlit_app.py`
 
-`python -m streamlit run streamlit_app.py`
+核心职责：
+- 作为整个项目唯一的 UI 启动入口
+- 初始化配置与日志
+- 将页面控制权交给 `src.ui.pages.home.render_home_page()`
 
-启动应用后，Streamlit 会执行这里的 `main()`，再进入
-`src.ui.pages.home.render_home_page()`，由页面层收集用户输入并触发 workflow。
+主要调用方：
+- `python -m streamlit run streamlit_app.py`
+
+主要依赖：
+- `src.core.config` 读取运行配置
+- `src.core.logging` 初始化日志
+- `src.ui.pages.home` 渲染首页并触发 workflow
+
+关键输入/输出：
+- 输入是 Streamlit 当前会话状态
+- 输出是页面渲染副作用，不直接返回业务对象
 """
 
 from __future__ import annotations
@@ -26,7 +38,14 @@ logger = logging.getLogger(__name__)
 def main() -> None:
     """启动首页渲染。
 
-    这里本身不承载业务逻辑，只作为 Streamlit 到 UI 页面层的最外层入口。
+    调用链位置：
+    - 由 Streamlit 直接执行
+    - 入口极薄，不承载业务逻辑
+
+    关键副作用：
+    - 根据页面标记决定是否重载 runtime
+    - 初始化日志
+    - 渲染首页
     """
     if st.session_state.pop("_ecom_reload_runtime", False):
         reload_runtime()
@@ -39,4 +58,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

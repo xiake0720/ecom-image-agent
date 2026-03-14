@@ -1,0 +1,63 @@
+{
+  "specs": [
+    {
+      "shot_id": "shot_01",
+      "shot_type": "hero_brand",
+      "goal": "Make the package the only saturated hero subject in the frame.",
+      "product_lock": {
+        "must_preserve": [
+          "package silhouette",
+          "front label layout",
+          "brand mark placement"
+        ],
+        "must_preserve_texts": [
+          "brand name",
+          "product name"
+        ],
+        "editable_regions": [
+          "background",
+          "props",
+          "lighting",
+          "crop"
+        ],
+        "must_not_change": [
+          "gift_box",
+          "red",
+          "front-centered hero label with secondary side panels"
+        ]
+      },
+      "subject_prompt": "Use the uploaded product as the exact hero subject. Keep the full package clearly recognizable as the primary visual center.",
+      "package_appearance_prompt": "Keep package type gift_box, primary color red, material paper gift box with metallic accents, label structure front-centered hero label with secondary side panels unchanged. Do not redesign package proportions, surface graphics, or brand texts.",
+      "composition_prompt": "Keep the product stable, front-facing or 3/4, and reserve a clean upper-right safe zone for copy. Preferred text-safe zone: top_right.",
+      "background_prompt": "desaturated neutral backgrounds only; keep texture subtle and commercial. Background must stay low saturation so the product remains the only saturated visual center.",
+      "lighting_prompt": "main light direction fixed at upper-left; soft directional commercial light with clean edge definition. Keep the lens language consistent: 50mm full-frame commercial lens feel; consistent moderate depth of field. Shot type: hero_brand.",
+      "style_prompt": "premium tea gift box visual world with restrained contemporary still-life styling | 50mm full-frame commercial lens feel | consistent moderate depth of field | tea tray | linen | neutral ceramic ware | muted wood accents. keep the full set visually unified.",
+      "quality_prompt": "high-end commercial e-commerce photography, premium material fidelity, stable composition, clean product edges",
+      "negative_prompt": [
+        "do not redesign the package structure",
+        "do not redesign the label",
+        "do not use oversaturated backgrounds",
+        "do not change package proportions"
+      ],
+      "layout_constraints": {
+        "preferred_text_safe_zone": "top_right",
+        "avoid_overlap_with_subject": true,
+        "max_text_layers": 2,
+        "subject_placement_hint": "stable hero package with clean upper-area copy zone"
+      },
+      "render_constraints": {
+        "generation_mode": "image_edit",
+        "reference_image_priority": "main_packshot",
+        "consistency_strength": "high",
+        "allow_human_presence": false,
+        "allow_hand_only": false
+      },
+      "copy_intent": {
+        "title_role": "品牌气质",
+        "subtitle_role": "礼赠价值",
+        "bullet_role": "optional",
+        "cta_role": "none"
+      }
+    }
+  ]
+}
