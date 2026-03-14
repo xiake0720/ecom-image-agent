@@ -1,3 +1,14 @@
+"""Pillow 中文后贴字渲染器。
+
+文件位置：
+- `src/services/rendering/text_renderer.py`
+
+核心职责：
+- 定义 typography token
+- 根据背景自适应选择深浅字、阴影、描边和底板
+- 按布局把标题、副标题、卖点、CTA 渲染到最终图片
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -71,6 +82,14 @@ class PlacedTextBlock:
     requested_font_size: int
     used_font_size: int
     line_count: int
+    x: int
+    y: int
+    width: int
+    height: int
+    block_width: int
+    block_height: int
+    density_ratio: float
+    overflow_detected: bool
     typography_preset: str
     text_color: tuple[int, int, int, int]
     background_plate_applied: bool
@@ -101,6 +120,7 @@ PRESET_TOKENS: dict[str, dict[str, TypographyToken]] = {
 
 
 class TextRenderer:
+    """中文后贴字主渲染器。"""
     def __init__(self, font_path: Path | None = None, *, preset_name: str | None = None) -> None:
         settings = get_settings()
         self.font_path = font_path or settings.default_font_path
@@ -115,6 +135,7 @@ class TextRenderer:
         layout_item: LayoutItem,
         output_path: str,
     ) -> TextRenderReport:
+        """在单张图片上渲染结构化中文文案并落盘成品图。"""
         logger.info(
             "开始执行中文后贴字，shot_id=%s，输入=%s，输出=%s，布局块数量=%s，preset=%s",
             copy_item.shot_id,
@@ -135,13 +156,21 @@ class TextRenderer:
                 lines, font_size = self._fit_text(draw, text, block, token, layout_item)
                 font = load_font(self.font_path, font_size)
                 style = self._resolve_text_style(analysis_image, block, token, layout_item)
-                self._draw_lines(draw, lines, block, font, token, style, layout_item)
+                placement = self._draw_lines(draw, lines, block, font, token, style, layout_item)
                 reports.append(
                     PlacedTextBlock(
                         kind=block.kind,
                         requested_font_size=self._requested_font_size(block, token, layout_item),
                         used_font_size=font_size,
                         line_count=len(lines),
+                        x=placement["x"],
+                        y=placement["y"],
+                        width=placement["width"],
+                        height=placement["height"],
+                        block_width=block.width,
+                        block_height=block.height,
+                        density_ratio=placement["density_ratio"],
+                        overflow_detected=placement["overflow_detected"],
                         typography_preset=self.preset_name,
                         text_color=style.text_color,
                         background_plate_applied=style.plate.enabled,
@@ -247,10 +276,17 @@ class TextRenderer:
         token: TypographyToken,
         style: ResolvedTextStyle,
         layout_item: LayoutItem,
-    ) -> None:
+    ) -> dict[str, int | float | bool]:
         lines = list(lines)
         if not lines:
-            return
+            return {
+                "x": block.x,
+                "y": block.y,
+                "width": 0,
+                "height": 0,
+                "density_ratio": 0.0,
+                "overflow_detected": False,
+            }
         line_height = max(self._line_height(draw, font), int(font.size * token.line_height)) if hasattr(font, "size") else self._line_height(draw, font)
         spacing = max(4, int((font.size if hasattr(font, "size") else 24) * 0.08))
         line_widths = [self._measure_text_width(draw, line, font, token.letter_spacing) for line in lines]
@@ -301,6 +337,15 @@ class TextRenderer:
                 stroke_fill=style.stroke.fill if style.stroke.enabled else None,
             )
             y += line_height + spacing
+        density_ratio = max(text_width / max(block.width, 1), total_height / max(block.height, 1))
+        return {
+            "x": int(plate_x0),
+            "y": int(plate_y0),
+            "width": int(text_width),
+            "height": int(total_height),
+            "density_ratio": float(density_ratio),
+            "overflow_detected": bool(text_width > block.width or total_height > block.height),
+        }
 
     def _draw_text(
         self,

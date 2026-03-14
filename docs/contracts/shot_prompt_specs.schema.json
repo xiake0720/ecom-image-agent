@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ShotPromptSpecPlan",
+  "type": "object",
+  "required": ["specs"],
+  "properties": {
+    "specs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "shot_id",
+          "shot_type",
+          "goal",
+          "product_lock",
+          "subject_prompt",
+          "package_appearance_prompt",
+          "composition_prompt",
+          "background_prompt",
+          "lighting_prompt",
+          "style_prompt",
+          "quality_prompt",
+          "negative_prompt",
+          "layout_constraints",
+          "render_constraints",
+          "copy_intent"
+        ],
+        "properties": {
+          "shot_id": { "type": "string" },
+          "shot_type": { "type": "string" },
+          "goal": { "type": "string" },
+          "product_lock": {
+            "type": "object",
+            "required": ["must_preserve", "must_preserve_texts", "editable_regions", "must_not_change"],
+            "properties": {
+              "must_preserve": { "type": "array", "items": { "type": "string" } },
+              "must_preserve_texts": { "type": "array", "items": { "type": "string" } },
+              "editable_regions": { "type": "array", "items": { "type": "string" } },
+              "must_not_change": { "type": "array", "items": { "type": "string" } }
+            },
+            "additionalProperties": false
+          },
+          "subject_prompt": { "type": "string" },
+          "package_appearance_prompt": { "type": "string" },
+          "composition_prompt": { "type": "string" },
+          "background_prompt": { "type": "string" },
+          "lighting_prompt": { "type": "string" },
+          "style_prompt": { "type": "string" },
+          "quality_prompt": { "type": "string" },
+          "negative_prompt": { "type": "array", "items": { "type": "string" } },
+          "layout_constraints": {
+            "type": "object",
+            "required": ["preferred_text_safe_zone", "avoid_overlap_with_subject", "max_text_layers", "subject_placement_hint"],
+            "properties": {
+              "preferred_text_safe_zone": { "type": "string" },
+              "avoid_overlap_with_subject": { "type": "boolean" },
+              "max_text_layers": { "type": "integer" },
+              "subject_placement_hint": { "type": "string" }
+            },
+            "additionalProperties": false
+          },
+          "render_constraints": {
+            "type": "object",
+            "required": [
+              "generation_mode",
+              "reference_image_priority",
+              "consistency_strength",
+              "allow_human_presence",
+              "allow_hand_only"
+            ],
+            "properties": {
+              "generation_mode": { "type": "string" },
+              "reference_image_priority": { "type": "string" },
+              "consistency_strength": { "type": "string" },
+              "allow_human_presence": { "type": "boolean" },
+              "allow_hand_only": { "type": "boolean" }
+            },
+            "additionalProperties": false
+          },
+          "copy_intent": {
+            "type": "object",
+            "required": ["title_role", "subtitle_role", "bullet_role", "cta_role"],
+            "properties": {
+              "title_role": { "type": "string" },
+              "subtitle_role": { "type": "string" },
+              "bullet_role": { "type": "string" },
+              "cta_role": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

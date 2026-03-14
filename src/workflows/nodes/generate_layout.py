@@ -1,4 +1,17 @@
-"""布局生成节点。"""
+"""布局生成节点。
+
+文件位置：
+- `src/workflows/nodes/generate_layout.py`
+
+核心职责：
+- 根据 shot plan 和输出尺寸生成 `layout_plan.json`
+- 为每张图选择更稳定的文字安全区 `text_safe_zone`
+- 输出安全区打分明细，便于调试“为什么选这个区域”
+
+节点前后关系：
+- 上游节点：`generate_copy`
+- 下游节点：`shot_prompt_refiner`
+"""
 
 from __future__ import annotations
 
@@ -20,7 +33,7 @@ logger = logging.getLogger(__name__)
 def generate_layout(state: WorkflowState, deps: WorkflowDependencies) -> dict:
     """根据 shot plan 和输出尺寸生成布局计划。"""
     task = state["task"]
-    logs = [*state.get("logs", []), f"[generate_layout] 开始生成布局，输出尺寸={task.output_size}。"]
+    logs = [*state.get("logs", []), f"[generate_layout] start output_size={task.output_size}"]
     cache_key, cache_context = build_node_cache_key(
         node_name="generate_layout",
         state=state,
@@ -38,19 +51,19 @@ def generate_layout(state: WorkflowState, deps: WorkflowDependencies) -> dict:
         cached_plan = deps.storage.load_cached_json_artifact("generate_layout", cache_key, LayoutPlan)
         if cached_plan is not None:
             deps.storage.save_json_artifact(task.task_id, "layout_plan.json", cached_plan)
-            logger.info("generate_layout cache hit，key=%s", cache_key)
+            logger.info("generate_layout cache hit, key=%s", cache_key)
             logs.extend(
                 [
-                    f"[generate_layout] cache hit，命中节点缓存，key={cache_key}。",
-                    "[generate_layout] 已从缓存恢复结果并写入 layout_plan.json。",
+                    f"[generate_layout] cache hit key={cache_key}",
+                    "[generate_layout] restored cached layout_plan.json",
                 ]
             )
             return {"layout_plan": cached_plan, "logs": logs}
-        logger.info("generate_layout cache miss，key=%s", cache_key)
-        logs.append(f"[generate_layout] cache miss，未命中节点缓存，key={cache_key}。")
+        logger.info("generate_layout cache miss, key=%s", cache_key)
+        logs.append(f"[generate_layout] cache miss key={cache_key}")
     elif is_force_rerun(state):
-        logger.info("generate_layout ignore cache，forced rerun")
-        logs.append("[generate_layout] ignore cache，已忽略缓存并强制重跑。")
+        logger.info("generate_layout ignore cache, forced rerun")
+        logs.append("[generate_layout] ignore cache requested")
 
     layout_plan = build_mock_layout_plan(
         state["shot_plan"],
@@ -65,7 +78,7 @@ def generate_layout(state: WorkflowState, deps: WorkflowDependencies) -> dict:
             layout_plan,
             metadata=cache_context,
         )
-    logger.info("布局生成完成，布局条目数=%s，输出尺寸=%s", len(layout_plan.items), task.output_size)
+    logger.info("布局生成完成，items=%s，output_size=%s", len(layout_plan.items), task.output_size)
     for item in layout_plan.items:
         score_summary = ", ".join(
             (
@@ -91,8 +104,8 @@ def generate_layout(state: WorkflowState, deps: WorkflowDependencies) -> dict:
         )
     logs.extend(
         [
-            f"[generate_layout] 布局生成完成，items={len(layout_plan.items)}。",
-            "[generate_layout] 已写入 layout_plan.json。",
+            f"[generate_layout] completed items={len(layout_plan.items)}",
+            "[generate_layout] saved layout_plan.json",
         ]
     )
     return {"layout_plan": layout_plan, "logs": logs}

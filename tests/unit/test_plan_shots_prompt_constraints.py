@@ -1,6 +1,16 @@
+"""茶叶模板分流相关测试。
+
+覆盖目标：
+- 礼盒模板仍保留 carry_action / open_box_structure
+- 圆柱金属罐改走 tea_tin_can_template
+- 非茶叶类不受影响
+- 下游 copy 节点仍可继续消费新的 `shot_plan`
+"""
+
 from __future__ import annotations
 
 from src.core.config import ResolvedModelSelection
+from src.domain.copy_plan import CopyPlan
 from src.domain.product_analysis import (
     MaterialGuess,
     PackagingStructure,
@@ -10,7 +20,13 @@ from src.domain.product_analysis import (
 )
 from src.domain.shot_plan import ShotPlan
 from src.domain.task import Task
-from src.services.planning.tea_shot_planner import build_tea_shot_plan
+from src.services.planning.copy_generator import build_mock_copy_plan
+from src.services.planning.tea_shot_planner import (
+    TEA_GIFT_BOX_PHASE1_SHOTS,
+    TEA_TIN_CAN_PHASE1_SHOTS,
+    build_tea_shot_plan,
+    resolve_tea_package_template_family,
+)
 from src.services.storage.local_storage import LocalStorageService
 from src.workflows.nodes.plan_shots import plan_shots
 from src.workflows.state import WorkflowDependencies
@@ -21,45 +37,50 @@ class FakeShotPlanningProvider:
         self.calls: list[str] = []
 
     def generate_structured(self, prompt: str, response_model, *, system_prompt: str | None = None):
+        del system_prompt
         self.calls.append(prompt)
         return response_model.model_validate(
             {
                 "shots": [
                     {
-                        "shot_id": "shot-01",
-                        "title": "主图",
-                        "purpose": "建立整组统一主视觉与商品识别",
-                        "composition_hint": "主体居中偏下，右侧或上方留白",
-                        "copy_goal": "突出品牌、茶类与包装主体",
-                        "shot_type": "hero",
-                        "goal": "建立茶叶整组统一商业主视觉",
-                        "focus": "包装主体与标签区",
-                        "scene_direction": "高级棚拍主图，灰绿背景，克制道具",
-                        "composition_direction": "主体居中偏下，右侧干净留白",
+                        "shot_id": "shot_01",
+                        "goal": "Make the package the only saturated hero subject in the frame.",
+                        "focus": "full package hero view",
+                        "scene_direction": "premium still life hero scene",
+                        "composition_direction": "subject centered with top-right safe zone",
+                        "text_safe_zone_preference": "top_right",
                     },
                     {
-                        "shot_id": "shot-02",
-                        "title": "干茶细节",
-                        "purpose": "补充茶叶条索、干茶形态与包装呼应",
-                        "composition_hint": "近景细节，局部特写，顶部留白",
-                        "copy_goal": "强调干茶形态与原料质感",
-                        "shot_type": "dry_leaf_detail",
-                        "goal": "补充干茶条索与原料质感信息",
-                        "focus": "干茶条索与材质",
-                        "scene_direction": "同色系静物细节场景，不加入跑题道具",
-                        "composition_direction": "主体近景偏左，上方留白",
+                        "shot_id": "shot_02",
+                        "goal": "Show restrained human interaction while keeping the package recognizable.",
+                        "focus": "package carried by hand",
+                        "scene_direction": "muted lifestyle scene",
+                        "composition_direction": "leave safe zone opposite the action direction",
+                        "text_safe_zone_preference": "top_left",
                     },
                     {
-                        "shot_id": "shot-03",
-                        "title": "茶汤图",
-                        "purpose": "展示冲泡后的汤色、清透度与饮用氛围",
-                        "composition_hint": "杯盏稳定，侧方留白",
-                        "copy_goal": "强调汤色、香气联想与饮用体验",
-                        "shot_type": "tea_soup",
-                        "goal": "完成茶叶核心图型中的茶汤表现",
-                        "focus": "茶汤色泽与器具搭配",
-                        "scene_direction": "统一灰绿暖金基调的冲泡场景",
-                        "composition_direction": "主体偏中间，右上留白",
+                        "shot_id": "shot_03",
+                        "goal": "Reveal the opening structure clearly.",
+                        "focus": "box opening and internal structure",
+                        "scene_direction": "clean premium tabletop",
+                        "composition_direction": "top or 3/4 angle with safe zone above",
+                        "text_safe_zone_preference": "top_right",
+                    },
+                    {
+                        "shot_id": "shot_04",
+                        "goal": "Connect the tea leaf detail with the same package world.",
+                        "focus": "dry leaf texture and package relationship",
+                        "scene_direction": "macro detail scene",
+                        "composition_direction": "clear background safe zone",
+                        "text_safe_zone_preference": "top_right",
+                    },
+                    {
+                        "shot_id": "shot_05",
+                        "goal": "Show tea soup color and drinking mood.",
+                        "focus": "tea soup vessel and package cue",
+                        "scene_direction": "premium brewed tea setting",
+                        "composition_direction": "upper safe zone",
+                        "text_safe_zone_preference": "top",
                     },
                 ]
             }
@@ -74,81 +95,112 @@ class DummyOCRService:
     pass
 
 
-def _build_tea_analysis(*, has_outer_box: str = "no", container_count: str = "1") -> ProductAnalysis:
+def _build_gift_box_analysis() -> ProductAnalysis:
     return ProductAnalysis(
         category="tea",
-        subcategory="乌龙茶",
-        product_type="tea can",
+        subcategory="oolong",
+        product_type="tea gift box",
         product_form="packaged_tea",
         packaging_structure=PackagingStructure(
-            primary_container="tea_can",
-            has_outer_box=has_outer_box,
+            primary_container="gift_box",
+            has_outer_box="yes",
             has_visible_lid="yes",
-            container_count=container_count,
+            container_count="1",
         ),
         visual_identity=VisualIdentity(
-            dominant_colors=["green", "gold"],
+            dominant_colors=["red", "gold"],
             label_position="front_center",
             label_ratio="medium",
-            style_impression=["东方雅致"],
-            must_preserve=["包装主体轮廓", "标签位置"],
+            style_impression=["premium"],
+            must_preserve=["package silhouette", "label position"],
         ),
-        material_guess=MaterialGuess(container_material="metal", label_material="paper"),
+        material_guess=MaterialGuess(container_material="paper gift box", label_material="paper"),
         visual_constraints=VisualConstraints(
-            recommended_style_direction=["高端静物棚拍", "克制东方气质"],
-            avoid=["凉席元素", "喧宾夺主花器"],
+            recommended_style_direction=["premium still life", "restrained gift scene"],
+            avoid=["festival clutter", "prop overload"],
         ),
-        visual_style_keywords=["高级", "安定", "东方质感"],
-        recommended_focuses=["包装主体", "干茶条索", "茶汤状态", "叶底状态"],
+        recommended_focuses=["package", "open structure", "dry leaf", "tea soup"],
+        locked_elements=["package silhouette", "front label layout"],
+        editable_elements=["background", "props", "lighting"],
+        package_type="gift_box",
+        package_template_family="tea_gift_box",
+        primary_color="red",
+        material="paper gift box",
+        label_structure="front-centered hero label",
     )
 
 
-def test_build_tea_shot_plan_uses_ordered_slots_for_five_six_and_seven_images() -> None:
-    tea_analysis = _build_tea_analysis()
-    task5 = Task(task_id="task-5", brand_name="A", product_name="B", platform="tmall", output_size="1440x1440", shot_count=5, copy_tone="专业", task_dir="outputs/tasks/task-5")
-    task6 = Task(task_id="task-6", brand_name="A", product_name="B", platform="tmall", output_size="1440x1440", shot_count=6, copy_tone="专业", task_dir="outputs/tasks/task-6")
-    task7 = Task(task_id="task-7", brand_name="A", product_name="B", platform="tmall", output_size="1440x1440", shot_count=7, copy_tone="专业", task_dir="outputs/tasks/task-7")
-
-    plan5 = build_tea_shot_plan(task5, tea_analysis)
-    plan6 = build_tea_shot_plan(task6, tea_analysis)
-    plan7 = build_tea_shot_plan(task7, tea_analysis)
-
-    assert [shot.shot_type for shot in plan5.shots] == [
-        "hero",
-        "dry_leaf_detail",
-        "tea_soup",
-        "brewed_leaf_detail",
-        "packaging_display",
-    ]
-    assert [shot.shot_type for shot in plan6.shots] == [
-        "hero",
-        "dry_leaf_detail",
-        "tea_soup",
-        "brewed_leaf_detail",
-        "packaging_display",
-        "tea_table_scene",
-    ]
-    assert [shot.shot_type for shot in plan7.shots] == [
-        "hero",
-        "dry_leaf_detail",
-        "tea_soup",
-        "brewed_leaf_detail",
-        "packaging_display",
-        "tea_table_scene",
-        "multi_can_display",
-    ]
+def _build_tin_can_analysis() -> ProductAnalysis:
+    return ProductAnalysis(
+        category="tea",
+        subcategory="single origin oolong",
+        product_type="cylindrical metal tin",
+        product_form="packaged_tea",
+        packaging_structure=PackagingStructure(
+            primary_container="tin_can",
+            has_outer_box="no",
+            has_visible_lid="yes",
+            container_count="1",
+        ),
+        visual_identity=VisualIdentity(
+            dominant_colors=["red", "gold"],
+            label_position="front_center",
+            label_ratio="medium",
+            style_impression=["premium"],
+            must_preserve=["cylindrical silhouette", "front label position"],
+        ),
+        material_guess=MaterialGuess(container_material="metal tin", label_material="paper"),
+        visual_constraints=VisualConstraints(
+            recommended_style_direction=["premium still life", "restrained product scene"],
+            avoid=["festival clutter", "gift box props"],
+        ),
+        recommended_focuses=["tin hero", "package detail", "dry leaf", "tea soup"],
+        locked_elements=["cylindrical can silhouette", "front label layout"],
+        editable_elements=["background", "props", "lighting"],
+        package_type="cylindrical metal tin",
+        primary_color="red",
+        material="cylindrical metal tin",
+        label_structure="front-centered tin label",
+    )
 
 
-def test_plan_shots_real_mode_uses_tea_slots_then_only_enriches_detail_fields() -> None:
-    provider = FakeShotPlanningProvider()
-    deps = WorkflowDependencies(
+def _build_other_analysis() -> ProductAnalysis:
+    return ProductAnalysis(
+        category="beauty",
+        subcategory="serum",
+        product_type="facial serum",
+        product_form="bottle",
+        packaging_structure=PackagingStructure(
+            primary_container="bottle",
+            has_outer_box="no",
+            has_visible_lid="yes",
+            container_count="1",
+        ),
+        visual_identity=VisualIdentity(
+            dominant_colors=["white", "silver"],
+            label_position="front_center",
+            label_ratio="small",
+            style_impression=["clean"],
+            must_preserve=["bottle silhouette"],
+        ),
+        material_guess=MaterialGuess(container_material="glass", label_material="paper"),
+        visual_constraints=VisualConstraints(
+            recommended_style_direction=["clean beauty still life"],
+            avoid=["chaotic props"],
+        ),
+        recommended_focuses=["bottle", "dropper"],
+    )
+
+
+def _build_deps(provider: FakeShotPlanningProvider | None = None, *, text_mode: str = "mock") -> WorkflowDependencies:
+    return WorkflowDependencies(
         storage=LocalStorageService(),
-        planning_provider=provider,
+        planning_provider=provider or FakeShotPlanningProvider(),
         vision_analysis_provider=None,
         image_generation_provider=object(),
         text_renderer=DummyRenderer(),
         ocr_service=DummyOCRService(),
-        text_provider_mode="real",
+        text_provider_mode=text_mode,
         vision_provider_mode="mock",
         image_provider_mode="mock",
         planning_provider_name="FakeShotPlanningProvider",
@@ -169,19 +221,78 @@ def test_plan_shots_real_mode_uses_tea_slots_then_only_enriches_detail_fields() 
             source="test",
         ),
     )
+
+
+def test_build_tea_gift_box_shot_plan_keeps_gift_box_template() -> None:
+    analysis = _build_gift_box_analysis()
     task = Task(
-        task_id="task-plan-001",
-        brand_name="品牌A",
-        product_name="高山乌龙",
+        task_id="task-5",
+        brand_name="A",
+        product_name="B",
+        platform="tmall",
+        output_size="1440x1440",
+        shot_count=2,
+        copy_tone="专业",
+        task_dir="outputs/tasks/task-5",
+    )
+
+    plan = build_tea_shot_plan(task, analysis)
+
+    assert resolve_tea_package_template_family(analysis) == "tea_gift_box"
+    assert [(shot.shot_id, shot.shot_type) for shot in plan.shots] == list(TEA_GIFT_BOX_PHASE1_SHOTS)
+    assert [shot.preferred_text_safe_zone for shot in plan.shots] == [
+        "top_right",
+        "top_left",
+        "top_right",
+        "top_right",
+        "top",
+    ]
+
+
+def test_build_tea_tin_can_shot_plan_uses_tin_template() -> None:
+    analysis = _build_tin_can_analysis()
+    task = Task(
+        task_id="task-tin-5",
+        brand_name="A",
+        product_name="cylindrical metal tin oolong",
         platform="tmall",
         output_size="1440x1440",
         shot_count=5,
+        copy_tone="专业",
+        task_dir="outputs/tasks/task-tin-5",
+    )
+
+    plan = build_tea_shot_plan(task, analysis)
+
+    assert resolve_tea_package_template_family(analysis) == "tea_tin_can"
+    assert [(shot.shot_id, shot.shot_type) for shot in plan.shots] == list(TEA_TIN_CAN_PHASE1_SHOTS)
+    assert [shot.shot_type for shot in plan.shots] == [
+        "hero_brand",
+        "package_detail",
+        "dry_leaf_detail",
+        "tea_soup_experience",
+        "lifestyle_or_brewing_context",
+    ]
+    assert "carry_action" not in [shot.shot_type for shot in plan.shots]
+    assert "open_box_structure" not in [shot.shot_type for shot in plan.shots]
+
+
+def test_plan_shots_real_mode_uses_fixed_gift_box_context_and_keeps_five_shots() -> None:
+    provider = FakeShotPlanningProvider()
+    deps = _build_deps(provider, text_mode="real")
+    task = Task(
+        task_id="task-plan-001",
+        brand_name="品牌A",
+        product_name="高山乌龙礼盒",
+        platform="tmall",
+        output_size="1440x1440",
+        shot_count=9,
         copy_tone="专业自然",
         task_dir="outputs/tasks/task-plan-001",
     )
     state = {
         "task": task,
-        "product_analysis": _build_tea_analysis(),
+        "product_analysis": _build_gift_box_analysis(),
         "logs": [],
         "cache_enabled": False,
         "ignore_cache": False,
@@ -192,15 +303,88 @@ def test_plan_shots_real_mode_uses_tea_slots_then_only_enriches_detail_fields() 
     assert isinstance(result["shot_plan"], ShotPlan)
     assert len(provider.calls) == 1
     prompt = provider.calls[0]
-    assert '"planner_mode": "templated_slots_then_minimal_enrichment"' in prompt
+    assert '"planner_mode": "fixed_phase1_five_shots"' in prompt
+    assert '"package_template_family": "tea_gift_box"' in prompt
     assert '"fixed_shot_slots"' in prompt
     assert '"editable_fields"' in prompt
-    assert "不得新增、删除或替换 shot slots" in prompt
-    assert [shot.shot_type for shot in result["shot_plan"].shots] == [
-        "hero",
-        "dry_leaf_detail",
-        "tea_soup",
-        "brewed_leaf_detail",
-        "packaging_display",
-    ]
-    assert any("tea 类目优先走模板化槽位规划" in log for log in result["logs"])
+    assert "text_safe_zone_preference" in prompt
+    assert "must keep all five fixed shot slots" in prompt
+    assert [(shot.shot_id, shot.shot_type) for shot in result["shot_plan"].shots] == list(TEA_GIFT_BOX_PHASE1_SHOTS)
+    assert any("tea_fixed_phase1_template=true" in log for log in result["logs"])
+    assert any("package_template_family=tea_gift_box" in log for log in result["logs"])
+    assert any("fixed_template_name=tea_gift_box" in log for log in result["logs"])
+
+
+def test_plan_shots_mock_mode_routes_tin_can_to_tin_template() -> None:
+    deps = _build_deps(text_mode="mock")
+    task = Task(
+        task_id="task-plan-tin-001",
+        brand_name="品牌A",
+        product_name="单罐乌龙",
+        platform="tmall",
+        output_size="1440x1440",
+        shot_count=5,
+        copy_tone="专业自然",
+        task_dir="outputs/tasks/task-plan-tin-001",
+    )
+    state = {
+        "task": task,
+        "product_analysis": _build_tin_can_analysis(),
+        "logs": [],
+        "cache_enabled": False,
+        "ignore_cache": False,
+    }
+
+    result = plan_shots(state, deps)
+
+    assert [(shot.shot_id, shot.shot_type) for shot in result["shot_plan"].shots] == list(TEA_TIN_CAN_PHASE1_SHOTS)
+    assert any("package_template_family=tea_tin_can" in log for log in result["logs"])
+    assert any("fixed_template_name=tea_tin_can" in log for log in result["logs"])
+
+
+def test_non_tea_category_keeps_existing_non_template_behavior() -> None:
+    deps = _build_deps(text_mode="mock")
+    task = Task(
+        task_id="task-non-tea-001",
+        brand_name="品牌B",
+        product_name="修护精华",
+        category="beauty",
+        platform="tmall",
+        output_size="1440x1440",
+        shot_count=3,
+        copy_tone="理性克制",
+        task_dir="outputs/tasks/task-non-tea-001",
+    )
+    state = {
+        "task": task,
+        "product_analysis": _build_other_analysis(),
+        "logs": [],
+        "cache_enabled": False,
+        "ignore_cache": False,
+    }
+
+    result = plan_shots(state, deps)
+
+    assert len(result["shot_plan"].shots) == 3
+    assert [(shot.shot_id, shot.shot_type) for shot in result["shot_plan"].shots] != list(TEA_GIFT_BOX_PHASE1_SHOTS)
+    assert not any("tea_fixed_phase1_template=true" in log for log in result["logs"])
+
+
+def test_downstream_copy_generation_can_still_consume_fixed_tin_can_shot_plan() -> None:
+    task = Task(
+        task_id="task-copy-001",
+        brand_name="品牌C",
+        product_name="老树红茶单罐",
+        platform="tmall",
+        output_size="1440x1440",
+        shot_count=1,
+        copy_tone="稳重",
+        task_dir="outputs/tasks/task-copy-001",
+    )
+    shot_plan = build_tea_shot_plan(task, _build_tin_can_analysis())
+
+    copy_plan = build_mock_copy_plan(task, shot_plan)
+
+    assert isinstance(copy_plan, CopyPlan)
+    assert len(copy_plan.items) == 5
+    assert copy_plan.items[0].shot_id == "shot_01"

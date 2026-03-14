@@ -1,0 +1,236 @@
+{
+  "product_analysis": {
+    "package_type": "gift_box",
+    "primary_color": "red",
+    "material": "paper gift box with metallic accents",
+    "label_structure": "front-centered hero label with secondary side panels",
+    "locked_elements": [
+      "package silhouette",
+      "front label layout",
+      "brand mark placement"
+    ],
+    "must_preserve_texts": [
+      "brand name",
+      "product name"
+    ],
+    "editable_elements": [
+      "background",
+      "props",
+      "lighting",
+      "crop"
+    ]
+  },
+  "style_architecture": {
+    "platform": "tmall",
+    "user_preferences": [
+      "premium",
+      "gift",
+      "light_background",
+      "red"
+    ],
+    "style_theme": "premium tea gift box visual world with restrained contemporary still-life styling",
+    "color_strategy": [
+      "keep red as the only saturated visual center",
+      "background palette stays in ivory, linen, warm gray, pale wood, and stone"
+    ],
+    "lighting_strategy": [
+      "main light direction fixed at upper-left",
+      "soft directional commercial light with clean edge definition"
+    ],
+    "lens_strategy": [
+      "50mm full-frame commercial lens feel",
+      "consistent moderate depth of field"
+    ],
+    "prop_system": [
+      "tea tray",
+      "linen",
+      "neutral ceramic ware",
+      "muted wood accents"
+    ],
+    "background_strategy": [
+      "desaturated neutral backgrounds only",
+      "keep texture subtle and commercial"
+    ],
+    "text_strategy": [
+      "every shot must reserve an explicit clean text safe zone"
+    ],
+    "global_negative_rules": [
+      "do not redesign the package structure",
+      "do not redesign the label",
+      "do not use oversaturated backgrounds"
+    ]
+  },
+  "shot_plan": {
+    "shots": [
+      {
+        "shot_id": "shot_01",
+        "shot_type": "hero_brand",
+        "title": "Brand Hero",
+        "purpose": "Establish the premium gift box as the brand-defining hero image.",
+        "composition_hint": "Product centered or slightly lower, leave a clean upper text zone.",
+        "copy_goal": "Show brand recognition and premium tea gift box value.",
+        "goal": "Make the package the only saturated hero subject in the frame.",
+        "focus": "full package hero view",
+        "scene_direction": "restrained premium tabletop scene with desaturated background tones around the red package",
+        "composition_direction": "Keep the product stable, front-facing or 3/4, and reserve a clean upper-right safe zone for copy.",
+        "preferred_text_safe_zone": "top_right",
+        "required_subjects": [
+          "gift_box package hero",
+          "front-centered hero label with secondary side panels"
+        ],
+        "optional_props": [
+          "muted linen",
+          "neutral tea tray"
+        ]
+      },
+      {
+        "shot_id": "shot_02",
+        "shot_type": "carry_action",
+        "title": "Carry Action",
+        "purpose": "Show a natural hand-carry or gift handoff moment without losing product lock.",
+        "composition_hint": "Action direction determines the opposite-side text safe zone.",
+        "copy_goal": "Convey real-life portability, gifting, and premium usability.",
+        "goal": "Show restrained human interaction while keeping the package clearly recognizable.",
+        "focus": "package carried by hand",
+        "scene_direction": "clean lifestyle moment with muted background and restrained wardrobe colors",
+        "composition_direction": "Let the action move in one direction and leave clean negative space on the opposite side for text.",
+        "preferred_text_safe_zone": "top_left",
+        "required_subjects": [
+          "gift_box package",
+          "hand carry or gifting gesture"
+        ],
+        "optional_props": [
+          "neutral gift bag",
+          "soft fabric sleeve"
+        ]
+      },
+      {
+        "shot_id": "shot_03",
+        "shot_type": "open_box_structure",
+        "title": "Open Box Structure",
+        "purpose": "Explain the package opening logic and internal structure.",
+        "composition_hint": "Open box angle with safe zone at top or top_right.",
+        "copy_goal": "Highlight gift-box structure, opening experience, and material value.",
+        "goal": "Reveal the opening structure clearly without redesigning any internal layout.",
+        "focus": "box opening and internal structure",
+        "scene_direction": "controlled premium tabletop with minimal props and clean structural read",
+        "composition_direction": "Use a stable top or 3/4 angle and keep a clean safe zone above or top_right.",
+        "preferred_text_safe_zone": "top_right",
+        "required_subjects": [
+          "opened package structure",
+          "inner tray or inner contents layout"
+        ],
+        "optional_props": [
+          "tissue paper",
+          "insert card"
+        ]
+      },
+      {
+        "shot_id": "shot_04",
+        "shot_type": "dry_leaf_detail",
+        "title": "Dry Leaf Detail",
+        "purpose": "Show tea leaf quality and texture while keeping package linkage.",
+        "composition_hint": "Detail composition with a background clean area for copy.",
+        "copy_goal": "Convey dry leaf quality, texture, and authenticity.",
+        "goal": "Connect the tea leaf detail with the same world as the package hero.",
+        "focus": "dry leaf texture and package relationship",
+        "scene_direction": "macro-friendly detail scene with muted surfaces and one or two restrained tea props",
+        "composition_direction": "Place the dry leaf detail near the product or packaging cue and preserve a clear background safe zone.",
+        "preferred_text_safe_zone": "top_right",
+        "required_subjects": [
+          "dry tea leaves",
+          "package cue or label fragment"
+        ],
+        "optional_props": [
+          "small tea scoop",
+          "neutral ceramic dish"
+        ]
+      },
+      {
+        "shot_id": "shot_05",
+        "shot_type": "tea_soup_experience",
+        "title": "Tea Soup Experience",
+        "purpose": "Show brewed tea experience with a calm premium feeling.",
+        "composition_hint": "Tea soup vessel stable, text safe zone at top.",
+        "copy_goal": "Convey aroma, warmth, and tea drinking experience.",
+        "goal": "Show tea soup color and drinking mood with the package still tied to the scene.",
+        "focus": "tea soup vessel and package cue",
+        "scene_direction": "premium brewed tea setting with desaturated background and unified prop family",
+        "composition_direction": "Keep the tea vessel stable, maintain a clean upper safe zone, and avoid clutter behind the liquid.",
+        "preferred_text_safe_zone": "top",
+        "required_subjects": [
+          "tea soup vessel",
+          "brewed tea visual",
+          "package cue"
+        ],
+        "optional_props": [
+          "gaiwan or teacup",
+          "tea tray"
+        ]
+      }
+    ]
+  },
+  "shot_prompt_specs": {
+    "specs": [
+      {
+        "shot_id": "shot_01",
+        "shot_type": "hero_brand",
+        "goal": "Make the package the only saturated hero subject in the frame.",
+        "product_lock": {
+          "must_preserve": [
+            "package silhouette",
+            "front label layout",
+            "brand mark placement"
+          ],
+          "must_preserve_texts": [
+            "brand name",
+            "product name"
+          ],
+          "editable_regions": [
+            "background",
+            "props",
+            "lighting",
+            "crop"
+          ],
+          "must_not_change": [
+            "gift_box",
+            "red",
+            "front-centered hero label with secondary side panels"
+          ]
+        },
+        "subject_prompt": "Use the uploaded product as the exact hero subject. Keep the full package clearly recognizable as the primary visual center.",
+        "package_appearance_prompt": "Keep package type gift_box, primary color red, material paper gift box with metallic accents, label structure front-centered hero label with secondary side panels unchanged. Do not redesign package proportions, surface graphics, or brand texts.",
+        "composition_prompt": "Keep the product stable, front-facing or 3/4, and reserve a clean upper-right safe zone for copy. Preferred text-safe zone: top_right.",
+        "background_prompt": "desaturated neutral backgrounds only; keep texture subtle and commercial. Background must stay low saturation so the product remains the only saturated visual center.",
+        "lighting_prompt": "main light direction fixed at upper-left; soft directional commercial light with clean edge definition. Keep the lens language consistent: 50mm full-frame commercial lens feel; consistent moderate depth of field. Shot type: hero_brand.",
+        "style_prompt": "premium tea gift box visual world with restrained contemporary still-life styling | 50mm full-frame commercial lens feel | consistent moderate depth of field | tea tray | linen | neutral ceramic ware | muted wood accents. keep the full set visually unified.",
+        "quality_prompt": "high-end commercial e-commerce photography, premium material fidelity, stable composition, clean product edges",
+        "negative_prompt": [
+          "do not redesign the package structure",
+          "do not redesign the label",
+          "do not use oversaturated backgrounds",
+          "do not change package proportions"
+        ],
+        "layout_constraints": {
+          "preferred_text_safe_zone": "top_right",
+          "avoid_overlap_with_subject": true,
+          "max_text_layers": 2,
+          "subject_placement_hint": "stable hero package with clean upper-area copy zone"
+        },
+        "render_constraints": {
+          "generation_mode": "image_edit",
+          "reference_image_priority": "main_packshot",
+          "consistency_strength": "high",
+          "allow_human_presence": false,
+          "allow_hand_only": false
+        },
+        "copy_intent": {
+          "title_role": "品牌气质",
+          "subtitle_role": "礼赠价值",
+          "bullet_role": "optional",
+          "cta_role": "none"
+        }
+      }
+    ]
+  }
+}

@@ -1,229 +1,91 @@
 # AGENTS.md
 
-## 当前仓库状态
-本仓库当前处于**第二阶段：真实 provider 接线阶段**。  
-第一阶段 **Mock MVP** 已经完成并归档，归档结论见：
-- `docs/milestones/phase-1-mock-mvp.md`
+## Scope
+- 当前仓库阶段：第二阶段，真实 provider 接线与可观测性增强阶段。
+- 项目目标：保证本地可运行、链路清晰、结构化落盘、便于回放与排查，不宣称生产可用。
+- 不变边界：
+  - Python `>=3.11,<3.12`
+  - Streamlit 单体应用
+  - LangGraph 工作流
+  - 本地文件存储
+  - Pydantic / schema 驱动的结构化 contract
+  - Pillow 中文后贴字
+  - 任务目录落盘到 `outputs/tasks/{task_id}/`
+- 唯一 UI 入口：`streamlit_app.py`
 
-当前仓库已经在第一阶段骨架基础上完成以下接线：
-- 文本侧：`NVIDIATextProvider` + NVIDIA GLM-5
-- 图片侧：`RunApiGeminiImageProvider` + RunAPI Gemini Image Gen
-- 同时继续保留 `mock / real` 模式切换
+## Working Rules
+- 保持分层：
+  - `src/ui/` 只负责页面、交互、展示、页面状态。
+  - `src/workflows/` 只负责 state、节点编排、节点间数据流转。
+  - `src/domain/` 只负责结构化数据 contract。
+  - `src/providers/` 只负责模型能力与 provider 路由。
+  - `src/services/` 只负责渲染、规划、落盘、质检等通用业务能力。
+- 不得把 provider 调用散落到 UI 或 workflow 节点内部。
+- 不得未经确认修改主 workflow 顺序。
+- 任何结构化运行时数据，先在 `src/domain/` 定义，再由 workflow / service / provider 消费。
+- 业务改动优先小步重构，避免无关推翻。
 
-但当前仓库**仍然不是生产可用系统**，仍以本地可运行、结构化落盘、链路清晰、便于检查与回放为优先目标。
+## Documentation Sync Rules
+- `docs/` 是项目事实来源，`AGENTS.md` 只负责执行规则、索引和约束。
+- `AGENTS.md` 必须保持简洁，不写成长篇设计说明；详细设计、示例、schema、行为说明统一写入 `docs/`。
+- 只要本次代码改动影响以下任一项，必须同步更新相关文档；否则任务不算完成：
+  - 工作流行为或节点输入输出
+  - 配置项 / 环境变量
+  - JSON contract / schema
+  - 落盘产物或目录结构
+  - UI 行为
+  - provider 路由、模型切换、`image_edit` / `t2i` 分流
+  - state 字段
+  - 日志关键字段
+  - 测试方式、验证命令、运行方式
+  - 文件职责变化
+- 任何新增 JSON 落盘产物、schema、state 字段、关键日志字段，都必须同步写入 `docs/contracts/` 或 `docs/workflow.md`。
+- 任何 UI 行为变化、任务状态变化、preview / final 行为变化，都必须同步更新 `docs/workflow.md` 或等价文档。
+- 任何 provider 路由、模型切换、图像生成模式分流变化，都必须同步更新 `docs/providers.md` 或等价文档。
+- 以后任何新增或修改的核心 Python 文件，都必须补齐：
+  - 文件头中文模块说明
+  - 核心类中文说明
+  - 核心函数中文 docstring
+  - 复杂逻辑中文注释
+- 中文注释必须解释职责、输入输出、上下游关系或为什么这样做，不能只写低价值废话。
+- 每次修改代码时，必须同步检查并更新：
+  - `docs/codebase-file-map.md`
+  - 受影响的 `docs/*`
+  - 必要的 schema / contract 文档
+- 优先检查和维护这些文档：
+  - `docs/phase1-contract.md`
+  - `docs/architecture.md`
+  - `docs/workflow.md`
+  - `docs/providers.md`
+  - `docs/qc-policy.md`
+  - `docs/contracts/*.json`
+  - `docs/contracts/*.md`
+- 如果推荐文档尚不存在，先在 `docs/` 下创建最接近职责的文件，再持续维护。
 
----
+## Required Final Checklist
+- 提交前必须执行文档同步检查：
+  - 本次是否新增、删除、重命名或修改了配置项？
+  - 本次是否改变了 workflow 节点输入输出、节点职责或节点顺序？
+  - 本次是否改变了 JSON contract、schema 或落盘文件？
+  - 本次是否改变了 API、UI、状态机或任务状态行为？
+  - 本次是否改变了 preview / final 行为？
+  - 本次是否改变了 provider 路由、模型选择或 `image_edit` / `t2i` 分流？
+  - 本次是否改变了日志关键字段、QC 语义或调试方式？
+  - 本次是否改变了测试命令、运行方式或验证步骤？
+- 上述任一项为“是”，必须在同一任务里更新对应文档。
+- 如果判断“无需更新文档”，最终总结必须明确说明理由。
+- 最终总结必须单独列出：
+  - 修改了哪些代码文件
+  - 修改了哪些文档文件
+  - 是否更新了 `docs/codebase-file-map.md`
+  - 是否补了中文注释 / docstring
+  - 未覆盖文件范围或后续建议
 
-## 不变的项目边界
-无论第一阶段还是当前第二阶段，本项目都必须继续保持以下边界：
-- Python 3.11
-- Streamlit 单体应用
-- LangGraph 工作流
-- 本地文件存储
-- Pydantic 结构化 schema
-- Pillow 中文后贴字
-- 本地预览与下载
-- 任务目录落盘与中间 JSON 回放能力
-
-唯一 UI 入口保持为：
-- `streamlit_app.py`
-
----
-
-## 历史阶段边界说明
-第一阶段 **Mock MVP** 的历史边界仍然成立，但它属于**历史归档约束**，不再等同于“当前仓库现状”。
-
-第一阶段重点验证的是：
-- 上传商品图
-- 填写品牌名、产品名、平台、尺寸、张数、文案风格等参数
-- 创建本地任务目录
-- 跑通 LangGraph 工作流骨架
-- 生成占位结果图
-- 使用 Pillow 完成中文后贴字
-- 预览结果
-- 单图下载与 ZIP 下载
-
-第一阶段归档事实不允许被篡改，但当前仓库已经在该骨架上进入第二阶段真实 provider 接线。
-
----
-
-## 当前阶段允许的实现范围
-当前仓库允许维护和迭代以下内容：
-- 第一阶段的本地骨架能力
-- NVIDIA GLM-5 文本 provider 接线
-- RunAPI Gemini Image Gen 图片 provider 接线
-- `mock / real` 模式切换
-- 结构化 JSON 输出校验与落盘
-- 基于 Pillow 的中文后贴字链路
-- 本地预览、单图下载、ZIP 下载
-
----
-
-## 当前阶段明确禁止的内容
-当前阶段仍然明确不做：
-- FastAPI 或前后端分离
-- 数据库
-- 登录鉴权
-- 消息队列
-- 云部署
-- 多租户
-- 真实 OCR 运行时
-- 真实 rembg 抠图
-- 多模型路由与 fallback
-- 复杂后台管理系统
-
----
-
-## 技术栈约束
-- Python 版本固定为 `>=3.11,<3.12`
-- UI 仅允许使用 Streamlit
-- 工作流编排使用 LangGraph
-- 数据结构与节点输入输出统一使用 Pydantic
-- 中文文案渲染统一使用 Pillow
-- 所有任务结果统一落盘到本地目录
-- 当前阶段优先保证本地可运行与可检查，不做过度抽象
-
----
-
-## 架构分层规则
-### UI 层
-位于 `src/ui/`，负责：
-- 上传组件
-- 参数表单
-- 结果预览
-- 下载按钮
-- 页面状态管理
-
-禁止在 UI 层直接编写复杂业务逻辑或直接发起模型 HTTP 请求。
-
-### Workflow 层
-位于 `src/workflows/`，负责：
-- LangGraph 状态定义
-- 图结构定义
-- 节点编排
-- 节点间数据传递
-
-禁止在 workflow 节点中散落 provider 细节实现。
-
-### Domain 层
-位于 `src/domain/`，负责：
-- 任务对象
-- 资产对象
-- 商品分析结果
-- 图组规划结果
-- 文案结构
-- 布局结构
-- 生成结果
-- 质检结果
-
-所有结构化数据必须优先通过 domain schema 表达。
-
-### Provider 层
-位于 `src/providers/`，负责：
-- 文本模型 provider 接口
-- 图片模型 provider 接口
-- mock provider
-- 当前真实 provider
-
-所有真实模型调用都必须收敛在 provider 层，不允许写到 UI 或 workflow 节点内部。
-
-### Service 层
-位于 `src/services/`，负责：
-- 本地存储
-- 文本渲染
-- 规划逻辑
-- 质检逻辑
-- OCR 占位接口
-- 抠图占位接口
-
----
-
-## 当前工作流节点
-当前工作流节点顺序固定为：
-1. `ingest_assets`
-2. `analyze_product`
-3. `plan_shots`
-4. `generate_copy`
-5. `generate_layout`
-6. `build_prompts`
-7. `render_images`
-8. `overlay_text`
-9. `run_qc`
-10. `finalize`
-
-允许节点内部存在 `mock / real` 分支，但不允许随意修改节点顺序、节点契约和落盘产物命名。
-
----
-
-## 输出产物要求
-每个任务必须落盘到：
-`outputs/tasks/{task_id}/`
-
-每个任务目录至少应包含：
-- `inputs/`
-- `task.json`
-- `product_analysis.json`
-- `shot_plan.json`
-- `copy_plan.json`
-- `layout_plan.json`
-- `image_prompt_plan.json`
-- `qc_report.json`
-- `generated/`
-- `final/`
-- `previews/`
-- `exports/`
-
----
-
-## 中文文案渲染规则
-最终图片中的中文文案，不依赖图片模型直接生成，而是统一走 Python 后贴字流程。
-
-要求：
-- 标题、副标题、卖点条目分层渲染
-- 支持自动换行
-- 支持缩字兜底
-- 保持安全边距
-- 避免裁字、溢出、遮挡主要商品主体
-
----
-
-## 质量规则
-当前阶段至少保证以下检查项：
-- 输出尺寸正确
-- 任务目录完整
-- 结构化 JSON 可读
-- 预览图可显示
-- 单图下载可用
-- ZIP 下载可用
-- 文本渲染不报错
-
----
-
-## 当前开发优先级
-1. 保持 Streamlit 单体应用稳定可运行
-2. 保持 workflow 骨架与 JSON 契约稳定
-3. 保持本地存储与导出链路稳定
-4. 保持 Pillow 中文后贴字能力可用
-5. 保持真实 provider 接线清晰且可回退
-6. 文档与测试同步完善
-
----
-
-## 禁止事项
-当前阶段禁止：
-- 未经确认直接改成前后端分离
-- 引入数据库或复杂基础设施
-- 在 UI 中硬编码模型调用
-- 在 workflow 节点中散落 provider 逻辑
-- 虚构已经实现的真实能力
-- 将“真实 provider 已接线”描述成“生产可用系统”
-
----
-
-## 文档与提交要求
-- 所有核心文档优先使用中文
-- 保持 README、架构文档、工作流文档、变更记录同步更新
-- 第一阶段里程碑文档作为历史归档保留，不改写归档事实
-- 当前状态文档必须准确反映仓库现状
-- 所有 TODO 必须可执行、可验证，避免空泛描述
-
+## Docs Source Of Truth
+- 事实来源优先级：
+  1. `docs/`：架构、workflow、provider、contract、QC、示例
+  2. 代码：具体实现
+  3. `AGENTS.md`：执行导航和约束
+- 历史里程碑文档只做事实归档，不改写历史结论。
+- 当前状态文档必须准确反映仓库现状。
+- 未经文档和实现同时满足，不得宣称生产可用。

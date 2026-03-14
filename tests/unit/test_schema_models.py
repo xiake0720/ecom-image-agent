@@ -71,6 +71,9 @@ def test_domain_models_round_trip() -> None:
                 focus="包装主体",
                 scene_direction="高级棚拍主图场景",
                 composition_direction="主体居中，右侧留白",
+                preferred_text_safe_zone="top_right",
+                required_subjects=["package hero", "front label"],
+                optional_props=["neutral tray"],
             )
         ]
     )
@@ -120,6 +123,9 @@ def test_domain_models_round_trip() -> None:
     assert analysis.model_dump()["analysis_scope"] == "sku_level"
     assert shot_plan.model_dump()["shots"][0]["shot_id"] == "shot-01"
     assert shot_plan.model_dump()["shots"][0]["shot_type"] == "hero"
+    assert shot_plan.model_dump()["shots"][0]["preferred_text_safe_zone"] == "top_right"
+    assert shot_plan.model_dump()["shots"][0]["required_subjects"][0] == "package hero"
+    assert shot_plan.model_dump()["shots"][0]["optional_props"][0] == "neutral tray"
     assert copy_plan.model_dump()["items"][0]["title"] == "标题"
     assert layout_plan.model_dump()["items"][0]["blocks"][0]["kind"] == "title"
     assert layout_plan.model_dump()["items"][0]["text_safe_zone"] == "top_right"
