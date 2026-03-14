@@ -177,12 +177,17 @@ def build_style_anchor_summary(*, product_analysis, platform: str, category_poli
 
 
 def infer_text_space_hint(layout_item) -> str:
+    text_safe_zone = getattr(layout_item, "text_safe_zone", "")
+    if text_safe_zone:
+        return str(text_safe_zone)
     if not getattr(layout_item, "blocks", None):
-        return "top_right_clean_space"
+        return "top_right"
     title_block = layout_item.blocks[0]
     horizontal = "left" if title_block.x <= layout_item.canvas_width // 2 else "right"
-    vertical = "top" if title_block.y <= layout_item.canvas_height // 2 else "bottom"
-    return f"{vertical}_{horizontal}_clean_space"
+    vertical = "top" if title_block.y <= layout_item.canvas_height * 0.33 else "bottom"
+    if layout_item.canvas_height * 0.33 < title_block.y < layout_item.canvas_height * 0.66:
+        return f"{horizontal}_center"
+    return f"{vertical}_{horizontal}"
 
 
 def _resolve_category_policy(category_family: str) -> dict[str, Any]:

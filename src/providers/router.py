@@ -6,7 +6,9 @@ import logging
 from src.core.config import ResolvedModelSelection, ResolvedProviderRoute, Settings
 from src.providers.image.base import BaseImageProvider
 from src.providers.image.dashscope_image import DashScopeImageProvider
+from src.providers.image.dashscope_image_edit import DashScopeImageEditProvider
 from src.providers.image.gemini_image import GeminiImageProvider
+from src.providers.image.routed_image import RoutedImageProvider
 from src.providers.image.runapi_gemini_image import RunApiGeminiImageProvider
 from src.providers.llm.base import BaseTextProvider
 from src.providers.llm.dashscope_text import DashScopeTextProvider
@@ -44,28 +46,7 @@ def build_capability_bindings(settings: Settings) -> CapabilityBindings:
     vision_provider, vision_route, vision_status, vision_selection = _build_vision_provider(settings)
     image_provider, image_route, image_status, image_selection = _build_image_provider(settings)
     logger.info(
-        "当前文本 provider/model: provider=%s, alias=%s, mode=%s, model=%s",
-        type(planning_provider).__name__,
-        planning_route.alias,
-        planning_route.mode,
-        planning_selection.model_id,
-    )
-    logger.info(
-        "当前视觉 provider/model: provider=%s, alias=%s, mode=%s, model=%s",
-        type(vision_provider).__name__ if vision_provider is not None else "None",
-        vision_route.alias,
-        vision_route.mode,
-        vision_selection.model_id,
-    )
-    logger.info(
-        "当前图片 provider/model: provider=%s, alias=%s, mode=%s, model=%s",
-        type(image_provider).__name__,
-        image_route.alias,
-        image_route.mode,
-        image_selection.model_id,
-    )
-    logger.info(
-        "能力路由构建完成，结构化规划=%s[%s](%s)，视觉分析=%s[%s](%s)，图片生成=%s[%s](%s)",
+        "Resolved providers: planning=%s[%s](%s), vision=%s[%s](%s), image=%s[%s](%s)",
         type(planning_provider).__name__,
         planning_route.alias,
         planning_selection.model_id,
@@ -101,26 +82,14 @@ def _build_planning_provider(
     route = settings.resolve_text_provider_route()
     selection = settings.resolve_text_model_selection()
     if route.mode != "real":
-        logger.info(
-            "当前结构化规划能力使用本地 mock provider，请求别名=%s，已解析模型=%s，model_id=%s，来源=%s",
-            route.alias,
-            selection.label,
-            selection.model_id,
-            selection.source,
-        )
         return GeminiTextProvider(), route, "mock-local", selection
-
     if route.alias == "nvidia":
-        logger.info("当前结构化规划模型：%s，model_id=%s，来源=%s", selection.label, selection.model_id, selection.source)
         return NVIDIATextProvider(settings), route, "ready", selection
     if route.alias == "ollama":
-        logger.info("当前结构化规划能力切换为 Ollama，model_id=%s，来源=%s", selection.model_id, selection.source)
         return OllamaTextProvider(settings), route, "ready", selection
     if route.alias == "dashscope":
-        logger.info("当前结构化规划能力切换为 DashScope，model_id=%s，来源=%s", selection.model_id, selection.source)
         return DashScopeTextProvider(settings), route, "ready", selection
     if route.alias in {"zhipu", "zhipu_glm47_flash", "zhipu_glm47"}:
-        logger.info("当前结构化规划能力切换为 Zhipu，model_id=%s，来源=%s", selection.model_id, selection.source)
         return ZhipuTextProvider(settings), route, "ready", selection
     raise RuntimeError(f"Unsupported text provider alias: {route.alias}")
 
@@ -131,42 +100,17 @@ def _build_vision_provider(
     route = settings.resolve_vision_provider_route()
     selection = settings.resolve_vision_model_selection()
     if route.mode != "real":
-        logger.info(
-            "当前视觉能力使用本地 mock 路径，请求别名=%s，已解析真实模型=%s，model_id=%s，来源=%s",
-            route.alias,
-            selection.label,
-            selection.model_id,
-            selection.source,
-        )
         return None, route, "mock-local", selection
-
     if route.alias == "nvidia":
-        logger.info(
-            "开始加载真实视觉 provider，provider_key=%s，model_id=%s，期望模块路径=src/providers/vision/nvidia_product_analysis.py",
-            selection.provider_key,
-            selection.model_id,
-        )
-        try:
-            from src.providers.vision.nvidia_product_analysis import NVIDIAVisionProductAnalysisProvider
-        except ModuleNotFoundError as exc:
-            raise RuntimeError(
-                "ECOM_IMAGE_AGENT_VISION_PROVIDER_MODE=real, but the vision provider "
-                "module is missing. Expected file: src/providers/vision/nvidia_product_analysis.py"
-            ) from exc
+        from src.providers.vision.nvidia_product_analysis import NVIDIAVisionProductAnalysisProvider
 
-        logger.info("当前视觉分析模型：%s，model_id=%s，来源=%s", selection.label, selection.model_id, selection.source)
         return NVIDIAVisionProductAnalysisProvider(settings), route, "ready", selection
-
     if route.alias == "zhipu":
         from src.providers.vision.zhipu_vision import ZhipuVisionProvider
 
-        logger.info("当前视觉分析能力切换为 Zhipu，model_id=%s，来源=%s", selection.model_id, selection.source)
         return ZhipuVisionProvider(settings), route, "ready", selection
-
     if route.alias == "dashscope":
-        logger.info("当前视觉分析能力切换为 DashScope，model_id=%s，来源=%s", selection.model_id, selection.source)
         return DashScopeVisionProvider(settings), route, "ready", selection
-
     raise RuntimeError(f"Unsupported vision provider alias: {route.alias}")
 
 
@@ -176,18 +120,59 @@ def _build_image_provider(
     route = settings.resolve_image_provider_route()
     selection = settings.resolve_image_model_selection()
     if route.mode != "real" or route.alias == "mock":
-        logger.info("当前图片生成能力使用本地 mock provider，请求别名=%s", route.alias)
         return GeminiImageProvider(), route, "mock-local", selection
     if route.alias == "dashscope":
-        logger.info("当前图片生成能力切换为 DashScope，model_id=%s，来源=%s", selection.model_id, selection.source)
-        return DashScopeImageProvider(settings), route, "ready", selection
+        return _build_dashscope_image_provider(settings, route, selection)
     if route.alias == "runapi":
-        logger.info("当前图片生成能力继续使用 RunAPI，model_id=%s", settings.runapi_image_model)
         return RunApiGeminiImageProvider(settings), route, "ready", selection
     if route.alias == "zhipu":
-        logger.warning("当前图片 provider 已进入配置路由，但当前阶段尚未接线：alias=%s", route.alias)
+        logger.warning("Image provider is routed but not wired yet: alias=%s", route.alias)
         return _UnsupportedImageProvider(route.alias), route, "planned-not-wired", selection
     raise RuntimeError(f"Unsupported image provider alias: {route.alias}")
+
+
+def _build_dashscope_image_provider(
+    settings: Settings,
+    route: ResolvedProviderRoute,
+    selection: ResolvedModelSelection,
+) -> tuple[BaseImageProvider, ResolvedProviderRoute, str, ResolvedModelSelection]:
+    edit_route = settings.resolve_image_edit_provider_route()
+    edit_selection = settings.resolve_image_edit_model_selection()
+    edit_provider: BaseImageProvider | None = None
+    edit_status = "disabled"
+    if settings.image_edit_enabled:
+        if edit_route.alias == "dashscope":
+            edit_provider = DashScopeImageEditProvider(settings)
+            edit_status = "ready"
+        elif edit_route.alias == "runapi":
+            edit_provider = RunApiGeminiImageProvider(settings)
+            edit_status = "ready"
+        else:
+            edit_status = "planned-not-wired"
+            logger.warning("Image edit provider is not wired: alias=%s", edit_route.alias)
+    logger.info(
+        "Configured image generation routing: t2i_provider=%s, t2i_model=%s, image_edit_enabled=%s, image_edit_provider=%s, image_edit_model=%s, image_edit_status=%s",
+        route.alias,
+        selection.model_id,
+        settings.image_edit_enabled,
+        edit_route.alias,
+        edit_selection.model_id,
+        edit_status,
+    )
+    return (
+        RoutedImageProvider(
+            settings=settings,
+            t2i_provider=DashScopeImageProvider(settings),
+            t2i_route=route,
+            t2i_model_selection=selection,
+            image_edit_provider=edit_provider,
+            image_edit_route=edit_route,
+            image_edit_model_selection=edit_selection,
+        ),
+        route,
+        "ready",
+        selection,
+    )
 
 
 class _UnsupportedTextProvider(BaseTextProvider):
@@ -195,9 +180,7 @@ class _UnsupportedTextProvider(BaseTextProvider):
         self.alias = alias
 
     def generate_structured(self, prompt: str, response_model, *, system_prompt: str | None = None):
-        raise RuntimeError(
-            f"文本 provider `{self.alias}` 已进入配置与路由体系，但当前阶段尚未接入真实调用实现。"
-        )
+        raise RuntimeError(f"Text provider `{self.alias}` is routed but not implemented.")
 
 
 class _UnsupportedVisionProvider(BaseVisionAnalysisProvider):
@@ -205,9 +188,7 @@ class _UnsupportedVisionProvider(BaseVisionAnalysisProvider):
         self.alias = alias
 
     def generate_structured_from_assets(self, prompt: str, response_model, *, assets, system_prompt: str | None = None):
-        raise RuntimeError(
-            f"视觉 provider `{self.alias}` 已进入配置与路由体系，但当前阶段尚未接入真实调用实现。"
-        )
+        raise RuntimeError(f"Vision provider `{self.alias}` is routed but not implemented.")
 
 
 class _UnsupportedImageProvider(BaseImageProvider):
@@ -215,6 +196,4 @@ class _UnsupportedImageProvider(BaseImageProvider):
         self.alias = alias
 
     def generate_images(self, plan, *, output_dir, reference_assets=None):
-        raise RuntimeError(
-            f"图片 provider `{self.alias}` 已进入配置与路由体系，但当前阶段尚未接入真实调用实现。"
-        )
+        raise RuntimeError(f"Image provider `{self.alias}` is routed but not implemented.")

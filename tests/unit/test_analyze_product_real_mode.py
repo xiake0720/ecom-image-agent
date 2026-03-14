@@ -110,5 +110,10 @@ def test_analyze_product_real_mode_uses_selected_reference_assets_only(tmp_path:
     assert vision_provider.called is True
     assert vision_provider.asset_ids == ["asset-01", "asset-02"]
     assert result["product_analysis"].source_asset_ids == ["asset-01", "asset-02"]
-    assert any("asset-01" in log and "asset-02" in log for log in result["logs"])
+    assert result["analyze_selected_main_asset_id"] == "asset-01"
+    assert result["analyze_selected_detail_asset_id"] == "asset-02"
+    assert result["analyze_reference_asset_ids"] == ["asset-01", "asset-02"]
+    assert "main=" in result["analyze_reference_selection_reason"]
+    assert any("selected_main_asset_id=asset-01" in log for log in result["logs"])
+    assert any("selected_detail_asset_id=asset-02" in log for log in result["logs"])
     assert (get_task_dir(task.task_id) / "product_analysis.json").exists()

@@ -34,7 +34,11 @@ class DashScopeImageProvider(BaseImageProvider):
         reference_assets: list[Asset] | None = None,
     ) -> GenerationResult:
         try:
-            return self._generate_images(plan=plan, output_dir=output_dir)
+            return self._generate_images(
+                plan=plan,
+                output_dir=output_dir,
+                reference_assets=reference_assets or [],
+            )
         except Exception as exc:
             if not self.settings.image_allow_mock_fallback:
                 raise
@@ -54,12 +58,15 @@ class DashScopeImageProvider(BaseImageProvider):
         *,
         plan: ImagePromptPlan,
         output_dir: Path,
+        reference_assets: list[Asset],
     ) -> GenerationResult:
+        reference_asset_ids = [asset.asset_id for asset in reference_assets]
         logger.info(
-            "开始调用图片模型，provider=DashScope，mode=%s，model=%s，图片数量=%s，输出目录=%s",
+            "Starting DashScope image generation: mode=t2i, provider=DashScope, route_mode=%s, model_id=%s, prompts=%s, reference_asset_ids=%s, output_dir=%s",
             self.settings.resolve_image_provider_route().mode,
             self.model_selection.model_id,
             len(plan.prompts),
+            reference_asset_ids,
             output_dir,
         )
         if self.settings.resolve_image_provider_route().mode != "real":
@@ -86,10 +93,11 @@ class DashScopeImageProvider(BaseImageProvider):
                 )
             )
             logger.info(
-                "图片生成成功，provider=DashScope，model=%s，shot_id=%s，task_id=%s，输出=%s",
+                "DashScope image generation succeeded: mode=t2i, model_id=%s, shot_id=%s, task_id=%s, reference_asset_ids=%s, output_path=%s",
                 self.model_selection.model_id,
                 prompt.shot_id,
                 task_id,
+                reference_asset_ids,
                 output_path,
             )
 
@@ -108,7 +116,7 @@ class DashScopeImageProvider(BaseImageProvider):
         with requests.Session() as session:
             session.trust_env = False
             logger.info(
-                "提交 DashScope 文生图任务，model=%s，url=%s，size=%s，代理状态=%s，prompt摘要=%s",
+                "Submitting DashScope t2i task: model_id=%s, url=%s, size=%s, proxy=%s, prompt_summary=%s",
                 self.model_selection.model_id,
                 url,
                 output_size,
@@ -135,7 +143,7 @@ class DashScopeImageProvider(BaseImageProvider):
                 f"response={summarize_text(response.text, limit=800)}"
             )
         data = response.json()
-        task_id = str((data.get("output") or {}).get("task_id") or "")
+        task_id = str((data.get('output') or {}).get('task_id') or "")
         if not task_id:
             raise RuntimeError(
                 "DashScope image submit did not return task_id: "
@@ -166,6 +174,13 @@ class DashScopeImageProvider(BaseImageProvider):
                 if status in {"SUCCEEDED", "SUCCESS"}:
                     image_url = self._extract_result_url(output)
                     if not image_url:
+                        logger.error(
+                            "DashScope image task succeeded but result URL extraction failed: task_id=%s, output_keys=%s, choice_content_summary=%s, output_summary=%s",
+                            task_id,
+                            sorted(output.keys()),
+                            self._summarize_choice_content(output),
+                            summarize_text(str(output), limit=1200),
+                        )
                         raise RuntimeError(
                             "DashScope image task succeeded but no result URL was found: "
                             f"task_id={task_id}, response={summarize_text(str(data), limit=800)}"
@@ -193,16 +208,92 @@ class DashScopeImageProvider(BaseImageProvider):
         return response.content
 
     def _extract_result_url(self, output: dict) -> str | None:
+        choices = output.get("choices") or []
+        for choice in choices:
+            if not isinstance(choice, dict):
+                continue
+            message = choice.get("message") or {}
+            if not isinstance(message, dict):
+                continue
+            content = message.get("content") or []
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                image = item.get("image")
+                if image:
+                    return str(image)
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                url = item.get("url")
+                if url:
+                    return str(url)
         results = output.get("results") or []
         for item in results:
             if isinstance(item, dict):
-                url = item.get("url") or item.get("result_url")
+                url = item.get("url")
                 if url:
                     return str(url)
+        for item in results:
+            if isinstance(item, dict):
+                result_url = item.get("result_url")
+                if result_url:
+                    return str(result_url)
+        for item in results:
+            if isinstance(item, dict):
+                image = item.get("image")
+                if image:
+                    return str(image)
         result_url = output.get("result_url")
         if result_url:
             return str(result_url)
+        url = output.get("url")
+        if url:
+            return str(url)
+        image = output.get("image")
+        if image:
+            return str(image)
         return None
+
+    def _summarize_choice_content(self, output: dict) -> list[dict[str, object]]:
+        summary: list[dict[str, object]] = []
+        choices = output.get("choices") or []
+        for choice_index, choice in enumerate(choices):
+            if not isinstance(choice, dict):
+                summary.append({"choice_index": choice_index, "type": type(choice).__name__})
+                continue
+            message = choice.get("message") or {}
+            content = message.get("content") if isinstance(message, dict) else None
+            if not isinstance(content, list):
+                summary.append(
+                    {
+                        "choice_index": choice_index,
+                        "message_keys": sorted(message.keys()) if isinstance(message, dict) else [],
+                        "content_type": type(content).__name__,
+                    }
+                )
+                continue
+            content_summary = []
+            for item_index, item in enumerate(content):
+                if isinstance(item, dict):
+                    content_summary.append(
+                        {
+                            "item_index": item_index,
+                            "keys": sorted(item.keys()),
+                            "has_image": bool(item.get("image")),
+                            "has_url": bool(item.get("url")),
+                        }
+                    )
+                else:
+                    content_summary.append({"item_index": item_index, "type": type(item).__name__})
+            summary.append(
+                {
+                    "choice_index": choice_index,
+                    "message_keys": sorted(message.keys()) if isinstance(message, dict) else [],
+                    "content": content_summary,
+                }
+            )
+        return summary
 
     def _resolve_api_root(self) -> str:
         base_url = self.settings.dashscope_base_url.rstrip("/")

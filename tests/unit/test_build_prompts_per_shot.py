@@ -39,7 +39,7 @@ class FakePromptProvider:
                             "negative_prompt": ["garbled text", "wrong packaging"],
                             "output_size": "1440x1440",
                             "preserve_rules": ["保持包装主体", "保持标签位置"],
-                            "text_space_hint": "top_right_clean_space",
+                            "text_space_hint": "top_right",
                             "composition_notes": ["主体清晰", "右侧留白"],
                             "style_notes": ["高端商业摄影", "真实棚拍质感"],
                         },
@@ -50,7 +50,7 @@ class FakePromptProvider:
                             "negative_prompt": ["garbled text", "wrong packaging"],
                             "output_size": "1440x1440",
                             "preserve_rules": ["保持包装主体", "保持标签位置"],
-                            "text_space_hint": "top_left_clean_space",
+                            "text_space_hint": "top_left",
                             "composition_notes": ["主体清晰", "左侧留白"],
                             "style_notes": ["高端商业摄影", "真实棚拍质感"],
                         },
@@ -66,11 +66,30 @@ class FakePromptProvider:
                 "negative_prompt": ["garbled text", "wrong packaging"],
                 "output_size": "1440x1440",
                 "preserve_rules": ["保持包装主体", "保持标签位置"],
-                "text_space_hint": "top_right_clean_space",
+                "text_space_hint": "top_right",
                 "composition_notes": ["主体清晰", "右侧留白"],
                 "style_notes": ["高端商业摄影", "真实棚拍质感"],
             }
         )
+
+
+class FakeImageGenerationProvider:
+    def __init__(self, generation_mode: str) -> None:
+        self.generation_mode = generation_mode
+
+    def resolve_generation_context(self, *, reference_assets=None):
+        asset_ids = [asset.asset_id for asset in (reference_assets or [])]
+        return type(
+            "GenerationContext",
+            (),
+            {
+                "generation_mode": self.generation_mode,
+                "provider_alias": "fake",
+                "model_id": "fake-image",
+                "reference_asset_ids": asset_ids if self.generation_mode == "image_edit" else [],
+                "selected_reference_assets": reference_assets or [],
+            },
+        )()
 
 
 class DummyRenderer:
@@ -86,11 +105,12 @@ def test_build_prompts_real_mode_uses_per_shot_generation_and_saves_debug_artifa
     task_dir = tmp_path / "task-001"
     task_dir.mkdir(parents=True, exist_ok=True)
     text_provider = FakePromptProvider()
-    deps = _build_deps(storage, text_provider)
+    deps = _build_deps(storage, text_provider, generation_mode="image_edit")
     task = _build_task("task-001", str(task_dir))
     state = _build_state(task, tmp_path, prompt_build_mode="per_shot", cache_enabled=False)
 
     result = build_prompts(state, deps)
+    first_prompt = result["image_prompt_plan"].prompts[0]
 
     assert len(text_provider.calls) == 2
     assert all("image_input_sent_to_model" in call for call in text_provider.calls)
@@ -98,12 +118,19 @@ def test_build_prompts_real_mode_uses_per_shot_generation_and_saves_debug_artifa
     assert all("render_images" in call for call in text_provider.calls)
     assert all("demo.png" not in call for call in text_provider.calls)
     assert len(result["image_prompt_plan"].prompts) == 2
-    assert any("当前 prompt build mode：per_shot" in log for log in result["logs"])
-    assert any("当前使用 per_shot 模式" in log for log in result["logs"])
+    assert result["image_prompt_plan"].generation_mode == "image_edit"
+    assert first_prompt.generation_mode == "image_edit"
+    assert first_prompt.prompt == "detailed prompt for shot-01"
+    assert first_prompt.edit_instruction
+    assert first_prompt.edit_instruction != first_prompt.prompt
+    assert first_prompt.keep_subject_rules
+    assert first_prompt.editable_regions
+    assert first_prompt.locked_regions
+    assert first_prompt.text_safe_zone == first_prompt.text_space_hint
+    assert any("target_generation_mode=image_edit" in log for log in result["logs"])
     real_task_dir = get_task_dir(task.task_id)
     assert (real_task_dir / "image_prompt_plan.json").exists()
     assert (real_task_dir / "artifacts" / "shots" / "shot-01" / "prompt.json").exists()
-    assert result["image_prompt_plan"].prompts[0].prompt == "detailed prompt for shot-01"
 
 
 def test_build_prompts_real_mode_uses_batch_generation_and_writes_per_shot_artifacts(tmp_path: Path) -> None:
@@ -111,7 +138,7 @@ def test_build_prompts_real_mode_uses_batch_generation_and_writes_per_shot_artif
     task_dir = tmp_path / "task-batch"
     task_dir.mkdir(parents=True, exist_ok=True)
     text_provider = FakePromptProvider()
-    deps = _build_deps(storage, text_provider)
+    deps = _build_deps(storage, text_provider, generation_mode="image_edit")
     task = _build_task("task-batch", str(task_dir))
     state = _build_state(task, tmp_path, prompt_build_mode="batch", cache_enabled=False)
 
@@ -120,9 +147,10 @@ def test_build_prompts_real_mode_uses_batch_generation_and_writes_per_shot_artif
     assert len(text_provider.calls) == 1
     assert '"prompt_build_mode": "batch"' in text_provider.calls[0]
     assert len(result["image_prompt_plan"].prompts) == 2
+    assert result["image_prompt_plan"].generation_mode == "image_edit"
     assert result["image_prompt_plan"].prompts[0].prompt == "batch prompt for shot-01"
-    assert any("当前 prompt build mode：batch" in log for log in result["logs"])
-    assert any("当前使用 batch 模式" in log for log in result["logs"])
+    assert result["image_prompt_plan"].prompts[0].edit_instruction
+    assert any("using batch mode target_generation_mode=image_edit" in log for log in result["logs"])
     real_task_dir = get_task_dir(task.task_id)
     assert (real_task_dir / "artifacts" / "shots" / "shot-01" / "prompt.json").exists()
     assert (real_task_dir / "artifacts" / "shots" / "shot-02" / "prompt.json").exists()
@@ -133,7 +161,7 @@ def test_build_prompts_uses_node_cache_on_second_run(tmp_path: Path) -> None:
     demo_path.write_bytes(b"cache-demo-image")
     storage = LocalStorageService()
     text_provider = FakePromptProvider()
-    deps = _build_deps(storage, text_provider)
+    deps = _build_deps(storage, text_provider, generation_mode="image_edit")
     task = _build_task(f"task-cache-{tmp_path.name}", str(tmp_path / "task-cache"))
     state = _build_state(task, tmp_path, prompt_build_mode="per_shot", cache_enabled=True)
     state["assets"] = [Asset(asset_id="asset-01", filename="demo-cache.png", local_path=str(demo_path))]
@@ -148,12 +176,58 @@ def test_build_prompts_uses_node_cache_on_second_run(tmp_path: Path) -> None:
     assert any("cache hit" in log for log in second_result["logs"])
 
 
-def _build_deps(storage: LocalStorageService, text_provider: FakePromptProvider) -> WorkflowDependencies:
+def test_build_prompts_t2i_mode_keeps_legacy_prompt_fields_compatible(tmp_path: Path) -> None:
+    storage = LocalStorageService()
+    text_provider = FakePromptProvider()
+    deps = _build_deps(storage, text_provider, generation_mode="t2i")
+    task = _build_task("task-t2i", str(tmp_path / "task-t2i"))
+    state = _build_state(task, tmp_path, prompt_build_mode="per_shot", cache_enabled=False)
+    state["assets"] = []
+
+    result = build_prompts(state, deps)
+    first_prompt = result["image_prompt_plan"].prompts[0]
+
+    assert result["image_prompt_plan"].generation_mode == "t2i"
+    assert first_prompt.generation_mode == "t2i"
+    assert first_prompt.prompt == "detailed prompt for shot-01"
+    assert first_prompt.negative_prompt
+    assert first_prompt.preserve_rules
+    assert first_prompt.edit_instruction
+
+
+def test_build_prompts_uses_layout_text_safe_zone_without_reinferring(tmp_path: Path) -> None:
+    storage = LocalStorageService()
+    text_provider = FakePromptProvider()
+    deps = _build_deps(storage, text_provider, generation_mode="image_edit")
+    task = _build_task("task-layout-zone", str(tmp_path / "task-layout-zone"))
+    state = _build_state(task, tmp_path, prompt_build_mode="per_shot", cache_enabled=False)
+    state["layout_plan"].items[0] = LayoutItem(
+        shot_id="shot-01",
+        canvas_width=1440,
+        canvas_height=1440,
+        text_safe_zone="bottom_right",
+        blocks=[LayoutBlock(kind="title", x=120, y=110, width=300, height=200)],
+    )
+
+    result = build_prompts(state, deps)
+
+    first_prompt = result["image_prompt_plan"].prompts[0]
+    assert first_prompt.text_safe_zone == "bottom_right"
+    assert first_prompt.text_space_hint == "bottom_right"
+    assert any('"layout_text_safe_zone": "bottom_right"' in call for call in text_provider.calls)
+
+
+def _build_deps(
+    storage: LocalStorageService,
+    text_provider: FakePromptProvider,
+    *,
+    generation_mode: str,
+) -> WorkflowDependencies:
     return WorkflowDependencies(
         storage=storage,
         planning_provider=text_provider,
         vision_analysis_provider=None,
-        image_generation_provider=object(),
+        image_generation_provider=FakeImageGenerationProvider(generation_mode),
         text_renderer=DummyRenderer(),
         ocr_service=DummyOCRService(),
         text_provider_mode="real",

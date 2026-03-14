@@ -60,8 +60,8 @@ def render_home_page() -> None:
         uploads = render_upload_panel()
         form_data = render_task_form()
         action_col1, action_col2 = st.columns(2)
-        preview_submitted = action_col1.button("先生成预览", use_container_width=True)
-        final_submitted = action_col2.button("生成正式成品", type="primary", use_container_width=True)
+        preview_submitted = action_col1.button("先生成预览", width="stretch")
+        final_submitted = action_col2.button("生成正式成品", type="primary", width="stretch")
 
         if preview_submitted:
             if not uploads:
@@ -174,6 +174,8 @@ def _continue_final_from_existing_task(existing_task_state: dict | None) -> dict
                     detail="检测到已有预览任务，直接基于现有 image_prompt_plan 继续生成正式成品",
                 ),
             ],
+            "cache_enabled": bool(existing_task_state.get("cache_enabled", settings.enable_node_cache)),
+            "ignore_cache": bool(existing_task_state.get("ignore_cache", False)),
             "render_mode": "final",
             "render_variant": "final",
             "preview_generation_result": preview_generation_result,
@@ -203,7 +205,9 @@ def _normalize_task_state(state: dict, debug_info: dict[str, object]) -> dict:
         normalized["qc_report"] = normalized["qc_report"].model_dump(mode="json")
     if "preview_qc_report" in normalized and hasattr(normalized["preview_qc_report"], "model_dump"):
         normalized["preview_qc_report"] = normalized["preview_qc_report"].model_dump(mode="json")
-    normalized["debug"] = debug_info
+    normalized_logs = _append_observability_summaries(normalized.get("logs", []), normalized)
+    normalized["logs"] = normalized_logs
+    normalized["debug"] = _merge_runtime_debug_info(debug_info, normalized, normalized_logs)
     if "analyze_max_reference_images" in state:
         normalized["analyze_max_reference_images"] = state["analyze_max_reference_images"]
     if "render_max_reference_images" in state:
@@ -258,10 +262,113 @@ def _build_debug_info(task: Task, settings, task_log_path: Path | None) -> dict[
     }
 
 
+def _merge_runtime_debug_info(debug_info: dict[str, object], state: dict, logs: list[str]) -> dict[str, object]:
+    merged = dict(debug_info)
+    merged.update(
+        {
+            "cache_enabled": bool(state.get("cache_enabled", False)),
+            "ignore_cache": bool(state.get("ignore_cache", False)),
+            "cache_hit_nodes": _extract_cache_hit_nodes(logs),
+            "render_mode": str(state.get("render_mode") or merged.get("render_mode", "-")),
+            "render_variant": str(state.get("render_variant") or "-"),
+            "render_generation_mode": str(state.get("render_generation_mode") or "-"),
+            "render_reference_asset_ids": list(state.get("render_reference_asset_ids", []) or []),
+            "image_provider_impl": str(state.get("render_image_provider_impl") or merged.get("image_provider_impl", "-")),
+            "image_model_id": str(state.get("render_image_model_id") or merged.get("image_model_id", "-")),
+        }
+    )
+    merged["real_generation_chain"] = {
+        "preview_or_final": merged["render_variant"],
+        "generation_mode": merged["render_generation_mode"],
+        "reference_asset_ids": merged["render_reference_asset_ids"],
+        "image_provider_impl": merged["image_provider_impl"],
+        "image_model_id": merged["image_model_id"],
+        "cache_hit_nodes": merged["cache_hit_nodes"],
+    }
+    return merged
+
+
+def _append_observability_summaries(logs: list[str], state: dict) -> list[str]:
+    normalized_logs = list(logs or [])
+    summary_lines: list[str] = []
+    seen_lines = set(normalized_logs)
+    for line in _build_cache_summary_logs(normalized_logs):
+        if line not in seen_lines:
+            summary_lines.append(line)
+            seen_lines.add(line)
+    render_summary = (
+        "[render] "
+        f"mode={state.get('render_mode', '-')} "
+        f"variant={state.get('render_variant', '-')} "
+        f"generation_mode={state.get('render_generation_mode', '-')} "
+        f"refs={list(state.get('render_reference_asset_ids', []) or [])}"
+    )
+    if render_summary not in seen_lines:
+        summary_lines.append(render_summary)
+        seen_lines.add(render_summary)
+    return [*normalized_logs, *summary_lines]
+
+
+def _build_cache_summary_logs(logs: list[str]) -> list[str]:
+    summaries: list[str] = []
+    seen: set[str] = set()
+    for line in logs:
+        parsed = _parse_cache_log(line)
+        if parsed is None:
+            continue
+        summary = f"[cache] node={parsed['node']} status={parsed['status']} key={parsed['key']}"
+        if summary in seen:
+            continue
+        seen.add(summary)
+        summaries.append(summary)
+    return summaries
+
+
+def _extract_cache_hit_nodes(logs: list[str]) -> list[str]:
+    hit_nodes: list[str] = []
+    seen: set[str] = set()
+    for line in logs:
+        parsed = _parse_cache_log(line)
+        if parsed is None or parsed["status"] != "hit" or parsed["node"] in seen:
+            continue
+        seen.add(parsed["node"])
+        hit_nodes.append(parsed["node"])
+    return hit_nodes
+
+
+def _parse_cache_log(line: str) -> dict[str, str] | None:
+    if line.startswith("[cache] "):
+        payload = line[len("[cache] ") :]
+        parts = dict(
+            part.split("=", maxsplit=1)
+            for part in payload.split(" ")
+            if "=" in part
+        )
+        if {"node", "status", "key"} <= parts.keys():
+            return {"node": parts["node"], "status": parts["status"], "key": parts["key"]}
+        return None
+    if not line.startswith("[") or "]" not in line or "cache " not in line:
+        return None
+    node = line[1 : line.index("]")]
+    if "cache hit" in line:
+        status = "hit"
+    elif "cache miss" in line:
+        status = "miss"
+    elif "ignore cache" in line:
+        status = "ignored"
+    else:
+        return None
+    key = "-"
+    marker = "key="
+    if marker in line:
+        key = line.split(marker, maxsplit=1)[1].split()[0].strip("。.,")
+    return {"node": node, "status": status, "key": key}
+
+
 def _render_runtime_controls(settings, bindings) -> None:
     with st.expander("当前 Provider 状态", expanded=True):
         action_col, info_col = st.columns([1, 3])
-        if action_col.button("重新加载配置 / 重建 Workflow", use_container_width=True):
+        if action_col.button("重新加载配置 / 重建 Workflow", width="stretch"):
             st.session_state["_ecom_reload_runtime"] = True
             st.rerun()
         info_col.caption("修改环境变量或 .env 后必须重启 Streamlit 进程；此按钮只清理当前进程内的 settings/workflow 缓存。")

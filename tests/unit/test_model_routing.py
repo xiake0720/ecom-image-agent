@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from src.core.config import Settings
-from src.providers.image.dashscope_image import DashScopeImageProvider
 from src.providers.image.gemini_image import GeminiImageProvider
+from src.providers.image.routed_image import RoutedImageProvider
 from src.providers.llm.dashscope_text import DashScopeTextProvider
 from src.providers.llm.gemini_text import GeminiTextProvider
 from src.providers.llm.ollama_text import OllamaTextProvider
@@ -28,6 +28,11 @@ def _clear_provider_envs(monkeypatch) -> None:
         "ECOM_IMAGE_AGENT_VISION_MODEL_ID",
         "ECOM_IMAGE_AGENT_IMAGE_MODEL",
         "ECOM_IMAGE_AGENT_IMAGE_MODEL_ID",
+        "ECOM_IMAGE_AGENT_IMAGE_EDIT_PROVIDER",
+        "ECOM_IMAGE_AGENT_IMAGE_EDIT_MODEL",
+        "ECOM_IMAGE_AGENT_IMAGE_EDIT_ENABLED",
+        "ECOM_IMAGE_AGENT_IMAGE_EDIT_PREFER_MULTI_IMAGE",
+        "ECOM_IMAGE_AGENT_IMAGE_EDIT_MAX_REFERENCE_IMAGES",
         "ECOM_IMAGE_AGENT_IMAGE_ALLOW_MOCK_FALLBACK",
         "DASHSCOPE_API_KEY",
         "DASHSCOPE_BASE_URL",
@@ -57,7 +62,7 @@ def test_capability_router_defaults_to_dashscope(monkeypatch) -> None:
 
     assert isinstance(bindings.planning_provider, DashScopeTextProvider)
     assert isinstance(bindings.vision_analysis_provider, DashScopeVisionProvider)
-    assert isinstance(bindings.image_generation_provider, DashScopeImageProvider)
+    assert isinstance(bindings.image_generation_provider, RoutedImageProvider)
     assert bindings.planning_route.alias == "dashscope"
     assert bindings.vision_route.alias == "dashscope"
     assert bindings.image_route.alias == "dashscope"
