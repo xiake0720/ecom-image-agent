@@ -17,6 +17,7 @@ from functools import lru_cache
 import logging
 import os
 from pathlib import Path
+import sys
 from typing import Any
 
 from dotenv import load_dotenv
@@ -126,6 +127,10 @@ class Settings(BaseSettings):
     default_font_path: Path = Path("assets/fonts/NotoSansSC-Regular.otf")
     text_render_preset: str = "premium_minimal"
     text_render_adaptive_style_enabled: bool = True
+    text_render_min_title_font_size: int = 40
+    text_render_min_subtitle_font_size: int = 24
+    text_render_min_bullets_font_size: int = 22
+    text_render_min_cta_font_size: int = 22
     outputs_dir: Path = Path("outputs")
     tasks_dir: Path = Path("outputs/tasks")
     cache_dir: Path = Path("outputs/cache")
@@ -234,8 +239,13 @@ class Settings(BaseSettings):
             "image_edit_max_reference_images": str(self.resolve_image_edit_max_reference_images()),
             "enable_node_cache": "true" if self.enable_node_cache else "false",
             "enable_file_log": "true" if self.enable_file_log else "false",
+            "default_font_path": str(self.default_font_path),
             "text_render_preset": self.resolve_text_render_preset(),
             "text_render_adaptive_style_enabled": "true" if self.text_render_adaptive_style_enabled else "false",
+            "text_render_min_title_font_size": str(self.text_render_min_title_font_size),
+            "text_render_min_subtitle_font_size": str(self.text_render_min_subtitle_font_size),
+            "text_render_min_bullets_font_size": str(self.text_render_min_bullets_font_size),
+            "text_render_min_cta_font_size": str(self.text_render_min_cta_font_size),
             "proxy_enabled": "true" if self.is_proxy_enabled() else "false",
             "dashscope_api_key_loaded": "true" if bool(self.dashscope_api_key) else "false",
             "dashscope_base_url": self.dashscope_base_url,
@@ -576,6 +586,79 @@ class Settings(BaseSettings):
                 f"Unsupported text render preset: {explicit_value}. Current supported presets: premium_minimal / commercial_balanced."
             )
         return explicit_value
+
+    def resolve_text_render_min_font_size(self, block_kind: str) -> int:
+        """返回指定文字块允许缩小到的最小字号。"""
+        min_size_map = {
+            "title": self.text_render_min_title_font_size,
+            "subtitle": self.text_render_min_subtitle_font_size,
+            "bullets": self.text_render_min_bullets_font_size,
+            "cta": self.text_render_min_cta_font_size,
+        }
+        return int(min_size_map.get(block_kind, self.text_render_min_bullets_font_size))
+
+    def resolve_project_font_candidates(self, requested_font_path: Path | None = None) -> tuple[Path, ...]:
+        """返回项目内优先尝试的中文字体候选列表。"""
+        requested = requested_font_path or self.default_font_path
+        font_dir = self.assets_dir / "fonts"
+        candidates: list[Path] = []
+        known_names = [
+            requested.name,
+            "NotoSansSC-Regular.otf",
+            "NotoSansSC-Medium.otf",
+            "NotoSansSC-Bold.otf",
+            "SourceHanSansSC-Regular.otf",
+            "SourceHanSansCN-Regular.otf",
+            "SourceHanSansSC-Medium.otf",
+            "AlibabaPuHuiTi-3-55-Regular.ttf",
+            "AlibabaPuHuiTi-3-75-SemiBold.ttf",
+        ]
+        for name in known_names:
+            if not name:
+                continue
+            path = requested if requested.name == name else font_dir / name
+            if path not in candidates:
+                candidates.append(path)
+        if requested not in candidates:
+            candidates.insert(0, requested)
+        return tuple(candidates)
+
+    def resolve_system_chinese_font_candidates(self) -> tuple[Path, ...]:
+        """按平台返回更适合中文渲染的系统字体候选。
+
+        Windows 是当前仓库优先兼容目标，因此优先尝试微软雅黑、等线、黑体、宋体。
+        """
+        if os.name == "nt":
+            fonts_dir = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
+            names = [
+                "msyh.ttc",
+                "msyhbd.ttc",
+                "msyhl.ttc",
+                "Deng.ttf",
+                "Dengb.ttf",
+                "simhei.ttf",
+                "simsun.ttc",
+                "simsunb.ttf",
+                "simfang.ttf",
+                "simkai.ttf",
+            ]
+            return tuple(fonts_dir / name for name in names)
+        if sys.platform == "darwin":
+            return (
+                Path("/System/Library/Fonts/PingFang.ttc"),
+                Path("/System/Library/Fonts/Hiragino Sans GB.ttc"),
+                Path("/Library/Fonts/Arial Unicode.ttf"),
+                Path("/System/Library/Fonts/STHeiti Medium.ttc"),
+            )
+        return (
+            Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+            Path("/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc"),
+            Path("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"),
+            Path("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"),
+            Path("/usr/share/fonts/truetype/arphic/ukai.ttc"),
+            Path("/usr/share/fonts/truetype/arphic/uming.ttc"),
+            Path("/usr/share/fonts/opentype/source-han-sans/SourceHanSansSC-Regular.otf"),
+        )
 
     def resolve_text_provider_route(self) -> ResolvedProviderRoute:
         """解析当前文本 provider 路由。"""

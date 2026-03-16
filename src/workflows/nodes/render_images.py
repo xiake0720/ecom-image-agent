@@ -120,8 +120,18 @@ def render_images(state: WorkflowState, deps: WorkflowDependencies) -> dict:
                 f"has_shot_prompt_spec={str(prompt_row['has_shot_prompt_spec']).lower()} "
                 f"reference_asset_ids={render_reference_asset_ids or []} "
                 f"text_safe_zone={prompt_row['text_safe_zone']} "
+                f"must_preserve_visuals={prompt_row['must_preserve_visuals']} "
+                f"must_preserve_texts={prompt_row['must_preserve_texts']} "
+                f"text_anchor_source={prompt_row['text_anchor_source']} "
+                f"text_anchor_status={prompt_row['text_anchor_status']} "
+                f"must_not_change={prompt_row['must_not_change']} "
                 f"keep_subject_rules={prompt_row['keep_subject_rules']} "
-                f"editable_regions={prompt_row['editable_regions']}"
+                f"primary_subject={prompt_row['primary_subject']} "
+                f"secondary_subject={prompt_row['secondary_subject']} "
+                f"allowed_scene_change_level={prompt_row['allowed_scene_change_level']} "
+                f"forbidden_regression_pattern={prompt_row['forbidden_regression_pattern']} "
+                f"editable_regions={prompt_row['editable_regions']} "
+                f"editable_regions_final={prompt_row['editable_regions_final']}"
             )
         )
         logs.append(
@@ -256,15 +266,22 @@ def _build_execution_prompt_plan(
 
     for prompt in prompt_plan.prompts:
         spec = spec_map.get(prompt.shot_id)
-        clean_keep_subject_rules = _resolve_clean_keep_subject_rules(
+        identity_rule_groups = _resolve_identity_rule_groups(
+            product_lock=product_lock,
+            spec=spec,
+        )
+        clean_keep_subject_rules = _flatten_identity_rule_groups(identity_rule_groups)
+        if not clean_keep_subject_rules:
+            clean_keep_subject_rules = _coerce_rule_strings(getattr(prompt, "keep_subject_rules", []) or [])
+        clean_editable_regions = _resolve_final_editable_regions(
             prompt=prompt,
             product_lock=product_lock,
             spec=spec,
         )
-        clean_editable_regions = _resolve_clean_editable_regions(
+        shot_summary = _build_shot_edit_summary(
             prompt=prompt,
-            product_lock=product_lock,
             spec=spec,
+            editable_regions_final=clean_editable_regions,
         )
         prompt_text, execution_source = _resolve_prompt_text_for_generation(
             prompt=prompt,
@@ -272,6 +289,9 @@ def _build_execution_prompt_plan(
             product_lock=product_lock,
             style_architecture=style_architecture,
             generation_mode=generation_mode,
+            identity_rule_groups=identity_rule_groups,
+            editable_regions_final=clean_editable_regions,
+            shot_summary=shot_summary,
         )
         updated_prompt = _build_updated_prompt(
             prompt=prompt,
@@ -291,7 +311,17 @@ def _build_execution_prompt_plan(
                 "has_shot_prompt_spec": spec is not None,
                 "text_safe_zone": _resolve_text_safe_zone(prompt=prompt, spec=spec),
                 "keep_subject_rules": clean_keep_subject_rules,
+                "must_preserve_visuals": identity_rule_groups["must_preserve_visuals"],
+                "must_preserve_texts": identity_rule_groups["must_preserve_texts"],
+                "text_anchor_source": str(getattr(product_lock, "text_anchor_source", "") or "none"),
+                "text_anchor_status": str(getattr(product_lock, "text_anchor_status", "") or "unreadable"),
+                "must_not_change": identity_rule_groups["must_not_change"],
                 "editable_regions": clean_editable_regions,
+                "editable_regions_final": clean_editable_regions,
+                "primary_subject": shot_summary["primary_subject"],
+                "secondary_subject": shot_summary["secondary_subject"],
+                "allowed_scene_change_level": shot_summary["allowed_scene_change_level"],
+                "forbidden_regression_pattern": shot_summary["forbidden_regression_pattern"],
                 "prompt_summary": _summarize_prompt_text(prompt_text),
             }
         )
@@ -306,6 +336,9 @@ def _resolve_prompt_text_for_generation(
     product_lock,
     style_architecture,
     generation_mode: str,
+    identity_rule_groups: dict[str, list[str]],
+    editable_regions_final: list[str],
+    shot_summary: dict[str, object],
 ) -> tuple[str, str]:
     """决定当前 shot 最终使用 contract mode 还是 legacy fallback。"""
     if generation_mode != "image_edit":
@@ -318,6 +351,9 @@ def _resolve_prompt_text_for_generation(
             style_architecture=style_architecture,
             spec=spec,
             text_safe_zone=prompt.text_safe_zone or prompt.text_space_hint,
+            identity_rule_groups=identity_rule_groups,
+            editable_regions_final=editable_regions_final,
+            shot_summary=shot_summary,
         ),
         "image_edit_contract_mode",
     )
@@ -354,21 +390,43 @@ def _resolve_text_safe_zone(*, prompt: ImagePrompt, spec) -> str:
     )
 
 
-def _assemble_image_edit_contract_prompt(*, product_lock, style_architecture, spec, text_safe_zone: str) -> str:
-    """按三层 contract 组装 image_edit 执行 prompt。
-
-    为什么要显式分块：
-    - 让 image_edit 更像“编辑指令”，而不是文生图散文。
-    - 便于日志里快速判断是 product lock、style architecture 还是 shot spec 出问题。
-    - 便于未来替换 provider 时继续复用上游 contract。
-    """
+def _assemble_image_edit_contract_prompt(
+    *,
+    product_lock,
+    style_architecture,
+    spec,
+    text_safe_zone: str,
+    identity_rule_groups: dict[str, list[str]],
+    editable_regions_final: list[str],
+    shot_summary: dict[str, object],
+) -> str:
+    """按更适合 image_edit 的顺序组装执行 prompt，先强调分镜差异，再落商品锁定。"""
     return "\n".join(
         [
             "Edit mode: reference-image commercial generation.",
             "",
+            "[Task Type And Current Shot Objective]",
+            "Task type: image_edit commercial product generation.",
+            f"Current shot type: {spec.shot_type}.",
+            f"Current shot goal: {spec.goal}.",
+            f"Allowed scene change level: {shot_summary['allowed_scene_change_level']}.",
+            "",
+            "[Shot Differentiation Rules]",
+            *shot_summary["differentiation_lines"],
+            "",
+            "[Subject Hierarchy]",
+            f"Primary subject: {shot_summary['primary_subject']}.",
+            f"Secondary subject: {shot_summary['secondary_subject']}.",
+            *shot_summary["subject_hierarchy_lines"],
+            "",
+            "[Allowed Editable Regions]",
+            f"Editable regions final: {'; '.join(editable_regions_final)}.",
+            f"Editable region strategy: {spec.render_constraints.editable_region_strategy}.",
+            "Only change scene, crop, props, lighting, or non-identity elements inside the allowed editable regions.",
+            "",
             "[Product Identity Lock]",
-            "Keep original product identity unchanged.",
-            *_build_product_lock_lines(product_lock, spec),
+            "Keep original product identity unchanged while making only the shot-specific scene changes above.",
+            *_build_product_lock_lines(identity_rule_groups),
             "",
             "[Global Style Architecture]",
             f"Style theme: {style_architecture.style_theme}.",
@@ -379,21 +437,8 @@ def _assemble_image_edit_contract_prompt(*, product_lock, style_architecture, sp
             *_format_named_lines("Background strategy", style_architecture.background_strategy),
             *_format_named_lines("Text strategy", style_architecture.text_strategy),
             "",
-            "[Current Shot Direction]",
-            f"Shot goal: {spec.goal}.",
-            f"Subject direction: {spec.subject_prompt}.",
-            f"Package appearance direction: {spec.package_appearance_prompt}.",
-            f"Composition direction: {spec.composition_prompt}.",
-            f"Background direction: {spec.background_prompt}.",
-            f"Lighting direction: {spec.lighting_prompt}.",
-            f"Style direction: {spec.style_prompt}.",
-            f"Quality direction: {spec.quality_prompt}.",
-            "",
             "[Layout And Text Safe Zone]",
             *_build_layout_lines(spec, text_safe_zone),
-            "",
-            "[Render Constraints]",
-            *_build_render_constraint_lines(spec),
             "",
             "[Negative Rules]",
             *_build_negative_lines(style_architecture, spec),
@@ -401,66 +446,102 @@ def _assemble_image_edit_contract_prompt(*, product_lock, style_architecture, sp
     ).strip()
 
 
-def _build_product_lock_lines(product_lock, spec) -> list[str]:
-    """把 product lock 转成稳定的编辑约束段落。"""
+def _build_product_lock_lines(identity_rule_groups: dict[str, list[str]]) -> list[str]:
+    """把商品锁定整理成三组稳定规则，避免重复堆叠导致 shot differentiation 被淹没。"""
     lines: list[str] = []
-    locked_elements = _coerce_rule_strings(getattr(product_lock, "locked_elements", []) or [])
-    if locked_elements:
-        lines.append(f"Preserve locked elements: {'; '.join(locked_elements)}.")
-    must_preserve_texts = _coerce_rule_strings(getattr(product_lock, "must_preserve_texts", []) or [])
-    if must_preserve_texts:
-        lines.append(f"Preserve brand and package texts exactly: {'; '.join(must_preserve_texts)}.")
-    if getattr(product_lock, "package_type", ""):
-        lines.append(f"Preserve package structure and proportions: {product_lock.package_type}.")
-    if getattr(product_lock, "label_structure", ""):
-        lines.append(f"Preserve label layout and placement: {product_lock.label_structure}.")
-    if getattr(product_lock, "primary_color", ""):
-        lines.append(f"Preserve main product color identity: {product_lock.primary_color}.")
-    if getattr(product_lock, "material", ""):
-        lines.append(f"Preserve visible material impression: {product_lock.material}.")
-    editable_elements = _coerce_rule_strings(getattr(product_lock, "editable_elements", []) or [])
-    if editable_elements:
-        lines.append(f"Only allow scene-side edits on: {'; '.join(editable_elements)}.")
-    if spec is not None and getattr(spec, "product_lock", None) is not None:
-        must_preserve = _coerce_rule_strings(spec.product_lock.must_preserve)
-        if must_preserve:
-            lines.append(f"Must preserve from shot spec: {'; '.join(must_preserve)}.")
-        spec_must_preserve_texts = _coerce_rule_strings(spec.product_lock.must_preserve_texts)
-        if spec_must_preserve_texts:
-            lines.append(f"Must preserve texts from shot spec: {'; '.join(spec_must_preserve_texts)}.")
-        spec_editable_regions = _coerce_rule_strings(spec.product_lock.editable_regions)
-        if spec_editable_regions:
-            lines.append(f"Editable regions from shot spec: {'; '.join(spec_editable_regions)}.")
-        must_not_change = _coerce_rule_strings(spec.product_lock.must_not_change)
-        if must_not_change:
-            lines.append(f"Must not change: {'; '.join(must_not_change)}.")
-    return lines or ["Preserve package structure, brand text, label hierarchy, and dominant product color."]
+    if identity_rule_groups["must_preserve_visuals"]:
+        lines.append(f"Must preserve visuals: {'; '.join(identity_rule_groups['must_preserve_visuals'])}.")
+    if identity_rule_groups["must_preserve_texts"]:
+        lines.append(f"Must preserve texts: {'; '.join(identity_rule_groups['must_preserve_texts'])}.")
+    if identity_rule_groups["must_not_change"]:
+        lines.append(f"Must not change: {'; '.join(identity_rule_groups['must_not_change'])}.")
+    return lines or ["Must preserve visuals: package structure; label hierarchy; dominant product color."]
 
 
-def _resolve_clean_keep_subject_rules(*, prompt: ImagePrompt, product_lock, spec) -> list[str]:
-    """统一生成调试日志里的主体锁定规则，避免出现 tuple / dict items 的字符串化噪声。"""
-    if spec is not None and getattr(spec, "product_lock", None) is not None:
-        return _coerce_rule_strings(
+def _resolve_identity_rule_groups(*, product_lock, spec) -> dict[str, list[str]]:
+    """把商品锁定拆成视觉、文本和禁止变化三组，供 prompt 与日志共用。"""
+    product_visuals = _coerce_rule_strings(getattr(product_lock, "locked_elements", []) or [])
+    visual_identity = getattr(product_lock, "visual_identity", None)
+    if visual_identity is not None:
+        product_visuals = _merge_unique_strings(product_visuals, _coerce_rule_strings(getattr(visual_identity, "must_preserve", []) or []))
+    visual_overrides = _coerce_rule_strings(spec.product_lock.must_preserve) if spec is not None and getattr(spec, "product_lock", None) is not None else []
+    preserve_texts = _merge_unique_strings(
+        _coerce_rule_strings(getattr(product_lock, "must_preserve_texts", []) or []),
+        _coerce_rule_strings(spec.product_lock.must_preserve_texts) if spec is not None and getattr(spec, "product_lock", None) is not None else [],
+    )
+    must_not_change = _coerce_rule_strings(spec.product_lock.must_not_change) if spec is not None and getattr(spec, "product_lock", None) is not None else []
+    if not must_not_change:
+        must_not_change = _coerce_rule_strings(
             [
-                *list(spec.product_lock.must_preserve or []),
-                *[f"must preserve texts: {item}" for item in spec.product_lock.must_preserve_texts],
-                *[f"must not change: {item}" for item in spec.product_lock.must_not_change],
+                getattr(product_lock, "package_type", ""),
+                getattr(product_lock, "label_structure", ""),
+                getattr(product_lock, "primary_color", ""),
+                getattr(product_lock, "material", ""),
             ]
         )
-    prompt_rules = _coerce_rule_strings(getattr(prompt, "keep_subject_rules", []) or [])
-    if prompt_rules:
-        return prompt_rules
-    return _coerce_rule_strings(getattr(product_lock, "locked_elements", []) or [])
+    return {
+        "must_preserve_visuals": _merge_unique_strings(product_visuals, visual_overrides),
+        "must_preserve_texts": preserve_texts,
+        "must_not_change": must_not_change,
+    }
 
 
-def _resolve_clean_editable_regions(*, prompt: ImagePrompt, product_lock, spec) -> list[str]:
-    """统一生成调试日志里的可编辑区域，优先使用结构化 spec。"""
-    if spec is not None and getattr(spec, "product_lock", None) is not None:
-        return _coerce_rule_strings(spec.product_lock.editable_regions)
-    prompt_regions = _coerce_rule_strings(getattr(prompt, "editable_regions", []) or [])
-    if prompt_regions:
-        return prompt_regions
-    return _coerce_rule_strings(getattr(product_lock, "editable_elements", []) or [])
+def _flatten_identity_rule_groups(identity_rule_groups: dict[str, list[str]]) -> list[str]:
+    """兼容旧 keep_subject_rules 字段，但内部已经改成三组清晰规则来源。"""
+    return _merge_unique_strings(
+        identity_rule_groups["must_preserve_visuals"],
+        [f"must preserve texts: {item}" for item in identity_rule_groups["must_preserve_texts"]],
+        [f"must not change: {item}" for item in identity_rule_groups["must_not_change"]],
+    )
+
+
+def _resolve_final_editable_regions(*, prompt: ImagePrompt, product_lock, spec) -> list[str]:
+    """统一生成最终 editable_regions，保证 image_edit 日志和执行 prompt 都不再频繁为空。"""
+    shot_type = getattr(spec, "shot_type", "") or prompt.shot_type
+    spec_regions = _coerce_rule_strings(spec.product_lock.editable_regions) if spec is not None and getattr(spec, "product_lock", None) is not None else []
+    return _merge_unique_strings(
+        _editable_region_defaults_for_shot_type(shot_type),
+        [_normalize_editable_region_name(item) for item in spec_regions],
+        [_normalize_editable_region_name(item) for item in _coerce_rule_strings(getattr(prompt, "editable_regions", []) or [])],
+        [_normalize_editable_region_name(item) for item in _coerce_rule_strings(getattr(product_lock, "editable_elements", []) or [])],
+    )
+
+
+def _build_shot_edit_summary(*, prompt: ImagePrompt, spec, editable_regions_final: list[str]) -> dict[str, object]:
+    """抽取当前 shot 的执行摘要，供最终 prompt 前置强调分镜变化。"""
+    if spec is None:
+        return {
+            "primary_subject": prompt.shot_type or "uploaded product reference",
+            "secondary_subject": "supporting scene only",
+            "allowed_scene_change_level": "fallback_from_legacy_prompt",
+            "forbidden_regression_pattern": "generic hero packshot",
+            "differentiation_lines": ["Fallback to legacy prompt for this shot."],
+            "subject_hierarchy_lines": [f"Scene edits may appear in: {'; '.join(editable_regions_final)}."],
+        }
+    primary_subject, secondary_subject, reference_anchor_line, subject_rule_lines = _parse_subject_prompt(spec.subject_prompt)
+    differentiation_lines = [
+        f"This shot must not regress into: {_resolve_forbidden_regression_pattern(spec, prompt.shot_type)}.",
+        f"Reference image priority: {spec.render_constraints.reference_image_priority}.",
+        f"Consistency strength: {spec.render_constraints.consistency_strength}.",
+        f"Product lock level: {spec.render_constraints.product_lock_level}.",
+        *[f"- {line}" for line in subject_rule_lines],
+        f"- Composition direction: {_clean_prompt_fragment(spec.composition_prompt)}.",
+        f"- Background direction: {_clean_prompt_fragment(spec.background_prompt)}.",
+        f"- Lighting direction: {_clean_prompt_fragment(spec.lighting_prompt)}.",
+        f"- Quality direction: {_clean_prompt_fragment(spec.quality_prompt)}.",
+    ]
+    subject_hierarchy_lines: list[str] = []
+    if reference_anchor_line:
+        subject_hierarchy_lines.append(f"Reference anchor: {reference_anchor_line}.")
+    subject_hierarchy_lines.append(f"Scene edits may appear in: {'; '.join(editable_regions_final)}.")
+    return {
+        "primary_subject": primary_subject or "uploaded product reference",
+        "secondary_subject": secondary_subject or "supporting scene only",
+        "allowed_scene_change_level": _resolve_allowed_scene_change_level(spec),
+        "forbidden_regression_pattern": _resolve_forbidden_regression_pattern(spec, prompt.shot_type),
+        "differentiation_lines": differentiation_lines,
+        "subject_hierarchy_lines": subject_hierarchy_lines,
+    }
 
 
 def _coerce_rule_strings(values) -> list[str]:
@@ -494,6 +575,116 @@ def _coerce_rule_strings(values) -> list[str]:
         if normalized not in cleaned:
             cleaned.append(normalized)
     return cleaned
+
+
+def _editable_region_defaults_for_shot_type(shot_type: str) -> list[str]:
+    """按 shot_type 提供最小可编辑区域兜底，保证 image_edit 有足够变化空间。"""
+    mapping = {
+        "hero_brand": ["background", "props", "lighting", "crop"],
+        "carry_action": ["hand_pose", "background", "props", "lighting", "crop"],
+        "open_box_structure": ["package_structure", "background", "props", "lighting", "crop"],
+        "package_detail": ["crop", "lighting", "detail_emphasis", "background"],
+        "label_or_material_detail": ["crop", "detail_emphasis", "lighting", "background"],
+        "package_with_leaf_hint": ["foreground_leaf_subject", "background", "props", "lighting", "crop"],
+        "dry_leaf_detail": ["foreground_leaf_subject", "background", "props", "lighting", "depth_of_field"],
+        "tea_soup_experience": ["tea_soup_subject", "vessel", "background", "props", "lighting"],
+        "lifestyle_or_brewing_context": ["props", "background", "scene_context", "depth_of_field", "lighting"],
+        "package_in_brewing_context": ["props", "background", "scene_context", "depth_of_field", "lighting"],
+    }
+    return list(mapping.get(shot_type, ["background", "props", "lighting", "crop"]))
+
+
+def _normalize_editable_region_name(value: str) -> str:
+    """把上游不同命名收敛成 render 阶段更稳定的区域标签。"""
+    normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "surface_styling": "props",
+        "prop_accents": "props",
+        "micro_props": "props",
+        "shadow_shape": "lighting",
+        "surface_highlights": "detail_emphasis",
+        "crop_window": "crop",
+        "foreground_leaves": "foreground_leaf_subject",
+        "breathing_space_around_leaves": "depth_of_field",
+        "background_anchor_placement": "background",
+        "tea_vessel": "vessel",
+        "tea_liquid": "tea_soup_subject",
+        "background_package_anchor": "background",
+        "brewing_props": "props",
+        "vessel_placement": "vessel",
+        "background_context": "scene_context",
+        "inner_tray_visibility": "package_structure",
+        "lid_angle": "package_structure",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _parse_subject_prompt(subject_prompt: str) -> tuple[str, str, str, list[str]]:
+    """从结构化 subject_prompt 里提取主次主体和剩余执行规则。"""
+    primary_subject = ""
+    secondary_subject = ""
+    reference_anchor_line = ""
+    rule_lines: list[str] = []
+    for raw in str(subject_prompt or "").split("."):
+        line = raw.strip()
+        if not line:
+            continue
+        lower = line.lower()
+        if lower.startswith("primary subject:"):
+            primary_subject = line.split(":", maxsplit=1)[1].strip()
+            continue
+        if lower.startswith("secondary subject:"):
+            secondary_subject = line.split(":", maxsplit=1)[1].strip()
+            continue
+        if lower.startswith("use the uploaded"):
+            reference_anchor_line = line
+            continue
+        rule_lines.append(line)
+    return primary_subject, secondary_subject, reference_anchor_line, rule_lines
+
+
+def _resolve_allowed_scene_change_level(spec) -> str:
+    """把 product_lock_level 转成更直观的 scene change 摘要。"""
+    if spec is None:
+        return "fallback_from_legacy_prompt"
+    mapping = {
+        "strong_product_lock": "low_scene_change_locked_product",
+        "medium_product_lock": "moderate_scene_change_keep_package_readable",
+        "anchor_only_product_lock": "high_scene_change_package_as_brand_anchor",
+    }
+    return mapping.get(spec.render_constraints.product_lock_level, "moderate_scene_change_keep_package_readable")
+
+
+def _resolve_forbidden_regression_pattern(spec, shot_type: str) -> str:
+    """输出每个 shot 不应退化回去的典型错误形态。"""
+    current_shot_type = getattr(spec, "shot_type", "") or shot_type
+    mapping = {
+        "hero_brand": "detail crop or prop-led auxiliary scene",
+        "carry_action": "isolated hero packshot without carry gesture",
+        "open_box_structure": "closed package hero frame",
+        "package_detail": "full front-facing hero packshot",
+        "label_or_material_detail": "full package hero view",
+        "package_with_leaf_hint": "isolated studio packshot with no leaf cue",
+        "dry_leaf_detail": "package-only composition or hero packshot",
+        "tea_soup_experience": "package-only composition without visible brewed tea",
+        "lifestyle_or_brewing_context": "isolated studio packshot with token props only",
+        "package_in_brewing_context": "isolated packshot with decorative props only",
+    }
+    return mapping.get(current_shot_type, "generic hero packshot")
+
+
+def _merge_unique_strings(*groups: list[str]) -> list[str]:
+    """保持原始顺序合并去重，避免日志和 prompt 反复输出同义内容。"""
+    merged: list[str] = []
+    seen: set[str] = set()
+    for group in groups:
+        for item in group:
+            text = str(item or "").strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            merged.append(text)
+    return merged
 
 
 def _clean_prompt_fragment(value) -> str:
@@ -556,11 +747,13 @@ def _build_layout_lines(spec, text_safe_zone: str) -> list[str]:
 
 
 def _build_render_constraint_lines(spec) -> list[str]:
-    """把 render constraints 转成稳定段落。"""
+    """把 render constraints 转成稳定段落，保留 shot 分层约束。"""
     lines = [
         f"Generation mode target: {spec.render_constraints.generation_mode}.",
         f"Reference image priority: {spec.render_constraints.reference_image_priority}.",
         f"Consistency strength: {spec.render_constraints.consistency_strength}.",
+        f"Product lock level: {spec.render_constraints.product_lock_level}.",
+        f"Editable region strategy: {spec.render_constraints.editable_region_strategy}.",
         f"Allow human presence: {str(spec.render_constraints.allow_human_presence).lower()}.",
         f"Allow hand only: {str(spec.render_constraints.allow_hand_only).lower()}.",
     ]

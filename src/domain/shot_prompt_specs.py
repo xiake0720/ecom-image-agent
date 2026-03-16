@@ -98,6 +98,8 @@ class RenderConstraintSpec(BaseModel):
     generation_mode: str = "t2i"
     reference_image_priority: str = "none"
     consistency_strength: str = "medium"
+    product_lock_level: str = "strong_product_lock"
+    editable_region_strategy: str = "background_props_only"
     allow_human_presence: bool = False
     allow_hand_only: bool = False
 
@@ -107,6 +109,8 @@ class RenderConstraintSpec(BaseModel):
             f"generation_mode={self.generation_mode}",
             f"reference_image_priority={self.reference_image_priority}",
             f"consistency_strength={self.consistency_strength}",
+            f"product_lock_level={self.product_lock_level}",
+            f"editable_region_strategy={self.editable_region_strategy}",
             f"allow_human_presence={str(self.allow_human_presence).lower()}",
             f"allow_hand_only={str(self.allow_hand_only).lower()}",
         ]
@@ -198,12 +202,25 @@ class ShotPromptSpec(BaseModel):
         generation_mode = "image_edit" if any("image_edit" in line for line in lines) else "t2i"
         reference_image_priority = "main_packshot" if generation_mode == "image_edit" else "none"
         consistency_strength = "high" if any("strict" in line or "high" in line for line in lines) else "medium"
+        if any("anchor_only_product_lock" in line for line in lines):
+            product_lock_level = "anchor_only_product_lock"
+        elif any("medium_product_lock" in line for line in lines):
+            product_lock_level = "medium_product_lock"
+        else:
+            product_lock_level = "strong_product_lock"
+        editable_region_strategy = "background_props_only"
+        for line in lines:
+            if "editable_region_strategy=" in line:
+                editable_region_strategy = line.split("editable_region_strategy=", maxsplit=1)[1].strip() or editable_region_strategy
+                break
         allow_hand_only = any("hand" in line for line in lines)
         allow_human_presence = allow_hand_only or any("human" in line or "person" in line for line in lines)
         return {
             "generation_mode": generation_mode,
             "reference_image_priority": reference_image_priority,
             "consistency_strength": consistency_strength,
+            "product_lock_level": product_lock_level,
+            "editable_region_strategy": editable_region_strategy,
             "allow_human_presence": allow_human_presence,
             "allow_hand_only": allow_hand_only,
         }

@@ -96,9 +96,13 @@ class ProductAnalysis(BaseModel):
     source_asset_ids: list[str] = Field(default_factory=list)
     locked_elements: list[str] = Field(default_factory=list)
     must_preserve_texts: list[str] = Field(default_factory=list)
+    text_anchor_status: Literal["readable", "uncertain", "unreadable"] = "unreadable"
+    text_anchor_source: Literal["provider", "fallback", "none"] = "none"
+    text_anchor_notes: list[str] = Field(default_factory=list)
     editable_elements: list[str] = Field(default_factory=list)
     package_type: str = ""
     package_template_family: str = ""
+    asset_completeness_mode: str = ""
     primary_color: str = ""
     material: str = ""
     label_structure: str = ""

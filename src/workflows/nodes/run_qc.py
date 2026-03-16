@@ -35,6 +35,7 @@ from src.services.qc.task_qc import (
     build_text_area_complexity_check,
     build_text_background_contrast_check,
     build_text_overflow_risk_check,
+    build_visual_shot_diversity_check,
 )
 from src.workflows.state import WorkflowDependencies, WorkflowState
 
@@ -76,6 +77,10 @@ def run_qc(state: WorkflowState, deps: WorkflowDependencies) -> dict:
     )
     checks.append(shot_completeness_check)
     logs.append(f"[run_qc] shot_count_summary={shot_completeness_check.details}")
+    hero_reference_image_path = _resolve_hero_reference_image_path(
+        generation_result=generation_result,
+        shot_plan=state["shot_plan"],
+    )
 
     for image in generation_result.images:
         checks.append(build_dimension_check(image))
@@ -146,11 +151,22 @@ def run_qc(state: WorkflowState, deps: WorkflowDependencies) -> dict:
             image=image,
             shot=shot_item,
             shot_prompt_spec=shot_prompt_spec,
+            hero_reference_image_path=hero_reference_image_path,
         )
         checks.append(shot_type_match_check)
         logs.append(
             f"[run_qc] shot_type_match_summary shot_id={image.shot_id} status={shot_type_match_check.status} details={shot_type_match_check.details}"
         )
+
+    diversity_check = build_visual_shot_diversity_check(
+        generation_result=generation_result,
+        shot_plan=state["shot_plan"],
+        product_analysis=state.get("product_analysis"),
+    )
+    checks.append(diversity_check)
+    logs.append(
+        f"[run_qc] visual_shot_diversity_summary status={diversity_check.status} details={diversity_check.details}"
+    )
 
     filename = "qc_report_preview.json" if render_variant == "preview" else "qc_report.json"
     report = _build_qc_report(checks)
@@ -223,6 +239,7 @@ def _build_qc_report(checks: list[QCCheck]) -> QCReport:
         shot_completeness_check=_build_summary_items(checks, {"shot_completeness_check"}),
         product_consistency_check=_build_summary_items(checks, {"product_consistency_check"}),
         shot_type_match_check=_build_summary_items(checks, {"shot_type_match_check"}),
+        visual_shot_diversity_check=_build_summary_items(checks, {"visual_shot_diversity_check"}),
         text_safe_zone_check=_build_summary_items(checks, {"text_safe_zone_check"}),
         text_readability_check=_build_summary_items(checks, {"text_readability_check"}),
     )
@@ -257,3 +274,16 @@ def _resolve_text_render_reports(*, state: WorkflowState, task_dir: Path, render
         for item in shots
         if item.get("shot_id")
     }
+
+
+def _resolve_hero_reference_image_path(*, generation_result, shot_plan) -> str:
+    """解析 hero_brand 对应成图路径，供其他 shot 做轻量相似度对比。"""
+    hero_shot_ids = [shot.shot_id for shot in shot_plan.shots if shot.shot_type == "hero_brand"]
+    if not hero_shot_ids:
+        return ""
+    image_map = {image.shot_id: image.image_path for image in generation_result.images}
+    for shot_id in hero_shot_ids:
+        image_path = image_map.get(shot_id)
+        if image_path:
+            return str(image_path)
+    return ""

@@ -133,7 +133,8 @@ def _select_text_safe_zone(
 def _build_blocks_for_zone(*, zone: TextSafeZone, canvas_width: int, canvas_height: int) -> list[LayoutBlock]:
     zone_rect = _zone_rect(zone, canvas_width=canvas_width, canvas_height=canvas_height)
     scale = min(canvas_width / 1440, canvas_height / 1440)
-    padding_x = int(zone_rect.width * 0.06)
+    # 标题和副标题优先横向展开，避免在安全区内再次被压成过窄竖列。
+    padding_x = int(zone_rect.width * 0.04)
     title_y = int(zone_rect.y)
     title_height = int(zone_rect.height * 0.17)
     subtitle_y = title_y + title_height + int(zone_rect.height * 0.03)
@@ -160,7 +161,7 @@ def _build_blocks_for_zone(*, zone: TextSafeZone, canvas_width: int, canvas_heig
             kind="subtitle",
             x=title_x,
             y=subtitle_y,
-            width=max(200, int(block_width * 0.92)),
+            width=max(220, int(block_width * 0.98)),
             height=subtitle_height,
             font_size=max(28, int(48 * scale)),
             align=align,
@@ -169,7 +170,7 @@ def _build_blocks_for_zone(*, zone: TextSafeZone, canvas_width: int, canvas_heig
             kind="bullets",
             x=title_x,
             y=bullets_y,
-            width=max(200, int(block_width * 0.88)),
+            width=max(220, int(block_width * 0.94)),
             height=bullets_height,
             font_size=max(24, int(40 * scale)),
             align=align,
@@ -188,7 +189,8 @@ def _build_blocks_for_zone(*, zone: TextSafeZone, canvas_width: int, canvas_heig
 
 def _zone_rect(zone: TextSafeZone, *, canvas_width: int, canvas_height: int) -> Rect:
     margin_x = canvas_width * 0.07
-    width = canvas_width * 0.36
+    # 文本安全区略放宽，让标题和副标题能优先占用横向空间。
+    width = canvas_width * 0.42
     top_height = canvas_height * 0.7
     center_height = canvas_height * 0.6
     bottom_height = canvas_height * 0.54

@@ -9,6 +9,7 @@ from src.domain.asset import Asset, AssetType
 from src.domain.generation_result import GenerationResult
 from src.domain.image_prompt_plan import ImagePrompt, ImagePromptPlan
 from src.domain.layout_plan import LayoutPlan
+from src.domain.shot_plan import ShotPlan, ShotSpec
 from src.domain.task import Task
 from src.services.analysis.product_analyzer import build_mock_product_analysis
 from src.services.planning.layout_generator import build_mock_layout_plan
@@ -232,6 +233,103 @@ def test_shot_prompt_refiner_outputs_structured_eight_layer_specs() -> None:
     assert any("generation_mode_summary=t2i" in line for line in result["logs"])
 
 
+def test_shot_prompt_refiner_adds_exclusive_rules_for_tin_can_detail_modes() -> None:
+    task = _build_task("task-shot-spec-diff")
+    analysis = build_mock_product_analysis([], task.product_name).model_copy(
+        update={
+            "package_template_family": "tea_tin_can",
+            "asset_completeness_mode": "packshot_plus_detail",
+            "package_type": "tea_tin_can",
+            "material": "metal tin",
+            "label_structure": "front wrap label",
+            "primary_color": "green",
+        }
+    )
+    shot_plan = ShotPlan(
+        shots=[
+            ShotSpec(
+                shot_id="shot_01",
+                title="Hero",
+                purpose="hero",
+                composition_hint="stable hero",
+                copy_goal="brand",
+                shot_type="hero_brand",
+            ),
+            ShotSpec(
+                shot_id="shot_02",
+                title="Detail",
+                purpose="detail",
+                composition_hint="close crop",
+                copy_goal="detail",
+                shot_type="package_detail",
+            ),
+            ShotSpec(
+                shot_id="shot_03",
+                title="Leaf",
+                purpose="leaf",
+                composition_hint="leaf foreground",
+                copy_goal="leaf",
+                shot_type="dry_leaf_detail",
+            ),
+            ShotSpec(
+                shot_id="shot_04",
+                title="Soup",
+                purpose="soup",
+                composition_hint="vessel foreground",
+                copy_goal="soup",
+                shot_type="tea_soup_experience",
+            ),
+            ShotSpec(
+                shot_id="shot_05",
+                title="Context",
+                purpose="context",
+                composition_hint="brewing table",
+                copy_goal="context",
+                shot_type="lifestyle_or_brewing_context",
+            ),
+        ]
+    )
+    layout_plan = build_mock_layout_plan(shot_plan, task.output_size, product_analysis=analysis)
+    style_architecture = style_director(
+        {
+            "task": task,
+            "product_analysis": analysis,
+            "logs": [],
+            "cache_enabled": False,
+            "ignore_cache": False,
+        },
+        _build_deps(),
+    )["style_architecture"]
+
+    result = shot_prompt_refiner(
+        {
+            "task": task,
+            "product_analysis": analysis,
+            "style_architecture": style_architecture,
+            "shot_plan": shot_plan,
+            "layout_plan": layout_plan,
+            "logs": [],
+            "cache_enabled": False,
+            "ignore_cache": False,
+        },
+        _build_deps(),
+    )
+
+    spec_map = {spec.shot_type: spec for spec in result["shot_prompt_specs"].specs}
+
+    assert "absolute first subject" in spec_map["hero_brand"].subject_prompt
+    assert "must not look like the hero image" in spec_map["package_detail"].subject_prompt
+    assert "package_detail must not look like hero image" in spec_map["package_detail"].negative_prompt
+    assert spec_map["package_detail"].render_constraints.product_lock_level == "medium_product_lock"
+    assert "Dry tea leaves must be the absolute first subject" in spec_map["dry_leaf_detail"].subject_prompt
+    assert spec_map["dry_leaf_detail"].render_constraints.product_lock_level == "anchor_only_product_lock"
+    assert "Visible liquid is mandatory" in spec_map["tea_soup_experience"].subject_prompt
+    assert "tea_soup_experience must include brewed tea vessel" in spec_map["tea_soup_experience"].negative_prompt
+    assert "Brewing props or explicit scene anchors are mandatory" in spec_map["lifestyle_or_brewing_context"].subject_prompt
+    assert any("primary_subject=dry tea leaves in the foreground" in line for line in result["logs"])
+    assert any("banned_fallback_pattern=full front hero package composition" in line for line in result["logs"])
+
+
 def test_render_images_assembles_execution_prompt_from_shot_spec(tmp_path: Path) -> None:
     task = _build_task(f"task-render-spec-{tmp_path.name}")
     analysis = build_mock_product_analysis([], task.product_name)
@@ -289,18 +387,28 @@ def test_render_images_assembles_execution_prompt_from_shot_spec(tmp_path: Path)
     result = render_images(state, deps)
 
     captured_prompt = deps.image_generation_provider.captured_plan.prompts[0].edit_instruction
+    assert captured_prompt.index("[Task Type And Current Shot Objective]") < captured_prompt.index("[Product Identity Lock]")
+    assert captured_prompt.index("[Shot Differentiation Rules]") < captured_prompt.index("[Product Identity Lock]")
+    assert captured_prompt.index("[Allowed Editable Regions]") < captured_prompt.index("[Product Identity Lock]")
+    assert "[Task Type And Current Shot Objective]" in captured_prompt
+    assert "[Shot Differentiation Rules]" in captured_prompt
+    assert "[Subject Hierarchy]" in captured_prompt
+    assert "[Allowed Editable Regions]" in captured_prompt
     assert "[Product Identity Lock]" in captured_prompt
     assert "[Global Style Architecture]" in captured_prompt
-    assert "[Current Shot Direction]" in captured_prompt
     assert "[Layout And Text Safe Zone]" in captured_prompt
-    assert "Keep original product identity unchanged." in captured_prompt
-    assert "Must preserve from shot spec:" in captured_prompt
-    assert "Preserve brand and package texts exactly:" in captured_prompt
-    assert "must not change" in captured_prompt
+    assert "Allowed scene change level:" in captured_prompt
+    assert "Editable regions final:" in captured_prompt
+    assert "Must preserve visuals:" in captured_prompt
+    assert "Must preserve texts:" in captured_prompt
+    assert "Must not change:" in captured_prompt
+    assert "Editable region strategy:" in captured_prompt
     assert "legacy prompt" not in captured_prompt
     assert "('" not in captured_prompt
     assert any("execution_source=image_edit_contract_mode" in line for line in result["logs"])
     assert any("reference_asset_ids=['asset-01', 'asset-02']" in line for line in result["logs"])
+    assert any("allowed_scene_change_level=" in line for line in result["logs"])
+    assert any("editable_regions_final=" in line for line in result["logs"])
     assert not any("keep_subject_rules=[\"('" in line or "keep_subject_rules=['(\"" in line for line in result["logs"])
 
 

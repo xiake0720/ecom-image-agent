@@ -40,6 +40,12 @@
   - 测试方式、验证命令、运行方式
   - 文件职责变化
 - 任何新增 JSON 落盘产物、schema、state 字段、关键日志字段，都必须同步写入 `docs/contracts/` 或 `docs/workflow.md`。
+- 中文后贴字相关改动，必须同步记录字体来源、fallback 状态、最小字号约束和测试产物位置。
+- `analyze_product` / `product_analysis` 相关改动，必须同步记录 `must_preserve_texts` 提取规则、`text_anchor_status / text_anchor_source` 语义、provider 空返回时的 fallback 策略，以及新增的文字锚点日志字段。
+- `generate_copy` 相关改动，必须同步记录贴图文案长度阈值、品牌漂移防护、shot-type copy 风格约束，以及 `original_length / normalized_length / copy_shortened / brand_anchor_valid` 等日志字段。
+- 茶叶固定模板相关改动，必须同步记录 `package_template_family`、`asset_completeness_mode` 和最终命中的模板名。
+- `shot_prompt_refiner` 相关改动，必须同步记录各 `shot_type` 的排他规则、`render_constraints` 分层，以及新增的 shot differentiation 日志字段。
+- `render_images` image_edit contract assembly 相关改动，必须同步记录 prompt section 顺序、锁定规则分组方式，以及 `editable_regions_final` 等执行日志字段。
 - 任何 UI 行为变化、任务状态变化、preview / final 行为变化，都必须同步更新 `docs/workflow.md` 或等价文档。
 - 任何 provider 路由、模型切换、图像生成模式分流变化，都必须同步更新 `docs/providers.md` 或等价文档。
 - 以后任何新增或修改的核心 Python 文件，都必须补齐：

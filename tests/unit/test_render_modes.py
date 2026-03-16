@@ -101,7 +101,7 @@ def test_render_images_preview_mode_renders_only_preview_subset(tmp_path: Path) 
     assert any("render_mode=preview" in log for log in result["logs"])
     assert any("render_generation_mode=image_edit" in log for log in result["logs"])
     assert any("keep_subject_rules=['keep pack']" in log for log in result["logs"])
-    assert any("editable_regions=['background']" in log for log in result["logs"])
+    assert any("editable_regions_final=" in log for log in result["logs"])
     assert any("text_safe_zone=top_right" in log for log in result["logs"])
     assert image_provider.reference_asset_ids == ["asset-01"]
     assert any("selected_main_asset_id=asset-01" in log for log in result["logs"])

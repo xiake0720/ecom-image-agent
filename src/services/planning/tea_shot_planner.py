@@ -41,6 +41,14 @@ TEA_TIN_CAN_PHASE1_SHOTS: tuple[tuple[str, str], ...] = (
     ("shot_05", "lifestyle_or_brewing_context"),
 )
 
+TEA_TIN_CAN_PACKSHOT_ONLY_PHASE1_SHOTS: tuple[tuple[str, str], ...] = (
+    ("shot_01", "hero_brand"),
+    ("shot_02", "package_detail"),
+    ("shot_03", "label_or_material_detail"),
+    ("shot_04", "package_with_leaf_hint"),
+    ("shot_05", "package_in_brewing_context"),
+)
+
 TEA_POUCH_PHASE1_SHOTS: tuple[tuple[str, str], ...] = (
     ("shot_01", "hero_brand"),
     ("shot_02", "package_detail"),
@@ -66,8 +74,11 @@ def build_tea_shot_slots(task: Task, analysis: ProductAnalysis) -> list[ShotSpec
     """
     del task
     template_family = resolve_tea_package_template_family(analysis)
+    asset_completeness_mode = resolve_tea_asset_completeness_mode(analysis)
     if template_family == "tea_tin_can":
-        return _build_tea_tin_can_slots(analysis)
+        if asset_completeness_mode == "packshot_only":
+            return _build_tea_tin_can_packshot_only_slots(analysis)
+        return _build_tea_tin_can_packshot_plus_detail_slots(analysis)
     if template_family == "tea_pouch":
         return _build_tea_pouch_slots(analysis)
     return _build_tea_gift_box_slots(analysis)
@@ -106,13 +117,36 @@ def resolve_tea_package_template_family(analysis: ProductAnalysis) -> str:
     return "tea_gift_box"
 
 
+def resolve_tea_asset_completeness_mode(analysis: ProductAnalysis) -> str:
+    """解析茶叶模板使用的素材完备度模式。"""
+    explicit_mode = str(getattr(analysis, "asset_completeness_mode", "") or "").strip().lower()
+    if explicit_mode in {"packshot_only", "packshot_plus_detail"}:
+        return explicit_mode
+    return "packshot_only"
+
+
+def resolve_tea_template_name(analysis: ProductAnalysis) -> str:
+    """返回当前茶叶商品实际命中的模板名。
+
+    模板名会同时体现包型和素材完备度，便于日志、测试和 QC 对齐。
+    """
+    template_family = resolve_tea_package_template_family(analysis)
+    asset_completeness_mode = resolve_tea_asset_completeness_mode(analysis)
+    if template_family == "tea_tin_can":
+        return f"{template_family}_{asset_completeness_mode}"
+    return f"{template_family}_default"
+
+
 def get_tea_template_shot_pairs(analysis: ProductAnalysis) -> tuple[tuple[str, str], ...]:
     """返回当前茶叶商品应该使用的固定五图顺序。
 
     这个函数给 planner、QC、测试共用，避免某处仍然写死礼盒模板。
     """
     template_family = resolve_tea_package_template_family(analysis)
+    asset_completeness_mode = resolve_tea_asset_completeness_mode(analysis)
     if template_family == "tea_tin_can":
+        if asset_completeness_mode == "packshot_only":
+            return TEA_TIN_CAN_PACKSHOT_ONLY_PHASE1_SHOTS
         return TEA_TIN_CAN_PHASE1_SHOTS
     if template_family == "tea_pouch":
         return TEA_POUCH_PHASE1_SHOTS
@@ -167,6 +201,8 @@ def build_tea_enrichment_context(
         "planner_mode": "fixed_phase1_five_shots",
         "category_family": "tea",
         "package_template_family": resolve_tea_package_template_family(analysis),
+        "asset_completeness_mode": resolve_tea_asset_completeness_mode(analysis),
+        "chosen_template_name": resolve_tea_template_name(analysis),
         "editable_fields": [
             "goal",
             "focus",
@@ -272,8 +308,16 @@ def _build_tea_gift_box_slots(analysis: ProductAnalysis) -> list[ShotSpec]:
     ]
 
 
-def _build_tea_tin_can_slots(analysis: ProductAnalysis) -> list[ShotSpec]:
-    """金属罐模板：突出罐体识别、工艺细节和冲泡场景。"""
+def _build_tea_tin_can_packshot_plus_detail_slots(analysis: ProductAnalysis) -> list[ShotSpec]:
+    """金属罐 packshot_plus_detail 模板。
+
+    适用条件：
+    - 有完整包装主图
+    - 同时有茶干/细节图
+
+    这套模板允许真实出现 `dry_leaf_detail / tea_soup_experience`，
+    因为系统可以依赖细节素材，而不是强行把同一张包装图变体化。
+    """
     primary_color = analysis.primary_color or "red"
     package_type = analysis.package_type or "cylindrical tea tin"
     package_label = analysis.label_structure or "front label layout"
@@ -352,6 +396,99 @@ def _build_tea_tin_can_slots(analysis: ProductAnalysis) -> list[ShotSpec]:
             preferred_text_safe_zone="top_left",
             required_subjects=["tea tin", "brewing context props"],
             optional_props=["kettle", "tea cloth", "cup set"],
+        ),
+    ]
+
+
+def _build_tea_tin_can_packshot_only_slots(analysis: ProductAnalysis) -> list[ShotSpec]:
+    """金属罐 packshot_only 模板。
+
+    适用条件：
+    - 只有包装主图
+    - 没有可用的茶干/细节素材
+
+    设计原则：
+    - 不再硬生成标准 `dry_leaf_detail / tea_soup_experience`
+    - 所有图位都继续围绕“包装本体 + 局部暗示 + 使用场景”展开
+    """
+    primary_color = analysis.primary_color or "red"
+    package_type = analysis.package_type or "cylindrical tea tin"
+    package_label = analysis.label_structure or "front label layout"
+    return [
+        ShotSpec(
+            shot_id="shot_01",
+            title="Brand Hero",
+            purpose="Establish the tea tin as the hero subject with stable front branding.",
+            composition_hint="Tin centered or slightly lower, leave a clean upper text zone.",
+            copy_goal="Show brand identity and premium tin packaging value.",
+            shot_type="hero_brand",
+            goal="Make the tea tin the clear hero subject and preserve the original cylindrical identity.",
+            focus="full tin can hero view",
+            scene_direction=f"restrained premium tabletop scene with desaturated background around the {primary_color} tin",
+            composition_direction="Keep the tin front-facing or 3/4 and reserve a clean upper-right safe zone for copy.",
+            preferred_text_safe_zone="top_right",
+            required_subjects=[f"{package_type} hero", package_label],
+            optional_props=["muted linen", "neutral stone base"],
+        ),
+        ShotSpec(
+            shot_id="shot_02",
+            title="Package Detail",
+            purpose="Show lid, label, material and cylindrical structure details of the tea tin.",
+            composition_hint="Detail crop with stable upper text safe zone.",
+            copy_goal="Convey material quality, printing detail, and package craftsmanship.",
+            shot_type="package_detail",
+            goal="Highlight the tin surface, lid, label, and edge details without changing the original structure.",
+            focus="label, lid, and material details",
+            scene_direction="controlled detail scene with muted background and commercial product lighting",
+            composition_direction="Use a close 3/4 angle or detail crop, keep a clean top-right safe zone for copy.",
+            preferred_text_safe_zone="top_right",
+            required_subjects=["tin lid detail", package_label, "cylindrical sidewall structure"],
+            optional_props=["neutral tray", "soft shadow base"],
+        ),
+        ShotSpec(
+            shot_id="shot_03",
+            title="Label Or Material Detail",
+            purpose="Zoom into label printing, material grain, edge finishing, or lid craftsmanship.",
+            composition_hint="Tight detail crop with clean upper safe zone and clear background fallback area.",
+            copy_goal="Explain packaging craftsmanship without inventing tea leaf close-ups.",
+            shot_type="label_or_material_detail",
+            goal="Use packaging-native details to carry the information load when no dry leaf asset exists.",
+            focus="label typography, embossing, foil detail, lid seam, or material texture",
+            scene_direction="controlled commercial detail scene that stays anchored to the real tin package",
+            composition_direction="Keep one clean upper-side safe zone and avoid filling the frame with noisy texture only.",
+            preferred_text_safe_zone="top_right",
+            required_subjects=["label detail or material texture", "real tin package surface"],
+            optional_props=["soft grazing light", "neutral base card"],
+        ),
+        ShotSpec(
+            shot_id="shot_04",
+            title="Package With Leaf Hint",
+            purpose="Show the package together with restrained tea leaf hints, without pretending to own a true dry leaf detail source.",
+            composition_hint="Package remains primary, leaf hint stays secondary, clear safe zone in upper area.",
+            copy_goal="Suggest tea quality while keeping the package as the anchor.",
+            shot_type="package_with_leaf_hint",
+            goal="Use the package as the primary subject and let tea leaf hints remain subordinate accents.",
+            focus="package with restrained tea leaf or ingredient cue",
+            scene_direction="premium still life with one controlled tea leaf hint and muted surfaces",
+            composition_direction="Keep the package readable, avoid macro-only framing, and preserve a clean top safe zone for copy.",
+            preferred_text_safe_zone="top_right",
+            required_subjects=["tea tin package", "subtle tea leaf hint"],
+            optional_props=["tea scoop", "small ceramic dish"],
+        ),
+        ShotSpec(
+            shot_id="shot_05",
+            title="Package In Brewing Context",
+            purpose="Place the tea tin into a believable brewing context while still keeping packaging readability.",
+            composition_hint="Scene stays clean, package remains readable, leave safe zone on the upper side.",
+            copy_goal="Convey brewing atmosphere without fabricating a dedicated tea soup detail source.",
+            shot_type="package_in_brewing_context",
+            goal="Show daily brewing context with the package still as the main identifiable anchor.",
+            focus="tea tin within brewing context",
+            scene_direction="quiet brewing desktop scene with restrained props and one coherent material family",
+            composition_direction="Keep the package readable in the frame, place brewing props around it, and preserve upper negative space for copy.",
+            preferred_text_safe_zone="top_left",
+            required_subjects=["tea tin", "brewing context props"],
+            optional_props=["kettle", "teacup", "tea cloth"],
         ),
     ]
 

@@ -46,11 +46,18 @@ class FakeTextRenderer:
         Image.new("RGB", (1440, 1440), color=(255, 255, 255)).save(output_path)
         return SimpleNamespace(
             output_path=output_path,
+            font_source="windows_system_font",
+            font_loaded=True,
+            fallback_used=True,
+            requested_font_path="assets/fonts/NotoSansSC-Regular.otf",
+            resolved_font_path="C:/Windows/Fonts/msyh.ttc",
+            fallback_target="C:/Windows/Fonts/msyh.ttc",
             blocks=[
                 SimpleNamespace(
                     kind="title",
                     requested_font_size=64,
                     used_font_size=60,
+                    min_font_size_hit=False,
                     line_count=2,
                     x=96,
                     y=88,
@@ -70,6 +77,7 @@ class FakeTextRenderer:
                     kind="subtitle",
                     requested_font_size=42,
                     used_font_size=40,
+                    min_font_size_hit=False,
                     line_count=1,
                     x=102,
                     y=196,
@@ -112,10 +120,12 @@ def test_run_qc_adds_structure_dimension_and_new_image_checks() -> None:
     assert "shot_completeness_check" in check_names
     assert "product_consistency_check" in check_names
     assert "shot_type_match_check" in check_names
+    assert "visual_shot_diversity_check" in check_names
     assert "qc_report_exists" in check_names
     assert report.shot_completeness_check
     assert report.product_consistency_check
     assert report.shot_type_match_check
+    assert report.visual_shot_diversity_check
     assert (task_dir / "qc_report.json").exists()
 
 
@@ -186,7 +196,11 @@ def test_overlay_text_persists_actual_text_regions_json() -> None:
     payload = json.loads(regions_path.read_text(encoding="utf-8"))
     shot_payload = payload["shots"][0]
     assert shot_payload["shot_id"] == "shot-01"
+    assert shot_payload["font_source"] == "windows_system_font"
+    assert shot_payload["font_loaded"] is True
+    assert shot_payload["fallback_used"] is True
     assert shot_payload["actual_text_regions"]
+    assert shot_payload["actual_text_regions"][0]["min_font_size_hit"] is False
     assert shot_payload["merged_text_region"] == {"x": 96, "y": 88, "width": 320, "height": 150}
     assert shot_payload["title_region"]["kind"] == "title"
     assert shot_payload["subtitle_region"]["kind"] == "subtitle"
@@ -289,6 +303,7 @@ def test_run_qc_fails_when_text_overflow_info_exists() -> None:
                     "kind": "title",
                     "requested_font_size": 80,
                     "used_font_size": 18,
+                    "min_font_size_hit": True,
                     "line_count": 6,
                     "x": 80,
                     "y": 80,
@@ -313,6 +328,61 @@ def test_run_qc_fails_when_text_overflow_info_exists() -> None:
     readability_check = next(check for check in result["qc_report"].checks if check.check_name == "text_readability_check")
     assert readability_check.status == "failed"
     assert "text_overflow_detected" in readability_check.details
+
+
+def test_run_qc_warns_when_used_font_size_is_below_commercial_threshold() -> None:
+    task_id = "task-qc-small-font"
+    task_dir = _reset_task_dir(task_id)
+    image_path = task_dir / "final" / "01_shot-01.png"
+    Image.new("RGB", (1440, 1440), color=(210, 210, 210)).save(image_path)
+    state, deps = _build_generic_qc_state(task_id=task_id, task_dir=task_dir, image_path=image_path)
+    state["text_render_reports"] = {
+        "shot-01": {
+            "output_path": str(image_path),
+            "merged_text_region": {"x": 120, "y": 100, "width": 180, "height": 72},
+            "blocks": [
+                {
+                    "kind": "title",
+                    "requested_font_size": 64,
+                    "used_font_size": 34,
+                    "min_font_size_hit": True,
+                    "line_count": 2,
+                    "x": 120,
+                    "y": 100,
+                    "width": 180,
+                    "height": 40,
+                    "block_width": 500,
+                    "block_height": 120,
+                    "density_ratio": 0.82,
+                    "overflow_detected": False,
+                },
+                {
+                    "kind": "subtitle",
+                    "requested_font_size": 42,
+                    "used_font_size": 20,
+                    "min_font_size_hit": True,
+                    "line_count": 1,
+                    "x": 124,
+                    "y": 150,
+                    "width": 170,
+                    "height": 24,
+                    "block_width": 500,
+                    "block_height": 120,
+                    "density_ratio": 0.64,
+                    "overflow_detected": False,
+                },
+            ],
+        }
+    }
+
+    result = run_qc(state, deps)
+
+    readability_check = next(check for check in result["qc_report"].checks if check.check_name == "text_readability_check")
+    assert readability_check.status in {"warning", "failed"}
+    assert "title_below_min_readable_size" in readability_check.details or "title_far_below_min_readable_size" in readability_check.details
+    assert "subtitle_below_min_readable_size" in readability_check.details or "subtitle_far_below_min_readable_size" in readability_check.details
+    assert "merged_text_region_ratio=" in readability_check.details
+    assert "used_font_sizes=" in readability_check.details
 
 
 def test_run_qc_falls_back_to_layout_when_actual_text_regions_missing() -> None:
@@ -392,6 +462,8 @@ def test_run_qc_does_not_pass_product_consistency_without_evidence() -> None:
         update={
             "must_preserve_texts": [],
             "locked_elements": [],
+            "text_anchor_source": "none",
+            "text_anchor_status": "unreadable",
             "primary_color": "",
         }
     )
@@ -403,6 +475,8 @@ def test_run_qc_does_not_pass_product_consistency_without_evidence() -> None:
     assert consistency_check.status != "passed"
     assert consistency_check.evidence_completeness == "missing"
     assert "brand_text_targets=['none']" in consistency_check.details
+    assert "text_anchor_source=none" in consistency_check.details
+    assert "text_anchor_status=unreadable" in consistency_check.details
     assert "ocr_texts=['none']" in consistency_check.details
     assert "primary_color_detected=None" in consistency_check.details
     assert "decision_reason=no_reliable_product_evidence_available" in consistency_check.details
@@ -425,6 +499,7 @@ def test_run_qc_marks_partial_product_evidence_as_warning() -> None:
     consistency_check = next(check for check in result["qc_report"].checks if check.check_name == "product_consistency_check")
     assert consistency_check.status == "warning"
     assert consistency_check.evidence_completeness == "partial"
+    assert "text_anchor_count=1" in consistency_check.details
     assert "decision_reason=partial_product_evidence_only" in consistency_check.details
 
 
@@ -438,8 +513,44 @@ def test_run_qc_builds_shot_type_match_summary_for_tea_phase1() -> None:
     assert len(result["qc_report"].shot_type_match_check) == 5
     related_ids = {item.related_shot_id for item in result["qc_report"].shot_type_match_check}
     assert related_ids == {"shot_01", "shot_02", "shot_03", "shot_04", "shot_05"}
+    assert len(result["qc_report"].visual_shot_diversity_check) == 1
     assert len(result["qc_report"].text_safe_zone_check) == 5
     assert len(result["qc_report"].text_readability_check) == 5
+
+
+def test_run_qc_warns_when_five_shots_are_visually_too_similar() -> None:
+    task_id = "task-qc-low-diversity"
+    task_dir = _reset_task_dir(task_id)
+    state, deps = _build_tea_phase1_qc_state(task_id=task_id, task_dir=task_dir, image_count=5)
+
+    result = run_qc(state, deps)
+
+    diversity_check = next(check for check in result["qc_report"].checks if check.check_name == "visual_shot_diversity_check")
+    assert diversity_check.status == "warning"
+    assert "similar_pairs=" in diversity_check.details
+    assert "hero_like_shots=" in diversity_check.details
+
+
+def test_run_qc_shot_type_match_uses_image_signals_not_only_prompt_metadata() -> None:
+    task_id = "task-qc-shot-visual-rules"
+    task_dir = _reset_task_dir(task_id)
+    state, deps = _build_tea_tin_can_qc_state(task_id=task_id, task_dir=task_dir, image_count=5)
+
+    result = run_qc(state, deps)
+
+    shot_type_checks = {
+        check.related_shot_id: check
+        for check in result["qc_report"].checks
+        if check.check_name == "shot_type_match_check"
+    }
+    assert shot_type_checks["shot_02"].status == "warning"
+    assert "package_detail_too_similar_to_hero" in shot_type_checks["shot_02"].details
+    assert shot_type_checks["shot_03"].status == "warning"
+    assert "dry_leaf_texture_signal_weak" in shot_type_checks["shot_03"].details
+    assert shot_type_checks["shot_04"].status == "warning"
+    assert "tea_soup_visual_signal_weak" in shot_type_checks["shot_04"].details
+    assert shot_type_checks["shot_05"].status == "warning"
+    assert "visual_warnings=" in shot_type_checks["shot_05"].details
 
 
 def test_different_shots_do_not_share_identical_text_rect_when_actual_regions_exist() -> None:
@@ -771,15 +882,122 @@ def _build_tea_phase1_qc_state(*, task_id: str, task_dir: Path, image_count: int
     return state, deps
 
 
+def _build_tea_tin_can_qc_state(*, task_id: str, task_dir: Path, image_count: int) -> tuple[dict, WorkflowDependencies]:
+    task = Task(
+        task_id=task_id,
+        brand_name="品牌A",
+        product_name="凤凰单丛铁罐",
+        platform="taobao",
+        output_size="1440x1440",
+        shot_count=5,
+        copy_tone="高端礼赠",
+        task_dir=str(task_dir),
+    )
+    storage = LocalStorageService()
+    storage.save_task_manifest(task)
+    for filename in [
+        "product_analysis.json",
+        "style_architecture.json",
+        "shot_plan.json",
+        "copy_plan.json",
+        "layout_plan.json",
+        "shot_prompt_specs.json",
+        "image_prompt_plan.json",
+    ]:
+        (task_dir / filename).write_text("{}", encoding="utf-8")
+
+    analysis = build_mock_product_analysis([], task.product_name).model_copy(
+        update={
+            "category": "tea",
+            "package_template_family": "tea_tin_can",
+            "asset_completeness_mode": "packshot_plus_detail",
+            "primary_color": "red",
+            "must_preserve_texts": ["品牌A"],
+            "locked_elements": ["tin can silhouette", "front label"],
+        }
+    )
+    shot_plan = build_tea_shot_plan(task, analysis)
+    copy_items = []
+    layout_items = []
+    prompt_items = []
+    generated_images = []
+    for index, shot in enumerate(shot_plan.shots[:image_count], start=1):
+        image_path = task_dir / "final" / f"{index:02d}_{shot.shot_id}.png"
+        image_path.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (1440, 1440), color=(180, 40, 40)).save(image_path)
+        copy_items.append(CopyItem(shot_id=shot.shot_id, title=shot.title, subtitle=shot.purpose, bullets=[shot.copy_goal]))
+        layout_items.append(
+            LayoutItem(
+                shot_id=shot.shot_id,
+                canvas_width=1440,
+                canvas_height=1440,
+                text_safe_zone=("top_right" if shot.preferred_text_safe_zone == "top" else shot.preferred_text_safe_zone or "top_right"),
+                blocks=[
+                    LayoutBlock(kind="title", x=80, y=80, width=520, height=120, font_size=64),
+                    LayoutBlock(kind="subtitle", x=80, y=220, width=520, height=120, font_size=42),
+                ],
+            )
+        )
+        prompt_items.append(
+            ImagePrompt(
+                shot_id=shot.shot_id,
+                shot_type=shot.shot_type,
+                generation_mode="image_edit" if shot.shot_type in {"hero_brand", "package_detail"} else "t2i",
+                prompt=shot.goal or shot.purpose,
+                edit_instruction=f"edit for {shot.shot_type}",
+                output_size="1440x1440",
+            )
+        )
+        generated_images.append(
+            GeneratedImage(
+                shot_id=shot.shot_id,
+                image_path=str(image_path),
+                preview_path=str(image_path),
+                width=1440,
+                height=1440,
+                status="finalized",
+            )
+        )
+
+    deps = WorkflowDependencies(
+        storage=storage,
+        planning_provider=object(),
+        vision_analysis_provider=None,
+        image_generation_provider=object(),
+        text_renderer=DummyRenderer(),
+        ocr_service=DummyOCRService(["品牌A"]),
+        text_provider_mode="mock",
+        vision_provider_mode="mock",
+        image_provider_mode="mock",
+    )
+    state = {
+        "task": task,
+        "product_analysis": analysis,
+        "copy_plan": CopyPlan(items=copy_items),
+        "shot_plan": shot_plan,
+        "layout_plan": LayoutPlan(items=layout_items),
+        "image_prompt_plan": ImagePromptPlan(generation_mode="image_edit", prompts=prompt_items),
+        "generation_result": GenerationResult(images=generated_images),
+        "logs": [],
+        "render_variant": "final",
+        "render_generation_mode": "image_edit",
+        "render_reference_asset_ids": ["asset-main"],
+    }
+    return state, deps
+
+
 def _build_text_region_report(x: int, y: int, width: int, height: int) -> dict:
     return {
         "shot_id": f"shot-{x}",
+        "font_source": "windows_system_font",
+        "font_loaded": True,
+        "fallback_used": False,
         "actual_text_regions": [
-            {"kind": "title", "x": x, "y": y, "width": width, "height": int(height * 0.56)},
-            {"kind": "subtitle", "x": x + 8, "y": y + int(height * 0.62), "width": width - 16, "height": int(height * 0.28)},
+            {"kind": "title", "x": x, "y": y, "width": width, "height": int(height * 0.56), "min_font_size_hit": False},
+            {"kind": "subtitle", "x": x + 8, "y": y + int(height * 0.62), "width": width - 16, "height": int(height * 0.28), "min_font_size_hit": False},
         ],
         "merged_text_region": {"x": x, "y": y, "width": width, "height": height},
-        "title_region": {"kind": "title", "x": x, "y": y, "width": width, "height": int(height * 0.56)},
-        "subtitle_region": {"kind": "subtitle", "x": x + 8, "y": y + int(height * 0.62), "width": width - 16, "height": int(height * 0.28)},
+        "title_region": {"kind": "title", "x": x, "y": y, "width": width, "height": int(height * 0.56), "min_font_size_hit": False},
+        "subtitle_region": {"kind": "subtitle", "x": x + 8, "y": y + int(height * 0.62), "width": width - 16, "height": int(height * 0.28), "min_font_size_hit": False},
     }
 
