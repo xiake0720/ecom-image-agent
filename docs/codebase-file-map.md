@@ -70,6 +70,7 @@
 #### `src/core/config.py`
 - 功能说明：
   - 读取环境变量、provider 路由、模型选择和运行开关。
+  - 现在也集中管理中文字体候选解析和最小可读字号配置。
 - 关键类 / 函数：
   - `Settings`
   - `get_settings()`
@@ -81,6 +82,7 @@
   - 是
 - 修改该文件时通常需要同步更新：
   - `docs/providers.md`
+  - `docs/workflow.md`
   - 相关 contract 文档
   - `.env.example`
 
@@ -89,6 +91,8 @@
 #### `src/domain/product_analysis.py`
 - 功能说明：
   - 商品锁定分析结果 contract，对应 `product_analysis.json`。
+  - 当前额外承载茶叶模板分流所需的 `package_template_family / asset_completeness_mode`。
+  - 当前还显式建模包装文字锚点相关字段：`must_preserve_texts / text_anchor_status / text_anchor_source / text_anchor_notes`。
 - 关键类 / 函数：
   - `ProductAnalysis`
 - 上游调用方：
@@ -145,6 +149,7 @@
 - 功能说明：
   - 单张结构化 prompt spec contract，对应 `shot_prompt_specs.json`。
   - 明确建模 `product_lock / layout_constraints / render_constraints / copy_intent`。
+  - `RenderConstraintSpec` 现在额外建模 `product_lock_level / editable_region_strategy`，用于表达 shot 级锁定强度和可编辑区域策略。
 - 关键类 / 函数：
   - `ShotPromptSpec`
   - `ShotPromptSpecPlan`
@@ -244,6 +249,9 @@
 #### `src/workflows/nodes/analyze_product.py`
 - 功能说明：
   - 生成 `product_analysis.json`，并把 `product_analysis / product_lock` 同时接入 state。
+  - 当前还会把参考图选择结果归一化为 `asset_completeness_mode`，供茶叶模板双重分流使用。
+  - 当前会优先提取包装真实文字锚点；provider 为空时，再从 `visual_identity.must_preserve / locked_elements` 中做轻量 fallback。
+  - 节点日志会新增 `extracted_text_anchors / text_anchor_source / text_anchor_count`。
 - 关键类 / 函数：
   - `analyze_product()`
 - 上游调用方：
@@ -279,7 +287,7 @@
 #### `src/workflows/nodes/plan_shots.py`
 - 功能说明：
   - 生成 `shot_plan.json`。
-  - 茶叶类 Phase 1 当前固定输出五图模板，模型只补图位细节。
+  - 茶叶类 Phase 1 当前按 `package_template_family + asset_completeness_mode` 双重分流固定五图模板，模型只补图位细节。
 - 关键类 / 函数：
   - `plan_shots()`
 - 上游调用方：
@@ -295,13 +303,39 @@
   - `docs/phase1-contract.md`
   - `tests/unit/test_plan_shots_prompt_constraints.py`
 
+#### `src/workflows/nodes/generate_copy.py`
+- 功能说明：
+  - 生成 `copy_plan.json`。
+  - 把模型或 mock 输出归一化为适合 1440x1440 中文贴图的短版文案。
+  - 会在进入 `overlay_text` 前收短超长文案、清理散文化句式，并做品牌锚点校验。
+- 关键类 / 函数：
+  - `generate_copy()`
+  - `_build_copy_generation_prompt()`
+  - `_normalize_copy_plan_for_overlay()`
+  - `_validate_brand_anchor()`
+- 上游调用方：
+  - `graph.py`
+- 下游影响对象：
+  - `generate_layout`
+  - `overlay_text`
+  - `copy_plan.json`
+- 是否属于核心链路：
+  - 是
+- 修改该文件时通常需要同步更新：
+  - `docs/workflow.md`
+  - `docs/phase1-contract.md`
+  - `src/prompts/base/generate_copy.md`
+  - `tests/unit/test_generate_copy.py`
+
 #### `src/workflows/nodes/shot_prompt_refiner.py`
 - 功能说明：
   - 基于 `product_analysis + style_architecture + shot_plan + layout_plan` 生成 `shot_prompt_specs.json`。
   - 固化单张图的 8 层 prompt、product lock、布局约束、渲染约束和 copy intent。
+  - 先构建 `ShotExecutionProfile`，再把 `primary_subject / secondary_subject / shot_differentiation_summary / banned_fallback_pattern` 和 shot-specific negative constraints 注入 spec 与日志。
 - 关键类 / 函数：
   - `shot_prompt_refiner()`
   - `_build_base_spec()`
+  - `_build_shot_execution_profile()`
   - `_merge_spec_plan_with_defaults()`
 - 上游调用方：
   - `graph.py`
@@ -320,6 +354,7 @@
 #### `src/workflows/nodes/build_prompts.py`
 - 功能说明：
   - 把 `shot_prompt_specs` 映射成兼容旧链路的 `ImagePromptPlan`。
+  - 当前还会把 `editable_regions` 收敛成 shot-aware 的稳定标签，避免后续 `render_images` 经常拿到空数组。
 - 关键类 / 函数：
   - `build_prompts()`
   - `_build_image_prompt()`
@@ -339,6 +374,10 @@
   - 根据兼容 prompt plan 执行实际图片生成。
   - `image_edit` 模式下优先基于 `product_lock + style_architecture + shot_prompt_specs` 组装最终执行 prompt。
   - 如果缺少任一关键 contract，则回退到旧的 `edit_instruction / prompt`。
+  - 现在会把 `product_lock_level / editable_region_strategy` 一起写进最终执行 prompt，避免不同 shot_type 在 provider 侧退化成同类 hero packshot。
+  - 当前会把执行 prompt 重排成“shot objective -> differentiation -> subject hierarchy -> editable regions -> product lock”顺序，并把锁定规则整理为 `must_preserve_visuals / must_preserve_texts / must_not_change` 三组。
+  - 当前日志会额外输出 `primary_subject / secondary_subject / allowed_scene_change_level / forbidden_regression_pattern / editable_regions_final`。
+  - 当前还会把 `text_anchor_source / text_anchor_status` 带入 `prompt_contract` 调试日志，便于判断文字锚点强弱。
 - 关键类 / 函数：
   - `render_images()`
 - 上游调用方：
@@ -396,6 +435,7 @@
 - 功能说明：
   - 承载任务级轻量 QC 规则函数。
   - 当前集中实现文字可读性、文字安全区、布局风险、五图完整性、商品一致性和图位匹配度检查。
+  - `product_consistency_check` 会优先消费 `must_preserve_texts`，并避免把视觉结构描述误判成文字锚点。
 - 关键类 / 函数：
   - `build_shot_completeness_check()`
   - `build_product_consistency_check()`
@@ -411,6 +451,81 @@
   - `docs/qc-policy.md`
   - `docs/workflow.md`
   - `tests/unit/test_qc_and_exports.py`
+
+#### `src/services/planning/layout_generator.py`
+- 功能说明：
+  - 基于安全区打分结果生成 `layout_plan.json` 中的文字块区域。
+  - 当前会优先放宽 title / subtitle 的横向占位，避免把中文标题挤成窄列。
+- 关键类 / 函数：
+  - `build_mock_layout_plan()`
+  - `_build_blocks_for_zone()`
+- 上游调用方：
+  - `generate_layout`
+- 下游影响对象：
+  - `overlay_text`
+  - `run_qc`
+- 是否属于核心链路：
+  - 是
+- 修改该文件时通常需要同步更新：
+  - `docs/workflow.md`
+  - 文字渲染相关测试
+
+#### `src/services/assets/reference_selector.py`
+- 功能说明：
+  - 统一选择主参考图和细节参考图。
+  - 当前还负责解析 `asset_completeness_mode`，供 `analyze_product / plan_shots / render_images` 共用。
+- 关键类 / 函数：
+  - `ReferenceSelection`
+  - `select_reference_bundle()`
+- 上游调用方：
+  - `analyze_product`
+  - `render_images`
+- 下游影响对象：
+  - `product_analysis.asset_completeness_mode`
+  - 参考图选择日志
+- 是否属于核心链路：
+  - 是
+- 修改该文件时通常需要同步更新：
+  - `docs/workflow.md`
+  - `docs/phase1-contract.md`
+  - `tests/unit/test_reference_selector.py`
+
+#### `src/services/fallbacks/copy_fallback.py`
+- 功能说明：
+  - 承载 `generate_copy` 的 shot-aware fallback 文案规则。
+  - provider 缺失、品牌锚点非法或文案被判定不适合贴图时，输出短版 `title/subtitle`。
+- 关键类 / 函数：
+  - `CopyPlanMergeResult`
+  - `build_default_copy_item_for_shot()`
+  - `merge_copy_plan_with_shots()`
+- 上游调用方：
+  - `generate_copy`
+  - `copy_generator.py`
+- 下游影响对象：
+  - `copy_plan.json`
+  - 文案归一化日志
+- 是否属于核心链路：
+  - 是
+- 修改该文件时通常需要同步更新：
+  - `docs/workflow.md`
+  - `docs/phase1-contract.md`
+  - `tests/unit/test_generate_copy.py`
+
+#### `src/services/planning/copy_generator.py`
+- 功能说明：
+  - mock 模式下生成 `CopyPlan`。
+  - 当前复用 fallback 规则，保证 mock 输出也符合短版贴图文案约束。
+- 关键类 / 函数：
+  - `build_mock_copy_plan()`
+- 上游调用方：
+  - `generate_copy`
+- 下游影响对象：
+  - `copy_plan.json`
+- 是否属于核心链路：
+  - 是
+- 修改该文件时通常需要同步更新：
+  - `docs/workflow.md`
+  - `tests/unit/test_generate_copy.py`
 
 #### `src/services/storage/task_loader.py`
 - 功能说明：
@@ -486,7 +601,7 @@
 #### `src/workflows/nodes/overlay_text.py`
 - 功能说明：
   - 执行 Pillow 中文后贴字并生成预览图。
-  - 当前会把每个 shot 的实际文本渲染块摘要回写到 `text_render_reports`，并落盘到 `final_text_regions.json / preview_text_regions.json`，供 `run_qc` 读取。
+  - 当前会把每个 shot 的实际文本渲染块摘要、字号使用情况和字体来源信息回写到 `text_render_reports`，并落盘到 `final_text_regions.json / preview_text_regions.json`，供 `run_qc` 读取。
 - 关键类 / 函数：
   - `overlay_text()`
 - 上游调用方：
@@ -504,7 +619,8 @@
 #### `src/services/rendering/text_renderer.py`
 - 功能说明：
   - 承载 Pillow 中文后贴字和自适应文字样式。
-  - 当前会回传每个文本块的实际渲染区域、密度和溢出标记，供文字层 QC 使用。
+  - 当前会回传每个文本块的实际渲染区域、密度、最小字号命中情况和溢出标记，供文字层 QC 使用。
+  - 同时会返回字体来源、fallback 状态，并生成中文渲染测试图 metadata sidecar。
 - 关键类 / 函数：
   - `TextRenderer`
   - `PlacedTextBlock`
@@ -519,6 +635,25 @@
 - 修改该文件时通常需要同步更新：
   - `docs/workflow.md`
   - `docs/qc-policy.md`
+  - `tests/unit/test_text_renderer.py`
+
+#### `src/services/rendering/font_utils.py`
+- 功能说明：
+  - 负责解析项目字体与系统中文字体候选，并加载可追踪的真实字体文件。
+  - 不允许静默回退到不适合中文的默认字体。
+- 关键类 / 函数：
+  - `LoadedFont`
+  - `load_font()`
+- 上游调用方：
+  - `TextRenderer`
+- 下游影响对象：
+  - 中文字体稳定性
+  - 文字渲染日志
+  - `text_render_test.meta.json`
+- 是否属于核心链路：
+  - 是
+- 修改该文件时通常需要同步更新：
+  - `docs/workflow.md`
   - `tests/unit/test_text_renderer.py`
 
 ### prompts
@@ -539,6 +674,7 @@
 #### `src/prompts/shot_prompt_refiner.md`
 - 功能说明：
   - real 模式下约束模型输出结构化 `ShotPromptSpecPlan`。
+  - 当前要求模型输出偏“执行说明”而不是“描述性文案”，并为关键 shot_type 加排他规则。
 - 上游调用方：
   - `shot_prompt_refiner`
 - 下游影响对象：
@@ -549,11 +685,26 @@
   - `docs/workflow.md`
   - `docs/contracts/shot_prompt_specs.*`
 
+#### `src/prompts/base/generate_copy.md`
+- 功能说明：
+  - real 模式下约束模型输出结构化 `CopyPlan`。
+  - 当前明确限制文案长度、品牌锚点、散文化语气和 shot_type copy 风格。
+- 上游调用方：
+  - `generate_copy`
+- 下游影响对象：
+  - planning provider 的 structured output
+- 是否属于核心链路：
+  - 是
+- 修改该文件时通常需要同步更新：
+  - `docs/workflow.md`
+  - `docs/phase1-contract.md`
+
 ### tests
 
 #### `tests/unit/test_visual_director_architecture.py`
 - 功能说明：
   - 验证 `style_director`、`shot_prompt_refiner`、结构化 spec 落盘、contract 接线和 workflow 顺序。
+  - 当前还覆盖茶叶 tin can 模板下不同 shot_type 的排他规则和 render constraint 分层。
 - 关键类 / 函数：
   - 茶叶类固定五图和结构化导演链路相关测试
 - 上游调用方：
@@ -598,6 +749,23 @@
   - `docs/qc-policy.md`
   - `docs/workflow.md`
 
+#### `tests/unit/test_generate_copy.py`
+- 功能说明：
+  - 验证 `generate_copy` 的长度收短、品牌锚点校验、mock 输出约束和归一化日志字段。
+- 关键类 / 函数：
+  - 文案归一化与日志相关单元测试
+- 上游调用方：
+  - `pytest`
+- 下游影响对象：
+  - `generate_copy`
+  - `copy_fallback.py`
+  - `copy_generator.py`
+- 是否属于核心链路：
+  - 是
+- 修改该文件时通常需要同步更新：
+  - `docs/workflow.md`
+  - `docs/codebase-file-map.md`
+
 ## 核心主链路文件
 主链路从：
 
@@ -606,10 +774,13 @@
 关键文件及职责：
 - `src/workflows/nodes/analyze_product.py`
   - 生成商品锁定分析，并把 `product_lock` 接入 state。
+  - 当前还负责把包装文字锚点归一化为后续 render/QC 可消费的稳定字段。
 - `src/workflows/nodes/style_director.py`
   - 生成整组统一视觉架构。
 - `src/workflows/nodes/plan_shots.py`
   - 输出茶叶类固定五图模板。
+- `src/workflows/nodes/generate_copy.py`
+  - 输出短版贴图文案并做程序级文案归一化。
 - `src/workflows/nodes/generate_layout.py`
   - 生成每张图的布局和 `text_safe_zone`。
 - `src/workflows/nodes/shot_prompt_refiner.py`
@@ -638,10 +809,39 @@
 8. `src/domain/shot_prompt_specs.py`
 9. `src/workflows/nodes/style_director.py`
 10. `src/workflows/nodes/plan_shots.py`
-11. `src/workflows/nodes/shot_prompt_refiner.py`
-12. `src/workflows/nodes/build_prompts.py`
-13. `src/workflows/nodes/render_images.py`
-14. `tests/unit/test_visual_director_architecture.py`
+11. `src/workflows/nodes/generate_copy.py`
+12. `src/workflows/nodes/shot_prompt_refiner.py`
+13. `src/workflows/nodes/build_prompts.py`
+14. `src/workflows/nodes/render_images.py`
+15. `tests/unit/test_visual_director_architecture.py`
+
+## 本次补充：generate_copy 短版贴图文案约束
+- `src/workflows/nodes/generate_copy.py`
+  - 现在会在 provider/mock 输出后做统一 copy normalization，限制标题、副标题长度并拦截品牌漂移。
+  - 节点日志新增 `original_length / normalized_length / copy_shortened / brand_anchor_valid`。
+- `src/services/fallbacks/copy_fallback.py`
+  - fallback 改为 shot-aware 短版贴图文案，不再输出冗长 bullets 或 CTA。
+- `src/services/planning/copy_generator.py`
+  - mock 模式复用 fallback，保证测试与本地运行时的 copy 也符合后贴字约束。
+- `src/prompts/base/generate_copy.md`
+  - prompt 改成“可直接贴图”的执行约束，按 `shot_type` 区分 copy 风格。
+- `tests/unit/test_generate_copy.py`
+  - 覆盖长度阈值、品牌锚点校验和归一化日志。
+
+## 本次补充：analyze_product 文字锚点提取
+- `src/domain/product_analysis.py`
+  - `ProductAnalysis` 新增 `text_anchor_status / text_anchor_source / text_anchor_notes`，显式标记包装文字锚点的可靠性和来源。
+- `src/workflows/nodes/analyze_product.py`
+  - provider 会优先提取品牌名、产品名、香型/口味、净含量和清晰英文副标。
+  - provider 空返回时，会从 `visual_identity.must_preserve / locked_elements` 中筛出短文本锚点。
+  - 节点日志新增 `extracted_text_anchors / text_anchor_source / text_anchor_count`。
+- `src/services/qc/task_qc.py`
+  - `product_consistency_check` 优先使用 `must_preserve_texts` 作为 OCR 对比锚点。
+  - `details` 里会新增 `text_anchor_source / text_anchor_status / text_anchor_count`。
+- `src/workflows/nodes/render_images.py`
+  - `prompt_contract` 调试日志现在会带出 `text_anchor_source / text_anchor_status`。
+- `tests/unit/test_analyze_product_real_mode.py`
+  - 覆盖 provider 空返回时的 fallback 文字锚点提取，以及弱证据日志。
 
 ## 待补全文档范围
 当前优先覆盖了主链路和结构化导演相关文件。以下范围后续建议继续补齐：
@@ -662,21 +862,26 @@
   - `product_consistency_summary` 日志会明确打印 `evidence_completeness`，便于区分“规则失败”和“证据不足”。
 ## 本次补充：茶叶模板按包装族分流
 - `src/domain/product_analysis.py`
-  - `ProductAnalysis` 新增 `package_template_family`，用于把茶叶商品分流到更合适的五图模板。
+  - `ProductAnalysis` 新增 `package_template_family / asset_completeness_mode`，用于把茶叶商品分流到更合适的五图模板。
 - `src/services/analysis/product_analyzer.py`
-  - mock 分析现在会根据商品名和包型关键词补 `package_type / material / package_template_family`。
+  - mock 分析现在会根据商品名和素材情况补 `package_type / material / package_template_family / asset_completeness_mode`。
+- `src/services/assets/reference_selector.py`
+  - 现在除主图/细节图选择外，还会统一输出 `asset_completeness_mode`。
 - `src/services/planning/tea_shot_planner.py`
-  - 不再只有礼盒模板。
+  - 不再只有礼盒模板，也不再只按包型分流。
   - 当前至少维护：
     - `tea_gift_box`
     - `tea_tin_can`
     - `tea_pouch`
+  - 其中 `tea_tin_can` 会继续区分：
+    - `packshot_only`
+    - `packshot_plus_detail`
   - 修改该文件时，通常还要同步更新：
     - `docs/phase1-contract.md`
     - `docs/workflow.md`
     - `tests/unit/test_plan_shots_prompt_constraints.py`
 - `src/workflows/nodes/plan_shots.py`
-  - 现在会把 `package_template_family` 写入日志，便于定位为什么当前商品走的是礼盒模板还是金属罐模板。
+  - 现在会把 `package_template_family / asset_completeness_mode / selected_main_asset_id / selected_detail_asset_id / chosen_template_name` 写入日志，便于定位当前模板命中原因。
 ## 本次补充：style_director 与 render_images contract 清理
 - `src/domain/style_architecture.py`
   - `StyleArchitecture` 新增 `main_light_direction`，用于避免只靠 `lighting_strategy` 推断主光方向。
@@ -689,3 +894,34 @@
 - `src/workflows/nodes/render_images.py`
   - `image_edit` prompt 组装现在会优先显式展开结构化 product lock。
   - 调试日志中的 `keep_subject_rules / editable_regions` 会先清洗，避免 tuple 字符串污染。
+
+## 本次补充：QC 更接近看结果图
+- `src/domain/qc_report.py`
+  - `QCReport` 根级摘要新增 `visual_shot_diversity_check`，用于承接任务级组图多样性预警。
+- `src/workflows/nodes/run_qc.py`
+  - `run_qc()` 现在会额外构建 `visual_shot_diversity_check`。
+  - `shot_type_match_check` 会拿到 hero 参考图路径，用于轻量“是否退化成 hero”比对。
+  - 节点日志新增：
+    - `text_readability_summary`
+    - `product_consistency_summary`
+    - `shot_type_match_summary`
+    - `visual_shot_diversity_summary`
+- `src/services/qc/task_qc.py`
+  - `build_text_readability_check()`
+    - 现在直接消费 `used_font_size / merged_text_region`
+    - 加入商用最小可读字号阈值和文本区域占比阈值
+  - `build_product_consistency_check()`
+    - 现在显式区分 `visual_consistency / text_anchor_consistency / evidence_completeness`
+  - `build_shot_type_match_check()`
+    - 现在不再只看 metadata，也会做轻量图像规则
+  - `build_visual_shot_diversity_check()`
+    - 新增五图趋同预警
+  - 当前核心阈值：
+    - `title >= 40`
+    - `subtitle >= 24`
+    - `bullets >= 22`
+    - `cta >= 22`
+    - `merged_text_region_ratio < 0.012` 预警
+    - `merged_text_region_ratio < 0.006` 失败
+- `tests/unit/test_qc_and_exports.py`
+  - 覆盖真实字号低于阈值、五图过度趋同、`shot_type_match_check` 消费图像信号而不只是 prompt metadata 的回归用例。

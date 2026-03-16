@@ -66,6 +66,7 @@ class WorkflowState(TypedDict, total=False):
     analyze_selected_main_asset_id: str
     analyze_selected_detail_asset_id: str
     analyze_reference_selection_reason: str
+    analyze_asset_completeness_mode: str
     analyze_max_reference_images: int
     render_max_reference_images: int
     preview_generation_result: GenerationResult

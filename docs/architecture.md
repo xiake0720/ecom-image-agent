@@ -98,6 +98,8 @@
   - 先生成整组图统一视觉规则，而不是让每张图各自自由发挥。
 - `plan_shots`
   - 茶叶类 Phase 1 固定五图，只让模型补充每张图的目标和方向。
+- `generate_copy`
+  - 先把每张图的文案收敛成短版贴图 copy，避免后贴字阶段再被被动压缩。
 - `shot_prompt_refiner`
   - 单独生成每张图的结构化 spec，避免旧版“一大段 prompt”难以调试。
 - `build_prompts`
@@ -116,6 +118,8 @@
 - 关键字段：
   - `locked_elements`
   - `must_preserve_texts`
+  - `text_anchor_status`
+  - `text_anchor_source`
   - `editable_elements`
   - `package_type`
   - `primary_color`
@@ -144,6 +148,7 @@
   - [`src/workflows/nodes/shot_prompt_refiner.py`](/D:/python/ecom-image-agent/src/workflows/nodes/shot_prompt_refiner.py)
 - 作用：
   - 为每张图定义结构化生成说明。
+  - 通过 `ShotExecutionProfile` 先统一主次主体、排他规则和锁定等级，再生成各层 prompt。
 - 关键字段：
   - `subject_prompt`
   - `package_appearance_prompt`
@@ -156,6 +161,8 @@
   - `layout_constraints`
   - `render_constraints`
   - `copy_intent`
+  - `primary_subject / secondary_subject / shot_differentiation_summary / banned_fallback_pattern` 会进入节点日志，辅助定位 shot 是否退化成 hero。
+  - `render_constraints` 现在除 `generation_mode / reference_image_priority / consistency_strength` 外，还包含 `product_lock_level / editable_region_strategy`。
 
 ## 5. 图片生成架构
 
@@ -178,12 +185,26 @@
   - `style_architecture`
   - 当前 shot 的 `ShotPromptSpec`
   - 当前 `text_safe_zone`
+- `image_edit` 组装顺序当前改为先写 `shot objective / shot differentiation / subject hierarchy / editable regions`，再写 `product identity lock`，避免 provider 只学到“不要动产品”而忽略分镜变化。
+- `render_images` 调试日志当前会输出 `primary_subject / secondary_subject / allowed_scene_change_level / forbidden_regression_pattern / editable_regions_final`。
   - 当前 `generation_mode`
 - 这样做的目的：
   - 让最终执行 prompt 可追溯
   - 避免 provider 只吃旧版单层 prompt
 
 ## 6. 布局与后贴字架构
+
+### 文案归一化
+- `generate_copy` 当前不是“写说明文案”，而是“生成可直接上图的 overlay copy”。
+- 约束重点：
+  - `title` 优先 `8~14` 字，最长 `18`
+  - `subtitle` 优先 `8~16` 字，最长 `22`
+  - `bullets` 默认留空
+  - `cta` 默认关闭
+- 程序层还会做一次 copy normalization：
+  - 超长文案自动收短
+  - 散文化表述自动回退
+  - 品牌锚点不合法时改用 shot-aware fallback，避免品牌漂移进入成图
 
 ### 布局
 - `generate_layout` 当前不是 AI 检测模型，而是规则打分器。
@@ -197,6 +218,8 @@
 - 仍然坚持 Pillow 后贴字，不把中文文字直接交给图像模型生成。
 - 当前补充了：
   - typography token
+  - 项目字体优先、系统中文字体候选 fallback
+  - 最小可读字号约束与溢出显式暴露
   - 背景自适应文字颜色
   - 阴影 / 描边 / 半透明底板策略
   - 两套 preset：`premium_minimal` / `commercial_balanced`
@@ -220,6 +243,25 @@
 - 结果页当前重点展示：
   - 是否命中缓存
   - 本次真实生成链路
+
+## 8. 本次补充：QC 从 metadata 自证转向结果图证据
+
+当前 `run_qc` 的设计重点已经从“只检查 workflow 产物是否自洽”扩展到“直接读取结果图做轻量证据判断”。
+
+这层变化主要体现在：
+- `text_readability_check`
+  - 读取 `overlay_text` 回写的真实字号和实际文本区域
+  - 不再只根据文案长度和 layout 预估可读性
+- `shot_type_match_check`
+  - 仍消费 `shot_plan / shot_prompt_specs`
+  - 但已经加入 hero 相似度、纹理主体、茶汤/杯具、场景 props 等轻量图像规则
+- `product_consistency_check`
+  - 不再把 OCR 缺失时的结果默认视作“证据充足”
+  - 显式区分 `visual_consistency / text_anchor_consistency / evidence_completeness`
+- `visual_shot_diversity_check`
+  - 作为任务级补充检查，识别整组结果图是否过度趋同
+
+这意味着当前 QC 仍然是轻量规则系统，但已经不再只是 prompt 和 metadata 的自证闭环。
   - preview / final
   - `t2i / image_edit`
   - 参考图 ID
@@ -246,3 +288,10 @@
 4. [`streamlit_app.py`](/D:/python/ecom-image-agent/streamlit_app.py)
 5. [`src/ui/pages/home.py`](/D:/python/ecom-image-agent/src/ui/pages/home.py)
 6. [`src/workflows/graph.py`](/D:/python/ecom-image-agent/src/workflows/graph.py)
+### copy 观察字段
+- `generate_copy` 当前会把每个 shot 的归一化结果写入日志：
+  - `original_length`
+  - `normalized_length`
+  - `copy_shortened`
+  - `brand_anchor_valid`
+- 这些字段用于区分是模型写得太长、品牌漂移，还是后续布局/字体阶段导致可读性下降。

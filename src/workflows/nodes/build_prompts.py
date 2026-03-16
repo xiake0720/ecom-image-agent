@@ -158,7 +158,12 @@ def _build_image_prompt(
     """
     del copy_item
     text_safe_zone = getattr(layout_item, "text_safe_zone", "")
-    product_lock_rules = spec.product_lock.flattened_rules()
+    product_lock_rules = _resolve_prompt_keep_subject_rules(spec=spec, product_analysis=product_analysis)
+    editable_regions = _resolve_prompt_editable_regions(
+        shot_type=shot.shot_type,
+        spec=spec,
+        product_analysis=product_analysis,
+    )
     layout_constraint_lines = spec.layout_constraints.as_prompt_lines()
     render_constraint_lines = spec.render_constraints.as_prompt_lines()
     preserve_rules = [*product_analysis.locked_elements, *product_analysis.visual_identity.must_preserve]
@@ -195,7 +200,7 @@ def _build_image_prompt(
         output_size=task_output_size,
         preserve_rules=preserve_rules,
         keep_subject_rules=product_lock_rules or preserve_rules,
-        editable_regions=spec.product_lock.editable_regions or product_analysis.editable_elements,
+        editable_regions=editable_regions,
         locked_regions=product_analysis.locked_elements,
         background_direction="; ".join(style_architecture.background_strategy + [spec.background_prompt]),
         lighting_direction="; ".join(style_architecture.lighting_strategy + [spec.lighting_prompt]),
@@ -205,6 +210,81 @@ def _build_image_prompt(
         composition_notes=[spec.composition_prompt, *layout_constraint_lines],
         style_notes=[style_architecture.style_theme, *style_architecture.prop_system, *style_architecture.lens_strategy],
     )
+
+
+def _resolve_prompt_keep_subject_rules(*, spec, product_analysis) -> list[str]:
+    """把结构化商品锁定规则整理成兼容层也能稳定消费的去重列表。"""
+    return _merge_unique_strings(
+        list(spec.product_lock.must_preserve or []),
+        [f"must preserve texts: {item}" for item in list(spec.product_lock.must_preserve_texts or [])],
+        [f"must not change: {item}" for item in list(spec.product_lock.must_not_change or [])],
+        list(product_analysis.locked_elements or []),
+    )
+
+
+def _resolve_prompt_editable_regions(*, shot_type: str, spec, product_analysis) -> list[str]:
+    """统一生成 shot-aware 的 editable_regions，避免后续 render 日志频繁出现空数组。"""
+    return _merge_unique_strings(
+        _editable_region_defaults_for_shot_type(shot_type),
+        [_normalize_editable_region_name(item) for item in list(spec.product_lock.editable_regions or [])],
+        [_normalize_editable_region_name(item) for item in list(product_analysis.editable_elements or [])],
+    )
+
+
+def _editable_region_defaults_for_shot_type(shot_type: str) -> list[str]:
+    """按 shot_type 提供最小可编辑区域兜底，兼顾 image_edit 的镜头变化空间。"""
+    mapping = {
+        "hero_brand": ["background", "props", "lighting", "crop"],
+        "carry_action": ["hand_pose", "background", "props", "lighting", "crop"],
+        "open_box_structure": ["package_structure", "background", "props", "lighting", "crop"],
+        "package_detail": ["crop", "lighting", "detail_emphasis", "background"],
+        "label_or_material_detail": ["crop", "detail_emphasis", "lighting", "background"],
+        "package_with_leaf_hint": ["foreground_leaf_subject", "background", "props", "lighting", "crop"],
+        "dry_leaf_detail": ["foreground_leaf_subject", "background", "props", "lighting", "depth_of_field"],
+        "tea_soup_experience": ["tea_soup_subject", "vessel", "background", "props", "lighting"],
+        "lifestyle_or_brewing_context": ["props", "background", "scene_context", "depth_of_field", "lighting"],
+        "package_in_brewing_context": ["props", "background", "scene_context", "depth_of_field", "lighting"],
+    }
+    return list(mapping.get(shot_type, ["background", "props", "lighting", "crop"]))
+
+
+def _normalize_editable_region_name(value: str) -> str:
+    """把上游不同命名收敛成 render 阶段更稳定的区域标签。"""
+    normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "surface_styling": "props",
+        "prop_accents": "props",
+        "micro_props": "props",
+        "shadow_shape": "lighting",
+        "surface_highlights": "detail_emphasis",
+        "crop_window": "crop",
+        "foreground_leaves": "foreground_leaf_subject",
+        "breathing_space_around_leaves": "depth_of_field",
+        "background_anchor_placement": "background",
+        "tea_vessel": "vessel",
+        "tea_liquid": "tea_soup_subject",
+        "background_package_anchor": "background",
+        "brewing_props": "props",
+        "vessel_placement": "vessel",
+        "background_context": "scene_context",
+        "inner_tray_visibility": "package_structure",
+        "lid_angle": "package_structure",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _merge_unique_strings(*groups: list[str]) -> list[str]:
+    """保持原始顺序合并去重，避免兼容 prompt 字段里重复同义规则。"""
+    merged: list[str] = []
+    seen: set[str] = set()
+    for group in groups:
+        for item in group:
+            text = str(item or "").strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            merged.append(text)
+    return merged
 
 
 def _resolve_target_generation_context(state: WorkflowState, deps: WorkflowDependencies) -> dict[str, object]:

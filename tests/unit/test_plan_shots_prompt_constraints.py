@@ -23,9 +23,12 @@ from src.domain.task import Task
 from src.services.planning.copy_generator import build_mock_copy_plan
 from src.services.planning.tea_shot_planner import (
     TEA_GIFT_BOX_PHASE1_SHOTS,
+    TEA_TIN_CAN_PACKSHOT_ONLY_PHASE1_SHOTS,
     TEA_TIN_CAN_PHASE1_SHOTS,
     build_tea_shot_plan,
+    resolve_tea_asset_completeness_mode,
     resolve_tea_package_template_family,
+    resolve_tea_template_name,
 )
 from src.services.storage.local_storage import LocalStorageService
 from src.workflows.nodes.plan_shots import plan_shots
@@ -158,10 +161,15 @@ def _build_tin_can_analysis() -> ProductAnalysis:
         locked_elements=["cylindrical can silhouette", "front label layout"],
         editable_elements=["background", "props", "lighting"],
         package_type="cylindrical metal tin",
+        asset_completeness_mode="packshot_plus_detail",
         primary_color="red",
         material="cylindrical metal tin",
         label_structure="front-centered tin label",
     )
+
+
+def _build_tin_can_packshot_only_analysis() -> ProductAnalysis:
+    return _build_tin_can_analysis().model_copy(update={"asset_completeness_mode": "packshot_only"})
 
 
 def _build_other_analysis() -> ProductAnalysis:
@@ -265,6 +273,8 @@ def test_build_tea_tin_can_shot_plan_uses_tin_template() -> None:
     plan = build_tea_shot_plan(task, analysis)
 
     assert resolve_tea_package_template_family(analysis) == "tea_tin_can"
+    assert resolve_tea_asset_completeness_mode(analysis) == "packshot_plus_detail"
+    assert resolve_tea_template_name(analysis) == "tea_tin_can_packshot_plus_detail"
     assert [(shot.shot_id, shot.shot_type) for shot in plan.shots] == list(TEA_TIN_CAN_PHASE1_SHOTS)
     assert [shot.shot_type for shot in plan.shots] == [
         "hero_brand",
@@ -275,6 +285,36 @@ def test_build_tea_tin_can_shot_plan_uses_tin_template() -> None:
     ]
     assert "carry_action" not in [shot.shot_type for shot in plan.shots]
     assert "open_box_structure" not in [shot.shot_type for shot in plan.shots]
+
+
+def test_build_tea_tin_can_packshot_only_plan_avoids_dry_leaf_and_tea_soup() -> None:
+    analysis = _build_tin_can_packshot_only_analysis()
+    task = Task(
+        task_id="task-tin-packshot-only-5",
+        brand_name="A",
+        product_name="cylindrical metal tin oolong",
+        platform="tmall",
+        output_size="1440x1440",
+        shot_count=5,
+        copy_tone="专业",
+        task_dir="outputs/tasks/task-tin-packshot-only-5",
+    )
+
+    plan = build_tea_shot_plan(task, analysis)
+
+    assert resolve_tea_package_template_family(analysis) == "tea_tin_can"
+    assert resolve_tea_asset_completeness_mode(analysis) == "packshot_only"
+    assert resolve_tea_template_name(analysis) == "tea_tin_can_packshot_only"
+    assert [(shot.shot_id, shot.shot_type) for shot in plan.shots] == list(TEA_TIN_CAN_PACKSHOT_ONLY_PHASE1_SHOTS)
+    assert [shot.shot_type for shot in plan.shots] == [
+        "hero_brand",
+        "package_detail",
+        "label_or_material_detail",
+        "package_with_leaf_hint",
+        "package_in_brewing_context",
+    ]
+    assert "dry_leaf_detail" not in [shot.shot_type for shot in plan.shots]
+    assert "tea_soup_experience" not in [shot.shot_type for shot in plan.shots]
 
 
 def test_plan_shots_real_mode_uses_fixed_gift_box_context_and_keeps_five_shots() -> None:
@@ -305,6 +345,8 @@ def test_plan_shots_real_mode_uses_fixed_gift_box_context_and_keeps_five_shots()
     prompt = provider.calls[0]
     assert '"planner_mode": "fixed_phase1_five_shots"' in prompt
     assert '"package_template_family": "tea_gift_box"' in prompt
+    assert '"asset_completeness_mode": "packshot_only"' in prompt
+    assert '"chosen_template_name": "tea_gift_box_default"' in prompt
     assert '"fixed_shot_slots"' in prompt
     assert '"editable_fields"' in prompt
     assert "text_safe_zone_preference" in prompt
@@ -312,7 +354,8 @@ def test_plan_shots_real_mode_uses_fixed_gift_box_context_and_keeps_five_shots()
     assert [(shot.shot_id, shot.shot_type) for shot in result["shot_plan"].shots] == list(TEA_GIFT_BOX_PHASE1_SHOTS)
     assert any("tea_fixed_phase1_template=true" in log for log in result["logs"])
     assert any("package_template_family=tea_gift_box" in log for log in result["logs"])
-    assert any("fixed_template_name=tea_gift_box" in log for log in result["logs"])
+    assert any("chosen_template_name=tea_gift_box_default" in log for log in result["logs"])
+    assert any("fixed_template_name=tea_gift_box_default" in log for log in result["logs"])
 
 
 def test_plan_shots_mock_mode_routes_tin_can_to_tin_template() -> None:
@@ -339,7 +382,41 @@ def test_plan_shots_mock_mode_routes_tin_can_to_tin_template() -> None:
 
     assert [(shot.shot_id, shot.shot_type) for shot in result["shot_plan"].shots] == list(TEA_TIN_CAN_PHASE1_SHOTS)
     assert any("package_template_family=tea_tin_can" in log for log in result["logs"])
-    assert any("fixed_template_name=tea_tin_can" in log for log in result["logs"])
+    assert any("asset_completeness_mode=packshot_plus_detail" in log for log in result["logs"])
+    assert any("chosen_template_name=tea_tin_can_packshot_plus_detail" in log for log in result["logs"])
+    assert any("fixed_template_name=tea_tin_can_packshot_plus_detail" in log for log in result["logs"])
+
+
+def test_plan_shots_mock_mode_routes_tin_can_packshot_only_to_safe_template() -> None:
+    deps = _build_deps(text_mode="mock")
+    task = Task(
+        task_id="task-plan-tin-packshot-only-001",
+        brand_name="品牌A",
+        product_name="单罐乌龙",
+        platform="tmall",
+        output_size="1440x1440",
+        shot_count=5,
+        copy_tone="专业自然",
+        task_dir="outputs/tasks/task-plan-tin-packshot-only-001",
+    )
+    state = {
+        "task": task,
+        "product_analysis": _build_tin_can_packshot_only_analysis(),
+        "analyze_selected_main_asset_id": "asset-main",
+        "analyze_selected_detail_asset_id": None,
+        "logs": [],
+        "cache_enabled": False,
+        "ignore_cache": False,
+    }
+
+    result = plan_shots(state, deps)
+
+    assert [(shot.shot_id, shot.shot_type) for shot in result["shot_plan"].shots] == list(TEA_TIN_CAN_PACKSHOT_ONLY_PHASE1_SHOTS)
+    assert any("package_template_family=tea_tin_can" in log for log in result["logs"])
+    assert any("asset_completeness_mode=packshot_only" in log for log in result["logs"])
+    assert any("selected_main_asset_id=asset-main" in log for log in result["logs"])
+    assert any("selected_detail_asset_id=-" in log for log in result["logs"])
+    assert any("chosen_template_name=tea_tin_can_packshot_only" in log for log in result["logs"])
 
 
 def test_non_tea_category_keeps_existing_non_template_behavior() -> None:

@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from src.core.config import get_settings
 from src.domain.product_analysis import ProductAnalysis
@@ -36,6 +37,65 @@ from src.workflows.nodes.prompt_utils import dump_pretty, load_prompt_text
 from src.workflows.state import WorkflowDependencies, WorkflowState, format_connected_contract_logs
 
 logger = logging.getLogger(__name__)
+
+TEXT_ANCHOR_MAX_COUNT = 5
+_TEXT_ANCHOR_INVALID_TOKENS = {"", "none", "null", "n/a", "-", "unknown"}
+_TEXT_ANCHOR_STATUS_MARKERS = {
+    "unreadable": "unreadable",
+    "uncertain": "uncertain",
+    "无法识别": "unreadable",
+    "看不清": "unreadable",
+    "不可辨认": "unreadable",
+    "不确定": "uncertain",
+    "unclear": "uncertain",
+    "blurry": "uncertain",
+}
+_VISUAL_STRUCTURE_MARKERS = (
+    "package",
+    "label",
+    "layout",
+    "zone",
+    "position",
+    "placement",
+    "mark",
+    "silhouette",
+    "structure",
+    "container",
+    "background",
+    "props",
+    "hero",
+    "轮廓",
+    "标签",
+    "标识区",
+    "标签区",
+    "区域",
+    "位置",
+    "结构",
+    "版式",
+    "留白",
+    "背景",
+    "主体",
+    "材质",
+    "纹理",
+)
+_TEXT_HINT_MARKERS = (
+    "品牌",
+    "品名",
+    "产品名",
+    "净含量",
+    "含量",
+    "系列",
+    "香型",
+    "口味",
+    "单丛",
+    "乌龙",
+    "红茶",
+    "绿茶",
+    "白茶",
+    "茶",
+)
+_TEXT_ANCHOR_UNIT_PATTERN = re.compile(r"\d+(?:\.\d+)?\s*(?:g|kg|ml|l|克|千克|毫升|升|袋|盒|罐|片|capsules?)", re.IGNORECASE)
+_LATIN_TOKEN_PATTERN = re.compile(r"[A-Za-z]")
 
 
 def analyze_product(state: WorkflowState, deps: WorkflowDependencies) -> dict:
@@ -77,7 +137,16 @@ def analyze_product(state: WorkflowState, deps: WorkflowDependencies) -> dict:
     if should_use_cache(state):
         cached_analysis = deps.storage.load_cached_json_artifact("analyze_product", cache_key, ProductAnalysis)
         if cached_analysis is not None:
+            cached_analysis = _normalize_product_lock_fields(
+                cached_analysis.model_copy(
+                    update={
+                        "source_asset_ids": selected_asset_ids or cached_analysis.source_asset_ids,
+                        "asset_completeness_mode": cached_analysis.asset_completeness_mode or selection.asset_completeness_mode,
+                    }
+                )
+            )
             deps.storage.save_json_artifact(task.task_id, "product_analysis.json", cached_analysis)
+            logs.extend(_format_text_anchor_logs(node_name="analyze_product", analysis=cached_analysis))
             logs.extend(
                 [
                     f"[analyze_product] cache hit key={cache_key}",
@@ -91,6 +160,10 @@ def analyze_product(state: WorkflowState, deps: WorkflowDependencies) -> dict:
                 "analyze_reference_asset_ids": selected_asset_ids,
                 "analyze_selected_main_asset_id": selection.selected_main_asset_id,
                 "analyze_selected_detail_asset_id": selection.selected_detail_asset_id,
+                "analyze_asset_completeness_mode": selection.asset_completeness_mode,
+                "analyze_text_anchor_source": cached_analysis.text_anchor_source,
+                "analyze_text_anchor_count": len(cached_analysis.must_preserve_texts),
+                "analyze_extracted_text_anchors": list(cached_analysis.must_preserve_texts),
                 "analyze_reference_selection_reason": selection.selection_reason,
                 "logs": [*logs, *format_connected_contract_logs({"product_analysis": cached_analysis, "product_lock": cached_analysis}, node_name="analyze_product")],
             }
@@ -133,14 +206,29 @@ def analyze_product(state: WorkflowState, deps: WorkflowDependencies) -> dict:
             assets=selected_assets,
             system_prompt=load_prompt_text("analyze_product.md"),
         )
-        analysis = _normalize_product_lock_fields(analysis.model_copy(update={"source_asset_ids": selected_asset_ids}))
+        analysis = _normalize_product_lock_fields(
+            analysis.model_copy(
+                update={
+                    "source_asset_ids": selected_asset_ids,
+                    "asset_completeness_mode": selection.asset_completeness_mode,
+                }
+            )
+        )
     else:
         analysis = build_mock_product_analysis(state.get("assets", []), task.product_name)
-        analysis = _normalize_product_lock_fields(analysis.model_copy(update={"source_asset_ids": selected_asset_ids}))
+        analysis = _normalize_product_lock_fields(
+            analysis.model_copy(
+                update={
+                    "source_asset_ids": selected_asset_ids,
+                    "asset_completeness_mode": selection.asset_completeness_mode,
+                }
+            )
+        )
 
     deps.storage.save_json_artifact(task.task_id, "product_analysis.json", analysis)
     if state.get("cache_enabled"):
         deps.storage.save_cached_json_artifact("analyze_product", cache_key, analysis, metadata=cache_context)
+    logs.extend(_format_text_anchor_logs(node_name="analyze_product", analysis=analysis))
     logs.extend(
         [
             (
@@ -149,6 +237,7 @@ def analyze_product(state: WorkflowState, deps: WorkflowDependencies) -> dict:
                 f"subcategory={analysis.subcategory} "
                 f"product_form={analysis.product_form} "
                 f"package_template_family={analysis.package_template_family or '-'} "
+                f"asset_completeness_mode={analysis.asset_completeness_mode or '-'} "
                 f"must_preserve={len(analysis.visual_identity.must_preserve)}"
             ),
             f"[analyze_product] vision_model={deps.vision_model_selection.model_id if deps.vision_model_selection else '-'}",
@@ -162,6 +251,10 @@ def analyze_product(state: WorkflowState, deps: WorkflowDependencies) -> dict:
         "analyze_reference_asset_ids": selected_asset_ids,
         "analyze_selected_main_asset_id": selection.selected_main_asset_id,
         "analyze_selected_detail_asset_id": selection.selected_detail_asset_id,
+        "analyze_asset_completeness_mode": selection.asset_completeness_mode,
+        "analyze_text_anchor_source": analysis.text_anchor_source,
+        "analyze_text_anchor_count": len(analysis.must_preserve_texts),
+        "analyze_extracted_text_anchors": list(analysis.must_preserve_texts),
         "analyze_reference_selection_reason": selection.selection_reason,
         "logs": logs,
     }
@@ -189,10 +282,29 @@ def _format_selection_logs(*, node_name: str, selection: ReferenceSelection) -> 
         (
             f"[{node_name}] selected_main_asset_id={selection.selected_main_asset_id or '-'} "
             f"selected_detail_asset_id={selection.selected_detail_asset_id or '-'} "
+            f"asset_completeness_mode={selection.asset_completeness_mode} "
             f"selected_reference_asset_ids={selection.selected_asset_ids or []}"
         ),
         f"[{node_name}] selection_reason={selection.selection_reason}",
     ]
+
+
+def _format_text_anchor_logs(*, node_name: str, analysis: ProductAnalysis) -> list[str]:
+    """统一输出文字锚点提取结果，便于后续排查 OCR/QC 为什么拿不到有效文字证据。"""
+    logs = [
+        (
+            f"[{node_name}] extracted_text_anchors={analysis.must_preserve_texts or []} "
+            f"text_anchor_source={analysis.text_anchor_source} "
+            f"text_anchor_count={len(analysis.must_preserve_texts)} "
+            f"text_anchor_status={analysis.text_anchor_status}"
+        )
+    ]
+    if not analysis.must_preserve_texts:
+        logs.append(
+            f"[{node_name}] warning text anchor evidence weak source={analysis.text_anchor_source} "
+            f"status={analysis.text_anchor_status} notes={analysis.text_anchor_notes or ['none']}"
+        )
+    return logs
 
 
 def _normalize_product_lock_fields(analysis: ProductAnalysis) -> ProductAnalysis:
@@ -214,6 +326,7 @@ def _normalize_product_lock_fields(analysis: ProductAnalysis) -> ProductAnalysis
         "front label layout",
     ]
     editable_elements = analysis.editable_elements or ["background", "props", "lighting", "crop"]
+    text_anchor_payload = _resolve_text_anchor_payload(analysis)
     package_template_family = analysis.package_template_family or resolve_tea_package_template_family(
         analysis.model_copy(
             update={
@@ -227,12 +340,174 @@ def _normalize_product_lock_fields(analysis: ProductAnalysis) -> ProductAnalysis
     return analysis.model_copy(
         update={
             "locked_elements": locked_elements,
-            "must_preserve_texts": analysis.must_preserve_texts or [],
+            "must_preserve_texts": text_anchor_payload["anchors"],
+            "text_anchor_status": text_anchor_payload["status"],
+            "text_anchor_source": text_anchor_payload["source"],
+            "text_anchor_notes": text_anchor_payload["notes"],
             "editable_elements": editable_elements,
             "package_type": package_type,
             "package_template_family": package_template_family,
+            "asset_completeness_mode": analysis.asset_completeness_mode or "packshot_only",
             "primary_color": primary_color,
             "material": material,
             "label_structure": label_structure,
         }
     )
+
+
+def _resolve_text_anchor_payload(analysis: ProductAnalysis) -> dict[str, object]:
+    """统一解析 must_preserve_texts 的来源、状态和兜底策略。
+
+    规则：
+    - provider 明确给出且通过过滤的短文本锚点，直接作为 `provider`
+    - provider 为空时，尝试从 `visual_identity.must_preserve / locked_elements` 中筛出短文本锚点
+    - 仍拿不到时，不再静默空数组，而是显式写出 `text_anchor_status`
+    """
+    provider_status = _normalize_text_anchor_status(analysis.text_anchor_status)
+    provider_notes = _normalize_text_anchor_notes(analysis.text_anchor_notes)
+    provider_anchors, inline_status = _normalize_text_anchors(analysis.must_preserve_texts)
+    provider_status = inline_status or provider_status
+    if provider_anchors:
+        return {
+            "anchors": provider_anchors,
+            "source": "provider",
+            "status": provider_status if provider_status in {"readable", "uncertain"} else "readable",
+            "notes": provider_notes,
+        }
+
+    fallback_anchors = _extract_fallback_text_anchors(analysis)
+    if fallback_anchors:
+        notes = _merge_unique_strings(
+            provider_notes,
+            ["provider returned empty must_preserve_texts, fallback extracted short text anchors from visual fields"],
+        )
+        return {
+            "anchors": fallback_anchors,
+            "source": "fallback",
+            "status": "uncertain",
+            "notes": notes,
+        }
+
+    final_status = provider_status if provider_status in {"uncertain", "unreadable"} else "unreadable"
+    notes = provider_notes or ["no stable text anchor could be extracted from provider or fallback"]
+    return {
+        "anchors": [],
+        "source": "none",
+        "status": final_status,
+        "notes": notes,
+    }
+
+
+def _normalize_text_anchor_status(value: str) -> str:
+    """把 provider 或 fallback 的文字锚点状态收敛为固定枚举。"""
+    text = str(value or "").strip().lower()
+    if text in {"readable", "uncertain", "unreadable"}:
+        return text
+    for marker, normalized in _TEXT_ANCHOR_STATUS_MARKERS.items():
+        if marker in text:
+            return normalized
+    return "readable" if text else ""
+
+
+def _normalize_text_anchor_notes(values: list[str] | None) -> list[str]:
+    """清洗 provider 侧的文字锚点说明，避免把空值或占位词写入日志与落盘。"""
+    notes: list[str] = []
+    for raw in values or []:
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        if text.lower() in _TEXT_ANCHOR_INVALID_TOKENS:
+            continue
+        if text not in notes:
+            notes.append(text)
+    return notes[:3]
+
+
+def _normalize_text_anchors(values: list[str] | None) -> tuple[list[str], str]:
+    """过滤 provider 返回的文字锚点，只保留短、关键、适合后续 OCR 对比的文本。"""
+    anchors: list[str] = []
+    detected_status = ""
+    for raw in values or []:
+        text = _normalize_text_anchor(raw)
+        if not text:
+            normalized_status = _normalize_text_anchor_status(str(raw))
+            if normalized_status in {"uncertain", "unreadable"}:
+                detected_status = normalized_status
+            continue
+        if text not in anchors:
+            anchors.append(text)
+        if len(anchors) >= TEXT_ANCHOR_MAX_COUNT:
+            break
+    return anchors, detected_status
+
+
+def _normalize_text_anchor(value: str) -> str:
+    """清洗单条文字锚点，并过滤掉视觉结构描述或过长说明句。"""
+    text = " ".join(str(value or "").strip().split())
+    if not text:
+        return ""
+    if text.lower() in _TEXT_ANCHOR_INVALID_TOKENS:
+        return ""
+    text = text.strip("[](){}'\"，。；;：: ")
+    if not text:
+        return ""
+    if any(marker in text.lower() for marker in _TEXT_ANCHOR_STATUS_MARKERS):
+        return ""
+    if len(text) > 24 or len(text) < 2:
+        return ""
+    if _looks_like_visual_structure_rule(text):
+        return ""
+    if not _looks_like_short_text_anchor(text):
+        return ""
+    return text
+
+
+def _extract_fallback_text_anchors(analysis: ProductAnalysis) -> list[str]:
+    """当 provider 没给 must_preserve_texts 时，从现有视觉字段里回收可用短文本锚点。"""
+    candidates = [
+        *list(getattr(analysis.visual_identity, "must_preserve", []) or []),
+        *list(analysis.locked_elements or []),
+    ]
+    anchors, _ = _normalize_text_anchors(candidates)
+    return anchors
+
+
+def _looks_like_visual_structure_rule(text: str) -> bool:
+    """识别“front label layout / package silhouette”这类视觉规则，避免误当文字锚点。"""
+    lower = text.lower()
+    if any(marker in lower for marker in _VISUAL_STRUCTURE_MARKERS):
+        return True
+    if any(marker in text for marker in ("留白", "构图", "轮廓", "结构", "区域", "材质", "纹理", "位置")):
+        return True
+    return False
+
+
+def _looks_like_short_text_anchor(text: str) -> bool:
+    """判断一段文本是否更像包装上真实可见的短文字，而不是长句说明。"""
+    if _TEXT_ANCHOR_UNIT_PATTERN.search(text):
+        return True
+    if any(marker in text for marker in _TEXT_HINT_MARKERS):
+        return True
+    if len(text) <= 16 and _LATIN_TOKEN_PATTERN.search(text):
+        return True
+    chinese_char_count = len(re.findall(r"[\u4e00-\u9fff]", text))
+    digit_count = len(re.findall(r"\d", text))
+    if 2 <= chinese_char_count <= 12 and len(text) <= 18:
+        return True
+    if chinese_char_count >= 2 and digit_count >= 1 and len(text) <= 20:
+        return True
+    return False
+
+
+def _merge_unique_strings(*groups: list[str]) -> list[str]:
+    """按原始顺序去重合并字符串，避免日志与落盘说明重复。"""
+    merged: list[str] = []
+    seen: set[str] = set()
+    for group in groups:
+        for item in group:
+            text = str(item or "").strip()
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            merged.append(text)
+    return merged

@@ -35,6 +35,7 @@ class ReferenceSelection:
     selected_asset_ids: list[str]
     selected_main_asset_id: str | None
     selected_detail_asset_id: str | None
+    asset_completeness_mode: str
     selection_reason: str
 
 
@@ -59,20 +60,24 @@ def select_reference_bundle(assets: list[Asset], *, max_images: int) -> Referenc
             selected_asset_ids=[],
             selected_main_asset_id=None,
             selected_detail_asset_id=None,
+            asset_completeness_mode="packshot_only",
             selection_reason="no_assets_or_max_images_zero",
         )
 
     main_asset, main_reason = _select_main_asset(assets)
+    detail_candidate, detail_reason = _select_detail_asset(assets, main_asset.asset_id if main_asset else None)
+    asset_completeness_mode = _resolve_asset_completeness_mode(main_asset=main_asset, detail_asset=detail_candidate)
     selected_assets: list[Asset] = []
     if main_asset is not None:
         selected_assets.append(main_asset)
 
     detail_asset = None
-    detail_reason = "detail_not_selected"
     if max_images > 1:
-        detail_asset, detail_reason = _select_detail_asset(assets, main_asset.asset_id if main_asset else None)
+        detail_asset = detail_candidate
         if detail_asset is not None:
             selected_assets.append(detail_asset)
+    else:
+        detail_reason = f"{detail_reason}; skipped_by_max_images={max_images}"
 
     if len(selected_assets) < max_images:
         existing_ids = {asset.asset_id for asset in selected_assets}
@@ -91,8 +96,16 @@ def select_reference_bundle(assets: list[Asset], *, max_images: int) -> Referenc
         selected_asset_ids=selected_asset_ids,
         selected_main_asset_id=main_asset.asset_id if main_asset is not None else None,
         selected_detail_asset_id=detail_asset.asset_id if detail_asset is not None and detail_asset in selected_assets else None,
-        selection_reason=f"main={main_reason}; detail={detail_reason}; max_images={max_images}",
+        asset_completeness_mode=asset_completeness_mode,
+        selection_reason=f"main={main_reason}; detail={detail_reason}; asset_completeness_mode={asset_completeness_mode}; max_images={max_images}",
     )
+
+
+def _resolve_asset_completeness_mode(*, main_asset: Asset | None, detail_asset: Asset | None) -> str:
+    """根据主包装图和细节图的可用性判断素材完备度模式。"""
+    if main_asset is not None and detail_asset is not None:
+        return "packshot_plus_detail"
+    return "packshot_only"
 
 
 def _select_main_asset(assets: list[Asset]) -> tuple[Asset | None, str]:

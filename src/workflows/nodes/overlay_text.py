@@ -60,6 +60,12 @@ def overlay_text(state: WorkflowState, deps: WorkflowDependencies) -> dict:
         normalized_report = _build_text_region_report(
             shot_id=image.shot_id,
             output_path=render_report.output_path,
+            font_source=render_report.font_source,
+            font_loaded=render_report.font_loaded,
+            fallback_used=render_report.fallback_used,
+            requested_font_path=render_report.requested_font_path,
+            resolved_font_path=render_report.resolved_font_path,
+            fallback_target=render_report.fallback_target,
             render_blocks=render_report.blocks,
         )
         block_summaries = [
@@ -68,7 +74,11 @@ def overlay_text(state: WorkflowState, deps: WorkflowDependencies) -> dict:
                 f"color={block.text_color},"
                 f"plate={block.background_plate_applied},"
                 f"shadow={block.shadow_applied},"
-                f"stroke={block.stroke_applied}"
+                f"stroke={block.stroke_applied},"
+                f"requested_font_size={block.requested_font_size},"
+                f"used_font_size={block.used_font_size},"
+                f"min_font_size_hit={block.min_font_size_hit},"
+                f"overflow_detected={block.overflow_detected}"
             )
             for block in render_report.blocks
         ]
@@ -78,6 +88,17 @@ def overlay_text(state: WorkflowState, deps: WorkflowDependencies) -> dict:
                 f"shot_id={image.shot_id} "
                 f"typography_preset={get_settings().resolve_text_render_preset()} "
                 f"adaptive_color_result={block_summaries or ['no_text_blocks_rendered']}"
+            )
+        )
+        logs.append(
+            (
+                "[overlay] "
+                f"shot_id={image.shot_id} "
+                f"font_source={render_report.font_source} "
+                f"font_loaded={render_report.font_loaded} "
+                f"fallback_used={render_report.fallback_used} "
+                f"resolved_font_path={render_report.resolved_font_path} "
+                f"fallback_target={render_report.fallback_target or '-'}"
             )
         )
         logs.append(
@@ -124,7 +145,18 @@ def overlay_text(state: WorkflowState, deps: WorkflowDependencies) -> dict:
     return updates
 
 
-def _build_text_region_report(*, shot_id: str, output_path: str, render_blocks: list) -> dict:
+def _build_text_region_report(
+    *,
+    shot_id: str,
+    output_path: str,
+    font_source: str,
+    font_loaded: bool,
+    fallback_used: bool,
+    requested_font_path: str,
+    resolved_font_path: str,
+    fallback_target: str | None,
+    render_blocks: list,
+) -> dict:
     """把文本渲染报告归一化成便于 QC 和落盘的结构。"""
     actual_text_regions = [
         {
@@ -135,6 +167,7 @@ def _build_text_region_report(*, shot_id: str, output_path: str, render_blocks: 
             "height": block.height,
             "requested_font_size": block.requested_font_size,
             "used_font_size": block.used_font_size,
+            "min_font_size_hit": block.min_font_size_hit,
             "line_count": block.line_count,
             "density_ratio": block.density_ratio,
             "overflow_detected": block.overflow_detected,
@@ -145,6 +178,12 @@ def _build_text_region_report(*, shot_id: str, output_path: str, render_blocks: 
     return {
         "shot_id": shot_id,
         "output_path": output_path,
+        "font_source": font_source,
+        "font_loaded": font_loaded,
+        "fallback_used": fallback_used,
+        "requested_font_path": requested_font_path,
+        "resolved_font_path": resolved_font_path,
+        "fallback_target": fallback_target,
         "actual_text_regions": actual_text_regions,
         "merged_text_region": _merge_text_regions(actual_text_regions),
         "title_region": _first_region_by_kind(actual_text_regions, "title"),
