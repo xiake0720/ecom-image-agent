@@ -1,184 +1,112 @@
-"""Workflow 状态、依赖与统一日志格式定义。
+"""Workflow 状态、依赖容器与进度工具。
 
 文件位置：
 - `src/workflows/state.py`
 
-核心职责：
-- 定义 LangGraph 节点之间传递的 `WorkflowState`
-- 定义 workflow 运行期依赖容器 `WorkflowDependencies`
-- 提供统一的 contract 接入摘要工具，便于日志、结果页和调试面板复用
-
-主要被谁调用：
-- `src/workflows/graph.py`
-- 所有 `src/workflows/nodes/*.py`
-- UI 结果页调试信息构建
+职责：
+- 定义 workflow 节点之间共享的最小状态
+- 定义 workflow 运行时依赖容器
+- 提供统一的进度、日志和任务状态回写工具
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TypedDict
+from typing import Callable, TypedDict
 
 from src.core.config import ResolvedModelSelection, ResolvedProviderRoute
 from src.domain.asset import Asset
-from src.domain.copy_plan import CopyPlan
-<<<<<<< HEAD
 from src.domain.director_output import DirectorOutput
-=======
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 from src.domain.generation_result import GenerationResult
-from src.domain.image_prompt_plan import ImagePromptPlan
-from src.domain.layout_plan import LayoutPlan
-from src.domain.product_analysis import ProductAnalysis
-<<<<<<< HEAD
 from src.domain.prompt_plan_v2 import PromptPlanV2
-=======
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 from src.domain.qc_report import QCReport
-from src.domain.shot_prompt_specs import ShotPromptSpecPlan
-from src.domain.shot_plan import ShotPlan
-from src.domain.style_architecture import StyleArchitecture
-from src.domain.task import Task
+from src.domain.task import Task, TaskStatus
 
 CORE_CONTRACT_ARTIFACTS: dict[str, str] = {
-    "product_analysis": "product_analysis.json",
-    "style_architecture": "style_architecture.json",
-    "shot_plan": "shot_plan.json",
-    "shot_prompt_specs": "shot_prompt_specs.json",
-}
-
-<<<<<<< HEAD
-V2_CONTRACT_ARTIFACTS: dict[str, str] = {
     "director_output": "director_output.json",
     "prompt_plan_v2": "prompt_plan_v2.json",
+    "generation_result_v2": "final/",
+    "qc_report_v2": "qc_report.json",
 }
 
-=======
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
+STEP_PROGRESS: dict[str, tuple[int, str]] = {
+    "ingest_assets": (10, "正在校验素材"),
+    "director_v2": (30, "正在分析产品与规划图组"),
+    "prompt_refine_v2": (55, "正在生成每张图提示词"),
+    "render_images": (85, "正在生成图片"),
+    "run_qc": (100, "正在质检与整理结果"),
+    "finalize": (100, "正在质检与整理结果"),
+}
+
 
 class WorkflowState(TypedDict, total=False):
-    """LangGraph 在节点之间传递的共享状态。
-
-    对 Java 开发者可以把它理解成整条 pipeline 的共享上下文对象。
-    本文件里显式声明这些字段，是为了让“哪个节点写了什么、下游哪个节点又读了什么”可追踪。
-    """
+    """LangGraph 节点间共享的最小状态。"""
 
     task: Task
     assets: list[Asset]
+    uploaded_files: list[str]
     logs: list[str]
-<<<<<<< HEAD
-    workflow_version: str
     cache_enabled: bool
     ignore_cache: bool
-    direct_text_on_image: bool
-    enable_overlay_fallback: bool
-    needs_overlay_fallback: bool
-    overlay_fallback_candidates: list[dict[str, object]]
-=======
-    cache_enabled: bool
-    ignore_cache: bool
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-    prompt_build_mode: str
-    render_mode: str
-    render_variant: str
-    render_generation_mode: str
-    render_reference_asset_ids: list[str]
-    render_image_provider_impl: str
-    render_image_model_id: str
-    render_selected_main_asset_id: str
-    render_selected_detail_asset_id: str
-    render_reference_selection_reason: str
-    analyze_reference_asset_ids: list[str]
-    analyze_selected_main_asset_id: str
-    analyze_selected_detail_asset_id: str
-    analyze_reference_selection_reason: str
-<<<<<<< HEAD
-=======
-    analyze_asset_completeness_mode: str
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-    analyze_max_reference_images: int
-    render_max_reference_images: int
-    preview_generation_result: GenerationResult
-    product_analysis: ProductAnalysis
-    product_lock: ProductAnalysis
-<<<<<<< HEAD
-    # v1 主链字段继续保留，不能因为引入 v2 而删改。
-=======
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-    style_architecture: StyleArchitecture
-    shot_plan: ShotPlan
-    copy_plan: CopyPlan
-    layout_plan: LayoutPlan
-    shot_prompt_specs: ShotPromptSpecPlan
-    image_prompt_plan: ImagePromptPlan
-<<<<<<< HEAD
-    # v2 三步链路字段先在 state 中占位，后续节点再逐步接入。
+    current_step: str
+    current_step_label: str
+    progress_percent: int
     director_output: DirectorOutput
     prompt_plan_v2: PromptPlanV2
     generation_result: GenerationResult
     generation_result_v2: GenerationResult
     qc_report: QCReport
     qc_report_v2: QCReport
-    preview_qc_report: QCReport
     text_render_reports: dict[str, dict[str, object]]
-=======
-    generation_result: GenerationResult
-    qc_report: QCReport
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     export_zip_path: str
+    full_task_bundle_zip_path: str
+    error_message: str
+
+
+ProgressCallback = Callable[[WorkflowState], None]
 
 
 @dataclass
 class WorkflowDependencies:
-    """Workflow 运行时依赖容器。
-
-    为什么需要：
-    - 避免每个节点自己实例化 storage/provider/renderer
-    - 让 graph 层统一注入 mock/real provider 和模型选择结果
-    """
+    """Workflow 运行时依赖容器。"""
 
     storage: object
     planning_provider: object
-    vision_analysis_provider: object | None
     image_generation_provider: object
     text_renderer: object
-    ocr_service: object
     text_provider_mode: str
-    vision_provider_mode: str
     image_provider_mode: str
     planning_provider_name: str = ""
-    vision_provider_name: str = ""
     image_provider_name: str = ""
     planning_route: ResolvedProviderRoute | None = None
-    vision_route: ResolvedProviderRoute | None = None
     image_route: ResolvedProviderRoute | None = None
-    planning_provider_status: str = ""
-    vision_provider_status: str = ""
-    image_provider_status: str = ""
     planning_model_selection: ResolvedModelSelection | None = None
-    vision_model_selection: ResolvedModelSelection | None = None
     image_model_selection: ResolvedModelSelection | None = None
+    progress_callback: ProgressCallback | None = None
 
 
 class WorkflowExecutionError(RuntimeError):
-    """包装节点执行失败信息，供 UI 统一展示。"""
+    """包装节点失败信息，供 UI 统一展示。"""
 
     def __init__(
         self,
         message: str,
         *,
         logs: list[str],
+        task_state: WorkflowState | None = None,
         task_id: str | None = None,
         node_name: str | None = None,
     ) -> None:
         super().__init__(message)
         self.logs = logs
+        self.task_state = task_state
         self.task_id = task_id
         self.node_name = node_name
 
 
 def get_task_id_from_state(state: WorkflowState) -> str:
-    """从 workflow state 中尽量稳定地取出 task_id。"""
+    """从 workflow state 中稳定提取 task_id。"""
+
     task = state.get("task")
     if hasattr(task, "task_id"):
         return str(task.task_id)
@@ -188,7 +116,8 @@ def get_task_id_from_state(state: WorkflowState) -> str:
 
 
 def append_log(logs: list[str] | None, message: str) -> list[str]:
-    """向日志列表追加一条日志并返回新列表。"""
+    """向日志列表追加一条日志。"""
+
     return [*(logs or []), message]
 
 
@@ -198,77 +127,72 @@ def format_workflow_log(
     node_name: str,
     event: str,
     detail: str | None = None,
-    output: str | None = None,
-    output_hint: str | None = None,
     elapsed_ms: int | None = None,
     level: str = "INFO",
 ) -> str:
     """生成统一格式的 workflow 日志行。"""
-    parts = [
-        f"[{level}]",
-        f"task_id={task_id}",
-        f"node={node_name}",
-        f"event={event}",
-    ]
+
+    parts = [f"[{level}]", f"task_id={task_id}", f"node={node_name}", f"event={event}"]
     if elapsed_ms is not None:
         parts.append(f"elapsed_ms={elapsed_ms}")
-    resolved_output = output_hint or output
-    if resolved_output:
-        parts.append(f"output={resolved_output}")
     if detail:
         parts.append(f"detail={detail}")
     return " | ".join(parts)
 
 
-def build_connected_contract_summary(state: WorkflowState) -> dict[str, object]:
-    """汇总当前 state 中已经接入的核心 contract。
+def update_task_progress(
+    task: Task,
+    *,
+    step: str,
+    status: TaskStatus | None = None,
+    error_message: str | None = None,
+    step_label: str | None = None,
+    progress_percent: int | None = None,
+) -> Task:
+    """根据节点信息更新任务进度。"""
 
-    这组摘要用于：
-    - 节点日志里统一打印“当前链路已经接了哪些 contract”
-    - 结果页 debug 面板展示当前主链路 contract 接入情况
-    - finalize 阶段补充任务目录产物可见性日志
+    default_progress, default_label = STEP_PROGRESS.get(step, (task.progress_percent, task.current_step_label))
+    return task.model_copy(
+        update={
+            "status": status or task.status,
+            "current_step": step,
+            "current_step_label": step_label or default_label,
+            "progress_percent": default_progress if progress_percent is None else progress_percent,
+            "error_message": error_message or "",
+        }
+    )
+
+
+def build_render_progress_task(task: Task, *, completed_count: int, total_count: int) -> Task:
+    """构造 `render_images` 节点内部的增量进度。
+
+    这里不再按张线性推进百分比，而是维持渲染阶段的固定百分比，
+    重点通过步骤文案告诉前端当前已经生成到第几张图。
     """
+
+    safe_total = max(total_count, 1)
+    safe_completed = max(0, min(completed_count, safe_total))
+    return update_task_progress(
+        task,
+        step="render_images",
+        step_label=f"正在生成图片（{safe_completed}/{safe_total}）",
+        progress_percent=STEP_PROGRESS["render_images"][0],
+    )
+
+
+def build_connected_contract_summary(state: WorkflowState) -> dict[str, object]:
+    """汇总当前 state 中已经接入的核心 contract。"""
+
     connected_files = [
         filename
         for state_key, filename in CORE_CONTRACT_ARTIFACTS.items()
         if state.get(state_key) is not None
     ]
-<<<<<<< HEAD
-    connected_files.extend(
-        filename
-        for state_key, filename in V2_CONTRACT_ARTIFACTS.items()
-        if state.get(state_key) is not None
-    )
-    style_connected = state.get("style_architecture") is not None
-    shot_specs_ready = state.get("shot_prompt_specs") is not None
-    prompt_plan_v2_ready = state.get("prompt_plan_v2") is not None
-=======
-    style_connected = state.get("style_architecture") is not None
-    shot_specs_ready = state.get("shot_prompt_specs") is not None
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-    product_lock_connected = state.get("product_lock") is not None or state.get("product_analysis") is not None
-    return {
-        "connected_contract_files": connected_files,
-        "style_architecture_connected": style_connected,
-        "shot_prompt_specs_available_for_render": shot_specs_ready,
-<<<<<<< HEAD
-        "prompt_plan_v2_available_for_render": prompt_plan_v2_ready,
-=======
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-        "product_lock_connected": product_lock_connected,
-    }
+    return {"connected_contract_files": connected_files}
 
 
 def format_connected_contract_logs(state: WorkflowState, *, node_name: str) -> list[str]:
-    """把当前核心 contract 接入情况格式化成统一日志。"""
+    """把已接入 contract 摘要格式化成日志。"""
+
     summary = build_connected_contract_summary(state)
-    return [
-        f"[{node_name}] connected_contract_files={summary['connected_contract_files']}",
-        f"[{node_name}] style_architecture_connected={str(summary['style_architecture_connected']).lower()}",
-        f"[{node_name}] shot_prompt_specs_available_for_render={str(summary['shot_prompt_specs_available_for_render']).lower()}",
-<<<<<<< HEAD
-        f"[{node_name}] prompt_plan_v2_available_for_render={str(summary['prompt_plan_v2_available_for_render']).lower()}",
-=======
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-        f"[{node_name}] product_lock_connected={str(summary['product_lock_connected']).lower()}",
-    ]
+    return [f"[{node_name}] connected_contract_files={summary['connected_contract_files']}"]

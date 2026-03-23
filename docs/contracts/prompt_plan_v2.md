@@ -8,7 +8,7 @@
 ## 顶层字段
 - `shots`
 
-## `shots[]` 字段
+## `shots[]`
 - `shot_id`
 - `shot_role`
 - `render_prompt`
@@ -18,17 +18,13 @@
 - `aspect_ratio`
 - `image_size`
 
-## 业务建议
-- `title_copy`
-  - 建议 4 到 8 字
-- `subtitle_copy`
-  - 建议 8 到 15 字
-- `aspect_ratio`
-  - 默认 `1:1`
-- `image_size`
-  - 默认 `2K`
+## 约束
+- `title_copy` 建议 `4-8` 字
+- `subtitle_copy` 建议 `8-15` 字
+- 默认 `aspect_ratio=1:1`
+- 默认 `image_size=2K`
 
-## 用途
-- `prompt_refine_v2` 的稳定输出
-- `render_images` v2 分支的直接输入
-- `overlay_text` fallback 的复用输入
+## 使用位置
+- `prompt_refine_v2` 的最终输出
+- `render_images` 的直接输入
+- overlay fallback 的文案与版式输入

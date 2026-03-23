@@ -8,19 +8,11 @@ from pathlib import Path
 
 
 PROMPTS_DIR = Path(__file__).resolve().parents[2] / "prompts"
-PROMPTS_BASE_DIR = PROMPTS_DIR / "base"
 
 
 def resolve_prompt_path(filename: str) -> Path:
-    """解析 prompt 文件路径，优先使用基础模板目录。"""
+    """解析 prompt 文件路径。"""
     candidate = PROMPTS_DIR / filename
-    if "/" in filename or "\\" in filename:
-        if candidate.exists():
-            return candidate
-        raise FileNotFoundError(f"Prompt file not found: {filename}")
-    base_candidate = PROMPTS_BASE_DIR / filename
-    if base_candidate.exists():
-        return base_candidate
     if candidate.exists():
         return candidate
     raise FileNotFoundError(f"Prompt file not found: {filename}")

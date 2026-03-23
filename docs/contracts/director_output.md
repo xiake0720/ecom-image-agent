@@ -12,7 +12,7 @@
 - `visual_style`
 - `shots`
 
-## `shots[]` 字段
+## `shots[]`
 - `shot_id`
 - `shot_role`
 - `objective`
@@ -24,6 +24,7 @@
 - `copy_direction`
 - `compliance_notes`
 
-## 用途
-- `director_v2` 的稳定输出
-- `prompt_refine_v2` 的直接输入
+## 说明
+- `director_v2` 固定输出 8 张图位规划
+- `prompt_refine_v2` 只消费这份结构化导演结果
+- 不再向旧 `style_director / plan_shots` contract 兼容

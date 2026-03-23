@@ -28,12 +28,23 @@ from src.domain.generation_result import GeneratedImage, GenerationResult
 from src.domain.image_prompt_plan import ImagePromptPlan
 from src.domain.prompt_plan_v2 import PromptPlanV2
 from src.providers.image.base import BaseImageProvider
-from src.providers.image.routed_image import ImageGenerationContext
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
 
 RUNAPI_GEMINI31_MODEL_ID = "gemini-3.1-flash-image-preview"
+
+
+@dataclass(frozen=True)
+class ImageGenerationContext:
+    """当前图片生成请求的最小执行上下文。"""
+
+    generation_mode: str
+    provider_alias: str
+    model_id: str
+    reference_asset_ids: list[str]
+    selected_reference_assets: list[Asset]
 
 
 class RunApiGemini31ImageProvider(BaseImageProvider):
@@ -55,8 +66,6 @@ class RunApiGemini31ImageProvider(BaseImageProvider):
         # 全局 image_model 默认值，否则会把 Wanx 默认模型误带进来。
         if settings.resolve_image_provider_route().alias == "runapi_gemini31":
             self.model_id = settings.resolve_image_model_selection().model_id
-        elif settings.resolve_image_edit_provider_route().alias == "runapi_gemini31":
-            self.model_id = settings.resolve_image_edit_model_selection().model_id
         else:
             self.model_id = RUNAPI_GEMINI31_MODEL_ID
         self.last_request_payloads: dict[str, dict[str, object]] = {}
@@ -202,15 +211,18 @@ class RunApiGemini31ImageProvider(BaseImageProvider):
         )
         started_at = perf_counter()
         try:
-            response = requests.post(
-                url,
-                headers={
-                    "Authorization": f"Bearer {self.settings.runapi_api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-                timeout=self.settings.provider_timeout_seconds,
-            )
+            with requests.Session() as session:
+                session.trust_env = False
+                session.proxies.clear()
+                response = session.post(
+                    url,
+                    headers={
+                        "Authorization": f"Bearer {self.settings.runapi_api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                    timeout=self.settings.provider_timeout_seconds,
+                )
         except requests.RequestException as exc:
             logger.exception("Gemini 3.1 图片请求失败，shot_id=%s, error=%s", shot_id, exc)
             raise RuntimeError(f"RunAPI Gemini 3.1 request failed for {shot_id}: {exc}") from exc
@@ -290,7 +302,40 @@ class RunApiGemini31ImageProvider(BaseImageProvider):
                 inline = part.get("inlineData") or part.get("inline_data")
                 if inline and inline.get("data"):
                     return base64.b64decode(inline["data"])
-        raise RuntimeError(f"RunAPI Gemini 3.1 response did not contain inline image data: {response_json}")
+                file_data = part.get("fileData") or part.get("file_data")
+                if file_data:
+                    file_uri = file_data.get("fileUri") or file_data.get("file_uri")
+                    if file_uri:
+                        return self._download_generated_file(str(file_uri))
+        raise RuntimeError(f"RunAPI Gemini 3.1 response did not contain image data: {response_json}")
+
+    def _download_generated_file(self, file_uri: str) -> bytes:
+        """下载 RunAPI 返回的图片文件地址，并显式禁用环境代理。"""
+        logger.info("检测到 Gemini 3.1 fileUri 返回，开始下载图片文件，url=%s", file_uri)
+        try:
+            with requests.Session() as session:
+                session.trust_env = False
+                session.proxies.clear()
+                response = session.get(
+                    file_uri,
+                    headers={"Authorization": f"Bearer {self.settings.runapi_api_key}"},
+                    timeout=self.settings.provider_timeout_seconds,
+                )
+        except requests.RequestException as exc:
+            logger.exception("Gemini 3.1 fileUri 图片下载失败，url=%s, error=%s", file_uri, exc)
+            raise RuntimeError(f"RunAPI Gemini 3.1 file download failed: {exc}") from exc
+
+        if response.status_code >= 400:
+            logger.error(
+                "Gemini 3.1 fileUri 图片下载失败，status_code=%s, url=%s, response=%s",
+                response.status_code,
+                file_uri,
+                summarize_text(response.text, limit=240),
+            )
+            raise RuntimeError(f"RunAPI Gemini 3.1 file download failed: {response.status_code} {response.text[:1200]}")
+        if not response.content:
+            raise RuntimeError(f"RunAPI Gemini 3.1 file download returned empty body: {file_uri}")
+        return response.content
 
     def _write_generated_image(self, *, index: int, shot_id: str, image_bytes: bytes, output_dir: Path) -> GeneratedImage:
         """把返回图片字节写入输出目录，并提取实际像素尺寸。"""

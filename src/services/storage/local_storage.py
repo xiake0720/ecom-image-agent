@@ -28,6 +28,7 @@ class LocalStorageService:
         return task_path
 
     def save_uploads(self, task_id: str, uploads: Iterable[tuple[str, bytes]]) -> list[Asset]:
+        """把上传文件写入任务目录，并生成素材清单。"""
         task_dirs = ensure_task_dirs(task_id)
         assets: list[Asset] = []
         for index, (filename, payload) in enumerate(uploads, start=1):
@@ -39,8 +40,8 @@ class LocalStorageService:
                     asset_id=f"asset-{index:02d}",
                     filename=filename,
                     local_path=str(target),
-                    mime_type="image/png",
-                    asset_type=AssetType.PRODUCT if index == 1 else AssetType.DETAIL,
+                    mime_type=self._guess_mime_type(target),
+                    asset_type=AssetType.WHITE_BG if index == 1 else AssetType.DETAIL,
                     width=width,
                     height=height,
                 )
@@ -110,3 +111,13 @@ class LocalStorageService:
                 return image.size
         except OSError:
             return None, None
+
+    def _guess_mime_type(self, image_path: Path) -> str:
+        """根据后缀推断最小可用 mime type。"""
+
+        suffix = image_path.suffix.lower()
+        if suffix in {".jpg", ".jpeg"}:
+            return "image/jpeg"
+        if suffix == ".webp":
+            return "image/webp"
+        return "image/png"

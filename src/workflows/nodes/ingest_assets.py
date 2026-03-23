@@ -1,40 +1,45 @@
 """素材接收节点。
 
-该节点负责：
-- 读取上传素材
-- 补齐素材宽高
-- 把素材整理为后续节点可消费的结构化资产列表
-
-它不调用任何真实 provider，只处理本地文件信息。
+职责：
+- 校验上传素材是否存在
+- 回填宽高信息
+- 输出最小素材摘要，供后续主链复用
 """
 
 from __future__ import annotations
 
-import logging
+from pathlib import Path
 
 from PIL import Image
 
 from src.domain.asset import Asset
 from src.workflows.state import WorkflowDependencies, WorkflowState
 
-logger = logging.getLogger(__name__)
-
 
 def ingest_assets(state: WorkflowState, deps: WorkflowDependencies) -> dict:
     """接收素材并补齐基础尺寸信息。"""
+
     assets: list[Asset] = []
+    uploaded_files: list[str] = []
     for asset in state.get("assets", []):
+        asset_path = Path(asset.local_path)
+        if not asset_path.exists():
+            raise RuntimeError(f"missing asset: {asset.filename}")
         try:
-            with Image.open(asset.local_path) as image:
+            with Image.open(asset_path) as image:
                 assets.append(asset.model_copy(update={"width": image.width, "height": image.height}))
         except OSError:
             assets.append(asset)
-    filenames = ", ".join(asset.filename for asset in assets)
-    logger.info("素材接收完成，素材数量=%s，文件=%s", len(assets), filenames or "-")
+        uploaded_files.append(asset.filename)
+
+    if not assets:
+        raise RuntimeError("no assets uploaded")
+
     return {
         "assets": assets,
+        "uploaded_files": uploaded_files,
         "logs": [
             *state.get("logs", []),
-            f"[ingest_assets] 素材接收完成，数量={len(assets)}，文件={filenames or '-' }。",
+            f"[ingest_assets] asset_count={len(assets)} files={uploaded_files}",
         ],
     }

@@ -1,304 +1,372 @@
 from __future__ import annotations
 
+import base64
 import json
 from pathlib import Path
+import zipfile
 
 from PIL import Image
 
-from src.core.config import ResolvedModelSelection
-from src.domain.asset import Asset, AssetType
-from src.domain.director_output import DirectorOutput, DirectorShot
+from src.core.config import Settings
 from src.domain.generation_result import GeneratedImage, GenerationResult
 from src.domain.prompt_plan_v2 import PromptPlanV2, PromptShot
-from src.domain.task import Task
-from src.services.storage.local_storage import LocalStorageService
+from src.domain.qc_report import QCReport
+from src.domain.task import Task, TaskStatus
+from src.providers.image.runapi_gemini31_image import RunApiGemini31ImageProvider
+from src.services.rendering.text_renderer import TextRenderer
+from src.workflows.nodes.finalize import finalize
 from src.workflows.nodes.render_images import render_images
 from src.workflows.nodes.run_qc import run_qc
 from src.workflows.state import WorkflowDependencies
 
 
-class FakeV2ImageProvider:
-    """用于验证 v2 render fallback 行为的最小图片 provider。"""
-
+class FakeImageProvider:
     def __init__(self) -> None:
-        self.calls: list[dict[str, str]] = []
+        self.v2_calls: list[str] = []
+        self.compat_calls: list[str] = []
 
-    def generate_images_v2(self, prompt_plan, *, output_dir, reference_assets=None):
-        """首张图第一次直出报错，后续 fallback 或其他图正常生成。"""
+    def generate_images_v2(self, prompt_plan, *, output_dir: Path, reference_assets=None) -> GenerationResult:
         del reference_assets
         shot = prompt_plan.shots[0]
-        self.calls.append(
-            {
-                "shot_id": shot.shot_id,
-                "title_copy": shot.title_copy,
-                "subtitle_copy": shot.subtitle_copy,
-                "layout_hint": shot.layout_hint,
-            }
-        )
-        if shot.shot_id == "shot-01" and shot.title_copy:
-            raise RuntimeError("direct text generation failed")
+        self.v2_calls.append(shot.shot_id)
+        if shot.shot_id == "shot_01":
+            raise RuntimeError("force overlay fallback")
+        return self.generate_images(_compat_plan_for_test(shot.shot_id), output_dir=output_dir, reference_assets=None)
+
+    def generate_images(self, plan, *, output_dir: Path, reference_assets=None) -> GenerationResult:
+        del reference_assets
+        prompt = plan.prompts[0]
+        self.compat_calls.append(prompt.shot_id)
         output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / f"{len(self.calls):02d}_{shot.shot_id}.png"
-        Image.new("RGB", (2048, 2048), color=(255, 255, 255)).save(output_path)
+        output_path = output_dir / f"{prompt.shot_id}.png"
+        Image.new("RGB", (512, 512), color=(255, 255, 255)).save(output_path)
         return GenerationResult(
             images=[
                 GeneratedImage(
-                    shot_id=shot.shot_id,
+                    shot_id=prompt.shot_id,
                     image_path=str(output_path),
                     preview_path=str(output_path),
-                    width=2048,
-                    height=2048,
+                    width=512,
+                    height=512,
                 )
             ]
         )
 
 
-class DummyOCRService:
-    """按图片文件名返回预设 OCR 结果，用于 v2 QC 检查。"""
+class TmpStorageService:
+    def __init__(self, root_dir: Path) -> None:
+        self.root_dir = root_dir
 
-    def read_text(self, image_path: str) -> list[str]:
-        if "shot-01" in image_path:
-            return []
-        return ["礼盒细节", "包装结构清晰质感高级"]
+    def save_json_artifact(self, task_id: str, filename: str, payload: object) -> Path:
+        del task_id
+        task_dir = self.root_dir
+        target = task_dir / filename
+        target.parent.mkdir(parents=True, exist_ok=True)
+        content = payload.model_dump(mode="json") if hasattr(payload, "model_dump") else payload
+        target.write_text(json.dumps(content, ensure_ascii=False, indent=2), encoding="utf-8")
+        return target
+
+    def save_task_manifest(self, task) -> Path:
+        target = Path(task.task_dir) / "task.json"
+        target.write_text(task.model_dump_json(indent=2), encoding="utf-8")
+        return target
+
+    def create_zip(self, task_id: str, source_dir: Path, output_name: str = "results") -> Path:
+        del task_id
+        exports_dir = self.root_dir / "exports"
+        exports_dir.mkdir(parents=True, exist_ok=True)
+        archive_path = exports_dir / f"{output_name}.zip"
+        with zipfile.ZipFile(archive_path, mode="w") as archive:
+            for path in sorted(source_dir.rglob("*")):
+                if path.is_file():
+                    archive.write(path, arcname=path.relative_to(source_dir))
+        return archive_path
 
 
-class DummyRenderer:
-    pass
-
-
-def _build_task(tmp_path: Path, *, task_id: str) -> Task:
-    """构造最小任务对象，避免直接写入仓库 outputs 目录。"""
-    return Task(
-        task_id=task_id,
-        brand_name="品牌A",
-        product_name="凤凰单丛",
-        platform="tmall",
-        output_size="1440x1440",
-        shot_count=2,
-        copy_tone="专业自然",
-        workflow_version="v2",
-        enable_overlay_fallback=True,
-        task_dir=str(tmp_path / task_id),
-    )
-
-
-def _build_deps(image_provider) -> WorkflowDependencies:
-    """构造 render/QC 复用的最小依赖集合。"""
-    return WorkflowDependencies(
-        storage=LocalStorageService(),
+def test_render_qc_finalize_keeps_overlay_fallback_inside_render(monkeypatch, tmp_path: Path) -> None:
+    task_dir = tmp_path / "task-render"
+    task_dir.mkdir(parents=True, exist_ok=True)
+    task = Task(task_id="task-render", brand_name="示例品牌", product_name="高山乌龙", task_dir=str(task_dir))
+    provider = FakeImageProvider()
+    storage = TmpStorageService(task_dir)
+    deps = WorkflowDependencies(
+        storage=storage,
         planning_provider=object(),
-        vision_analysis_provider=None,
-        image_generation_provider=image_provider,
-        text_renderer=DummyRenderer(),
-        ocr_service=DummyOCRService(),
+        image_generation_provider=provider,
+        text_renderer=TextRenderer(Path("missing-font.ttf")),
         text_provider_mode="mock",
-        vision_provider_mode="mock",
         image_provider_mode="mock",
-        image_provider_name=type(image_provider).__name__,
-        image_model_selection=ResolvedModelSelection("image", "mock", "mock-image", "Mock Image", "test"),
     )
-
-
-def _build_prompt_plan_v2() -> PromptPlanV2:
-    """生成两张 v2 prompt，用于验证单张 fallback 不影响整组输出。"""
-    return PromptPlanV2(
-        shots=[
-            PromptShot(
-                shot_id="shot-01",
-                shot_role="hero",
-                render_prompt="高端茶叶主图，产品主体完整，画面高级统一。",
-                title_copy="东方茶礼",
-                subtitle_copy="甄选春茶醇香回甘",
-                layout_hint="顶部留白，右下弱化文案区",
-            ),
-            PromptShot(
-                shot_id="shot-02",
-                shot_role="packaging_feature",
-                render_prompt="包装特写，突出细节与结构品质。",
-                title_copy="礼盒细节",
-                subtitle_copy="包装结构清晰质感高级",
-                layout_hint="左上留白，不遮挡包装主体",
-            ),
-        ]
-    )
-
-
-def _build_director_output() -> DirectorOutput:
-    """生成与 prompt_plan_v2 对应的最小 director_output。"""
-    return DirectorOutput(
-        product_summary="凤凰单丛茶礼盒，强调送礼和品质。",
-        category="tea",
-        platform="tmall",
-        visual_style="高级茶礼、统一暖金调性",
-        shots=[
-            DirectorShot(
-                shot_id="shot-01",
-                shot_role="hero",
-                objective="建立第一视觉转化",
-                audience="送礼与自饮人群",
-                selling_points=["高端礼盒", "凤凰单丛"],
-                scene="高级主图场景",
-                composition="居中主体，顶部留白",
-                visual_focus="包装主体",
-                copy_direction="品牌感与高级感",
-                compliance_notes=["不要改包装结构"],
-            ),
-            DirectorShot(
-                shot_id="shot-02",
-                shot_role="packaging_feature",
-                objective="放大包装价值感",
-                audience="注重品质与细节的人群",
-                selling_points=["礼盒结构", "质感工艺"],
-                scene="包装细节特写",
-                composition="近景特写，左上留白",
-                visual_focus="礼盒细节",
-                copy_direction="卖点转化",
-                compliance_notes=["不要改品牌识别"],
-            ),
-        ],
-    )
-
-
-def test_render_images_v2_marks_single_shot_overlay_fallback(monkeypatch, tmp_path: Path) -> None:
-    """验证 v2 渲染时单张直出失败会记录 fallback 候选，而不是整组中断。"""
-    task = _build_task(tmp_path, task_id="task-render-v2")
-    image_provider = FakeV2ImageProvider()
-    deps = _build_deps(image_provider)
-    monkeypatch.setattr(
-        "src.workflows.nodes.render_images.get_task_generated_dir",
-        lambda task_id: str(tmp_path / task_id / "generated"),
-    )
-    monkeypatch.setattr(
-        "src.workflows.nodes.render_images.get_task_generated_preview_dir",
-        lambda task_id: str(tmp_path / task_id / "generated_preview"),
-    )
-    state = {
-        "task": task,
-        "workflow_version": "v2",
-        "enable_overlay_fallback": True,
-        "render_mode": "final",
-        "assets": [
-            Asset(asset_id="asset-01", filename="main.png", local_path=str(tmp_path / "main.png"), asset_type=AssetType.PRODUCT),
-            Asset(asset_id="asset-02", filename="detail.png", local_path=str(tmp_path / "detail.png"), asset_type=AssetType.DETAIL),
-        ],
-        "prompt_plan_v2": _build_prompt_plan_v2(),
-        "logs": [],
-    }
-    Image.new("RGB", (32, 32), color=(250, 250, 250)).save(tmp_path / "main.png")
-    Image.new("RGB", (32, 32), color=(245, 245, 245)).save(tmp_path / "detail.png")
-
-    result = render_images(state, deps)
-
-    assert result["workflow_version"] == "v2"
-    assert result["render_generation_mode"] == "t2i"
-    assert len(result["generation_result_v2"].images) == 2
-    assert result["needs_overlay_fallback"] is True
-    assert len(result["overlay_fallback_candidates"]) == 1
-    assert result["overlay_fallback_candidates"][0]["shot_id"] == "shot-01"
-    assert "direct_text_generation_failed" in result["overlay_fallback_candidates"][0]["reason"]
-    assert len(image_provider.calls) == 3
-    assert image_provider.calls[1]["shot_id"] == "shot-01"
-    assert image_provider.calls[1]["title_copy"] == ""
-    assert image_provider.calls[2]["shot_id"] == "shot-02"
-    assert any("workflow_version=v2" in log for log in result["logs"])
-
-
-def test_run_qc_v2_reports_overlay_fallback_candidates(monkeypatch, tmp_path: Path) -> None:
-    """验证 v2 QC 能识别图内文案缺失，并把单张图标记为 overlay fallback 候选。"""
-    task = _build_task(tmp_path, task_id="task-qc-v2")
-    task_dir = tmp_path / task.task_id
-    (task_dir / "generated").mkdir(parents=True, exist_ok=True)
-    (task_dir / "final").mkdir(parents=True, exist_ok=True)
-    (task_dir / "previews").mkdir(parents=True, exist_ok=True)
-    (task_dir / "exports").mkdir(parents=True, exist_ok=True)
-
-    shot1_path = task_dir / "final" / "01_shot-01.png"
-    shot2_path = task_dir / "final" / "02_shot-02.png"
-    Image.new("RGB", (1440, 1440), color=(255, 255, 255)).save(shot1_path)
-    Image.new("RGB", (1440, 1440), color=(255, 255, 255)).save(shot2_path)
-
-    prompt_plan_v2 = _build_prompt_plan_v2()
-    director_output = _build_director_output()
-    (task_dir / "task.json").write_text(task.model_dump_json(indent=2), encoding="utf-8")
-    (task_dir / "director_output.json").write_text(director_output.model_dump_json(indent=2), encoding="utf-8")
-    (task_dir / "prompt_plan_v2.json").write_text(prompt_plan_v2.model_dump_json(indent=2), encoding="utf-8")
-    (task_dir / "final_text_regions.json").write_text(
-        json.dumps(
-            {
-                "workflow_version": "v2",
-                "render_variant": "final",
-                "shots": [
-                    {"shot_id": "shot-01", "overlay_applied": False},
-                    {"shot_id": "shot-02", "overlay_applied": False},
-                ],
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-
+    monkeypatch.setattr("src.workflows.nodes.render_images.get_task_generated_dir", lambda task_id: str(task_dir / "generated"))
+    monkeypatch.setattr("src.workflows.nodes.render_images.get_task_final_dir", lambda task_id: str(task_dir / "final"))
     monkeypatch.setattr("src.workflows.nodes.run_qc.get_task_dir", lambda task_id: task_dir)
-    deps = _build_deps(image_provider=FakeV2ImageProvider())
+    monkeypatch.setattr(
+        "src.services.storage.zip_export.ensure_task_dirs",
+        lambda task_id: {
+            "task": task_dir,
+            "inputs": task_dir / "inputs",
+            "generated": task_dir / "generated",
+            "generated_preview": task_dir / "generated_preview",
+            "final": task_dir / "final",
+            "final_preview": task_dir / "final_preview",
+            "previews": task_dir / "previews",
+            "exports": task_dir / "exports",
+        },
+    )
     state = {
         "task": task,
-        "workflow_version": "v2",
-        "render_mode": "final",
-        "render_variant": "final",
-        "render_generation_mode": "t2i",
-        "render_reference_asset_ids": ["asset-01"],
-        "generation_result": GenerationResult(
-            images=[
-                GeneratedImage(
-                    shot_id="shot-01",
-                    image_path=str(shot1_path),
-                    preview_path=str(shot1_path),
-                    width=1440,
-                    height=1440,
-                    status="finalized",
+        "assets": [],
+        "prompt_plan_v2": PromptPlanV2(
+            shots=[
+                PromptShot(
+                    shot_id="shot_01",
+                    shot_role="hero",
+                    render_prompt="hero shot",
+                    title_copy="东方茶礼",
+                    subtitle_copy="包装主体稳定清晰可见",
+                    layout_hint="top_left",
                 ),
-                GeneratedImage(
-                    shot_id="shot-02",
-                    image_path=str(shot2_path),
-                    preview_path=str(shot2_path),
-                    width=1440,
-                    height=1440,
-                    status="finalized",
+                PromptShot(
+                    shot_id="shot_02",
+                    shot_role="packaging_feature",
+                    render_prompt="detail shot",
+                    title_copy="细节见真",
+                    subtitle_copy="包装结构细节清晰稳定",
+                    layout_hint="top_right",
                 ),
             ]
         ),
-        "generation_result_v2": GenerationResult(
-            images=[
-                GeneratedImage(
-                    shot_id="shot-01",
-                    image_path=str(shot1_path),
-                    preview_path=str(shot1_path),
-                    width=1440,
-                    height=1440,
-                    status="finalized",
-                ),
-                GeneratedImage(
-                    shot_id="shot-02",
-                    image_path=str(shot2_path),
-                    preview_path=str(shot2_path),
-                    width=1440,
-                    height=1440,
-                    status="finalized",
-                ),
-            ]
-        ),
-        "prompt_plan_v2": prompt_plan_v2,
-        "director_output": director_output,
-        "overlay_fallback_candidates": [],
         "logs": [],
     }
 
-    result = run_qc(state, deps)
+    render_result = render_images(state, deps)
+    qc_result = run_qc({**state, **render_result}, deps)
+    final_result = finalize({**state, **render_result, **qc_result}, deps)
 
-    assert result["qc_report_v2"].review_required is True
-    assert result["needs_overlay_fallback"] is True
-    assert len(result["overlay_fallback_candidates"]) == 1
-    assert result["overlay_fallback_candidates"][0]["shot_id"] == "shot-01"
-    assert result["overlay_fallback_candidates"][0]["fallback_stage"] == "run_qc"
-    assert "ocr_no_text_detected_for_direct_text_image" in result["overlay_fallback_candidates"][0]["reason"]
-    assert any(check.check_name == "text_readability_check" for check in result["qc_report_v2"].checks)
+    assert len(render_result["generation_result_v2"].images) == 2
+    assert render_result["text_render_reports"]["shot_01"]["overlay_applied"] is True
+    assert render_result["text_render_reports"]["shot_02"]["overlay_applied"] is False
+    assert provider.v2_calls == ["shot_01", "shot_02"]
+    assert provider.compat_calls == ["shot_01", "shot_02"]
+    assert isinstance(qc_result["qc_report_v2"], QCReport)
+    assert qc_result["qc_report_v2"].review_required is True
+    assert final_result["task"].status == TaskStatus.REVIEW_REQUIRED
+    assert Path(final_result["export_zip_path"]).exists()
+    assert Path(final_result["full_task_bundle_zip_path"]).exists()
+
+
+def test_render_images_reports_partial_results_per_shot(monkeypatch, tmp_path: Path) -> None:
+    task_dir = tmp_path / "task-progressive-render"
+    task_dir.mkdir(parents=True, exist_ok=True)
+    task = Task(task_id="task-progressive-render", brand_name="示例品牌", product_name="高山乌龙", task_dir=str(task_dir))
+    provider = FakeImageProvider()
+    progress_events: list[dict[str, object]] = []
+    deps = WorkflowDependencies(
+        storage=TmpStorageService(task_dir),
+        planning_provider=object(),
+        image_generation_provider=provider,
+        text_renderer=TextRenderer(Path("missing-font.ttf")),
+        text_provider_mode="mock",
+        image_provider_mode="mock",
+        progress_callback=lambda state: progress_events.append(state),
+    )
+    monkeypatch.setattr("src.workflows.nodes.render_images.get_task_generated_dir", lambda task_id: str(task_dir / "generated"))
+    monkeypatch.setattr("src.workflows.nodes.render_images.get_task_final_dir", lambda task_id: str(task_dir / "final"))
+    state = {
+        "task": task,
+        "assets": [],
+        "prompt_plan_v2": PromptPlanV2(
+            shots=[
+                PromptShot(
+                    shot_id="shot_01",
+                    shot_role="hero",
+                    render_prompt="hero shot",
+                    title_copy="东方茶礼",
+                    subtitle_copy="包装主体稳定清晰可见",
+                    layout_hint="top_left",
+                ),
+                PromptShot(
+                    shot_id="shot_02",
+                    shot_role="packaging_feature",
+                    render_prompt="detail shot",
+                    title_copy="细节见真",
+                    subtitle_copy="包装结构细节清晰稳定",
+                    layout_hint="top_right",
+                ),
+            ]
+        ),
+        "logs": [],
+    }
+
+    render_result = render_images(state, deps)
+
+    assert len(render_result["generation_result_v2"].images) == 2
+    assert [len(event["generation_result_v2"].images) for event in progress_events] == [1, 2]
+    assert progress_events[0]["task"].current_step == "render_images"
+    assert progress_events[0]["task"].current_step_label == "正在生成图片（1/2）"
+    assert progress_events[1]["task"].current_step_label == "正在生成图片（2/2）"
+
+
+def test_runapi_gemini31_request_disables_environment_proxy(monkeypatch) -> None:
+    session_state: dict[str, object] = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = '{"ok":true}'
+
+        def json(self) -> dict[str, object]:
+            return {
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [
+                                {
+                                    "inlineData": {
+                                        "data": base64.b64encode(b"fake-image-bytes").decode("utf-8"),
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+
+    class FakeSession:
+        def __init__(self) -> None:
+            self.trust_env = True
+            self.proxies = {"http": "http://proxy.local", "https": "http://proxy.local"}
+
+        def __enter__(self):
+            session_state["session"] = self
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def post(self, *args, **kwargs):
+            session_state["post_args"] = args
+            session_state["post_kwargs"] = kwargs
+            return FakeResponse()
+
+    monkeypatch.setattr("src.providers.image.runapi_gemini31_image.requests.Session", FakeSession)
+    provider = RunApiGemini31ImageProvider(
+        Settings(
+            image_provider_mode="real",
+            runapi_api_key="test-key",
+            runapi_image_model="gemini-3.1-flash-image-preview",
+        )
+    )
+
+    result = provider._generate_single(
+        shot_id="shot_01",
+        prompt_text="test prompt",
+        reference_assets=[],
+        aspect_ratio="1:1",
+        image_size="2K",
+    )
+
+    fake_session = session_state["session"]
+    assert result == b"fake-image-bytes"
+    assert fake_session.trust_env is False
+    assert fake_session.proxies == {}
+
+
+def test_runapi_gemini31_supports_file_data_uri_response(monkeypatch) -> None:
+    session_state: dict[str, object] = {"sessions": []}
+
+    class FakeGenerateResponse:
+        status_code = 200
+        text = '{"ok":true}'
+        content = b""
+
+        def json(self) -> dict[str, object]:
+            return {
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [
+                                {
+                                    "fileData": {
+                                        "mimeType": "image/jpeg",
+                                        "fileUri": "https://runapi.co/images/fake-generated.jpg",
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+
+    class FakeDownloadResponse:
+        status_code = 200
+        text = ""
+        content = b"downloaded-image-bytes"
+
+        def json(self) -> dict[str, object]:
+            raise AssertionError("download response should not be parsed as json")
+
+    class FakeSession:
+        def __init__(self) -> None:
+            self.trust_env = True
+            self.proxies = {"http": "http://proxy.local", "https": "http://proxy.local"}
+            self.calls: list[tuple[str, str]] = []
+
+        def __enter__(self):
+            session_state["sessions"].append(self)
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def post(self, url, **kwargs):
+            self.calls.append(("post", url))
+            return FakeGenerateResponse()
+
+        def get(self, url, **kwargs):
+            self.calls.append(("get", url))
+            session_state["download_headers"] = kwargs.get("headers")
+            return FakeDownloadResponse()
+
+    monkeypatch.setattr("src.providers.image.runapi_gemini31_image.requests.Session", FakeSession)
+    provider = RunApiGemini31ImageProvider(
+        Settings(
+            image_provider_mode="real",
+            runapi_api_key="test-key",
+            runapi_image_model="gemini-3.1-flash-image-preview",
+        )
+    )
+
+    result = provider._generate_single(
+        shot_id="shot_01",
+        prompt_text="test prompt",
+        reference_assets=[],
+        aspect_ratio="1:1",
+        image_size="2K",
+    )
+
+    sessions = session_state["sessions"]
+    assert result == b"downloaded-image-bytes"
+    assert len(sessions) == 2
+    assert sessions[0].calls == [("post", "https://runapi.co/v1/models/gemini-3.1-flash-image-preview:generateContent")]
+    assert sessions[1].calls == [("get", "https://runapi.co/images/fake-generated.jpg")]
+    assert sessions[0].trust_env is False
+    assert sessions[1].trust_env is False
+    assert sessions[0].proxies == {}
+    assert sessions[1].proxies == {}
+    assert session_state["download_headers"]["Authorization"].startswith("Bearer ")
+
+
+def _compat_plan_for_test(shot_id: str):
+    from src.domain.image_prompt_plan import ImagePrompt, ImagePromptPlan
+
+    return ImagePromptPlan(
+        generation_mode="t2i",
+        prompts=[
+            ImagePrompt(
+                shot_id=shot_id,
+                shot_type="compat",
+                prompt=f"compat prompt for {shot_id}",
+                output_size="512x512",
+            )
+        ],
+    )
