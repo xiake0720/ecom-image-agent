@@ -1,3 +1,76 @@
+<<<<<<< HEAD
+# 代码文件地图
+
+## 入口
+- `streamlit_app.py`
+  - 唯一 UI 入口
+
+## 配置与路由
+- `src/core/config.py`
+  - provider 路由、模型选择、v1/v2 默认参数
+- `src/providers/router.py`
+  - 构造文本、视觉、图片 provider
+
+## v2 schema
+- `src/domain/director_output.py`
+  - `director_v2` 输出 contract
+- `src/domain/prompt_plan_v2.py`
+  - `prompt_refine_v2` 输出 contract
+- `src/domain/task.py`
+  - 任务级字段，包含 `workflow_version`、`enable_overlay_fallback`
+
+## workflow
+- `src/workflows/graph.py`
+  - `build_workflow_v1 / build_workflow_v2 / build_workflow`
+- `src/workflows/state.py`
+  - v1/v2 共享 state、依赖容器和调试摘要
+
+## v2 节点
+- `src/workflows/nodes/director_v2.py`
+  - 生成 8 张图导演规划
+- `src/workflows/nodes/prompt_refine_v2.py`
+  - 生成 render prompt、标题、副标题和版式提示
+
+## 共用节点的 v2 扩展
+- `src/workflows/nodes/render_images.py`
+  - 同时兼容 v1 `image_prompt_plan` 与 v2 `prompt_plan_v2`
+- `src/workflows/nodes/overlay_text.py`
+  - v1 全量贴字，v2 仅处理 fallback 候选
+- `src/workflows/nodes/run_qc.py`
+  - v1/v2 共用入口，v2 识别图内文案与 fallback 需求
+- `src/workflows/nodes/finalize.py`
+  - 汇总 v1/v2 产物并导出
+
+## provider
+- `src/providers/llm/runapi_openai_text.py`
+  - RunAPI 文本 provider，默认 `gpt-5-nano`
+- `src/providers/image/runapi_gemini31_image.py`
+  - RunAPI Gemini 3.1 图片 provider，默认 `gemini-3.1-flash-image-preview`
+
+## UI
+- `src/ui/pages/task_form.py`
+  - 表单默认值与 workflow/version 开关
+- `src/ui/pages/home.py`
+  - 任务提交、workflow 调用、debug 聚合
+- `src/ui/pages/result_view.py`
+  - v1/v2 结果展示与调试摘要
+
+## 存储恢复
+- `src/services/storage/task_loader.py`
+  - 从任务目录恢复 v1/v2 上下文
+
+## 提示词
+- `src/prompts/director_v2.md`
+- `src/prompts/prompt_refine_v2.md`
+
+## 测试
+- `tests/unit/test_schema_models_v2.py`
+- `tests/unit/test_director_v2.py`
+- `tests/unit/test_prompt_refine_v2.py`
+- `tests/unit/test_runapi_gemini31_image.py`
+- `tests/unit/test_render_v2_and_qc.py`
+- `tests/unit/test_workflow_v2_routing.py`
+=======
 # 全仓文件功能总表
 
 ## 仓库总体目录说明
@@ -925,3 +998,4 @@
     - `merged_text_region_ratio < 0.006` 失败
 - `tests/unit/test_qc_and_exports.py`
   - 覆盖真实字号低于阈值、五图过度趋同、`shot_type_match_check` 消费图像信号而不只是 prompt metadata 的回归用例。
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c

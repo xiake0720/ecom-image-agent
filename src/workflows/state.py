@@ -22,10 +22,18 @@ from typing import TypedDict
 from src.core.config import ResolvedModelSelection, ResolvedProviderRoute
 from src.domain.asset import Asset
 from src.domain.copy_plan import CopyPlan
+<<<<<<< HEAD
+from src.domain.director_output import DirectorOutput
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 from src.domain.generation_result import GenerationResult
 from src.domain.image_prompt_plan import ImagePromptPlan
 from src.domain.layout_plan import LayoutPlan
 from src.domain.product_analysis import ProductAnalysis
+<<<<<<< HEAD
+from src.domain.prompt_plan_v2 import PromptPlanV2
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 from src.domain.qc_report import QCReport
 from src.domain.shot_prompt_specs import ShotPromptSpecPlan
 from src.domain.shot_plan import ShotPlan
@@ -39,6 +47,14 @@ CORE_CONTRACT_ARTIFACTS: dict[str, str] = {
     "shot_prompt_specs": "shot_prompt_specs.json",
 }
 
+<<<<<<< HEAD
+V2_CONTRACT_ARTIFACTS: dict[str, str] = {
+    "director_output": "director_output.json",
+    "prompt_plan_v2": "prompt_plan_v2.json",
+}
+
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 
 class WorkflowState(TypedDict, total=False):
     """LangGraph 在节点之间传递的共享状态。
@@ -50,8 +66,18 @@ class WorkflowState(TypedDict, total=False):
     task: Task
     assets: list[Asset]
     logs: list[str]
+<<<<<<< HEAD
+    workflow_version: str
     cache_enabled: bool
     ignore_cache: bool
+    direct_text_on_image: bool
+    enable_overlay_fallback: bool
+    needs_overlay_fallback: bool
+    overlay_fallback_candidates: list[dict[str, object]]
+=======
+    cache_enabled: bool
+    ignore_cache: bool
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     prompt_build_mode: str
     render_mode: str
     render_variant: str
@@ -66,20 +92,39 @@ class WorkflowState(TypedDict, total=False):
     analyze_selected_main_asset_id: str
     analyze_selected_detail_asset_id: str
     analyze_reference_selection_reason: str
+<<<<<<< HEAD
+=======
     analyze_asset_completeness_mode: str
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     analyze_max_reference_images: int
     render_max_reference_images: int
     preview_generation_result: GenerationResult
     product_analysis: ProductAnalysis
     product_lock: ProductAnalysis
+<<<<<<< HEAD
+    # v1 主链字段继续保留，不能因为引入 v2 而删改。
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     style_architecture: StyleArchitecture
     shot_plan: ShotPlan
     copy_plan: CopyPlan
     layout_plan: LayoutPlan
     shot_prompt_specs: ShotPromptSpecPlan
     image_prompt_plan: ImagePromptPlan
+<<<<<<< HEAD
+    # v2 三步链路字段先在 state 中占位，后续节点再逐步接入。
+    director_output: DirectorOutput
+    prompt_plan_v2: PromptPlanV2
+    generation_result: GenerationResult
+    generation_result_v2: GenerationResult
+    qc_report: QCReport
+    qc_report_v2: QCReport
+    preview_qc_report: QCReport
+    text_render_reports: dict[str, dict[str, object]]
+=======
     generation_result: GenerationResult
     qc_report: QCReport
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     export_zip_path: str
 
 
@@ -188,13 +233,28 @@ def build_connected_contract_summary(state: WorkflowState) -> dict[str, object]:
         for state_key, filename in CORE_CONTRACT_ARTIFACTS.items()
         if state.get(state_key) is not None
     ]
+<<<<<<< HEAD
+    connected_files.extend(
+        filename
+        for state_key, filename in V2_CONTRACT_ARTIFACTS.items()
+        if state.get(state_key) is not None
+    )
     style_connected = state.get("style_architecture") is not None
     shot_specs_ready = state.get("shot_prompt_specs") is not None
+    prompt_plan_v2_ready = state.get("prompt_plan_v2") is not None
+=======
+    style_connected = state.get("style_architecture") is not None
+    shot_specs_ready = state.get("shot_prompt_specs") is not None
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     product_lock_connected = state.get("product_lock") is not None or state.get("product_analysis") is not None
     return {
         "connected_contract_files": connected_files,
         "style_architecture_connected": style_connected,
         "shot_prompt_specs_available_for_render": shot_specs_ready,
+<<<<<<< HEAD
+        "prompt_plan_v2_available_for_render": prompt_plan_v2_ready,
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
         "product_lock_connected": product_lock_connected,
     }
 
@@ -206,5 +266,9 @@ def format_connected_contract_logs(state: WorkflowState, *, node_name: str) -> l
         f"[{node_name}] connected_contract_files={summary['connected_contract_files']}",
         f"[{node_name}] style_architecture_connected={str(summary['style_architecture_connected']).lower()}",
         f"[{node_name}] shot_prompt_specs_available_for_render={str(summary['shot_prompt_specs_available_for_render']).lower()}",
+<<<<<<< HEAD
+        f"[{node_name}] prompt_plan_v2_available_for_render={str(summary['prompt_plan_v2_available_for_render']).lower()}",
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
         f"[{node_name}] product_lock_connected={str(summary['product_lock_connected']).lower()}",
     ]

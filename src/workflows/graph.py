@@ -6,6 +6,10 @@
 核心职责：
 - 构建 LangGraph `StateGraph`
 - 注入 workflow 运行期依赖
+<<<<<<< HEAD
+- 同时维护 v1 / v2 / 动态分流三套入口
+- 为每个节点统一追加开始、结束和异常日志
+=======
 - 固定节点顺序
 - 为每个节点统一加开始/结束/异常日志
 
@@ -21,6 +25,7 @@
 关键输入/输出：
 - 输入是初始 `WorkflowState`
 - 输出是编译后的 workflow 可执行对象，或局部续跑后的 state
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 """
 
 from __future__ import annotations
@@ -40,12 +45,20 @@ from src.services.rendering.text_renderer import TextRenderer
 from src.services.storage.local_storage import LocalStorageService
 from src.workflows.nodes.analyze_product import analyze_product
 from src.workflows.nodes.build_prompts import build_prompts
+<<<<<<< HEAD
+from src.workflows.nodes.director_v2 import director_v2
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 from src.workflows.nodes.finalize import finalize
 from src.workflows.nodes.generate_copy import generate_copy
 from src.workflows.nodes.generate_layout import generate_layout
 from src.workflows.nodes.ingest_assets import ingest_assets
 from src.workflows.nodes.overlay_text import overlay_text
 from src.workflows.nodes.plan_shots import plan_shots
+<<<<<<< HEAD
+from src.workflows.nodes.prompt_refine_v2 import prompt_refine_v2
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 from src.workflows.nodes.render_images import render_images
 from src.workflows.nodes.run_qc import run_qc
 from src.workflows.nodes.shot_prompt_refiner import shot_prompt_refiner
@@ -71,6 +84,11 @@ NODE_OUTPUT_HINTS: dict[str, str] = {
     "generate_layout": "layout_plan.json",
     "shot_prompt_refiner": "shot_prompt_specs.json",
     "build_prompts": "image_prompt_plan.json, artifacts/shots/",
+<<<<<<< HEAD
+    "director_v2": "director_output.json",
+    "prompt_refine_v2": "prompt_plan_v2.json",
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     "render_images": "generated/ or generated_preview/",
     "overlay_text": "final/ or final_preview/",
     "run_qc": "qc_report.json or qc_report_preview.json",
@@ -79,6 +97,9 @@ NODE_OUTPUT_HINTS: dict[str, str] = {
 
 
 def build_dependencies() -> WorkflowDependencies:
+<<<<<<< HEAD
+    """构建 workflow 运行期依赖。"""
+=======
     """构建 workflow 运行期依赖。
 
     这里是 provider 和 service 的统一装配点。
@@ -87,6 +108,7 @@ def build_dependencies() -> WorkflowDependencies:
     - model 选择统一
     - 调试信息可集中展示
     """
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     settings = get_settings()
     initialize_logging(settings)
     bindings = build_capability_bindings(settings)
@@ -176,6 +198,29 @@ def _wrap_node(node_name: str, handler: NodeHandler, deps: WorkflowDependencies)
     return _runner
 
 
+<<<<<<< HEAD
+def _resolve_workflow_branch(state: WorkflowState | None = None) -> str:
+    """优先使用 state.workflow_version，缺失时回退到全局设置。"""
+    explicit_value = ""
+    if state is not None:
+        explicit_value = str(state.get("workflow_version") or "").strip().lower()
+    if explicit_value in {"v1", "v2"}:
+        return explicit_value
+    return str(get_settings().workflow_version or "v1").strip().lower()
+
+
+def _register_shared_nodes(graph: StateGraph, deps: WorkflowDependencies) -> None:
+    """注册 v1 / v2 共用节点。"""
+    graph.add_node("ingest_assets", _wrap_node("ingest_assets", ingest_assets, deps))
+    graph.add_node("render_images", _wrap_node("render_images", render_images, deps))
+    graph.add_node("overlay_text", _wrap_node("overlay_text", overlay_text, deps))
+    graph.add_node("run_qc", _wrap_node("run_qc", run_qc, deps))
+    graph.add_node("finalize", _wrap_node("finalize", finalize, deps))
+
+
+def _register_v1_nodes(graph: StateGraph, deps: WorkflowDependencies) -> None:
+    """注册 v1 专属节点。"""
+=======
 @lru_cache(maxsize=1)
 def build_workflow():
     """构建并缓存 workflow 图。
@@ -189,6 +234,7 @@ def build_workflow():
     deps = build_dependencies()
     graph = StateGraph(WorkflowState)
     graph.add_node("ingest_assets", _wrap_node("ingest_assets", ingest_assets, deps))
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     graph.add_node("analyze_product", _wrap_node("analyze_product", analyze_product, deps))
     graph.add_node("style_director", _wrap_node("style_director", style_director, deps))
     graph.add_node("plan_shots", _wrap_node("plan_shots", plan_shots, deps))
@@ -196,11 +242,29 @@ def build_workflow():
     graph.add_node("generate_layout", _wrap_node("generate_layout", generate_layout, deps))
     graph.add_node("shot_prompt_refiner", _wrap_node("shot_prompt_refiner", shot_prompt_refiner, deps))
     graph.add_node("build_prompts", _wrap_node("build_prompts", build_prompts, deps))
+<<<<<<< HEAD
+
+
+def _register_v2_nodes(graph: StateGraph, deps: WorkflowDependencies) -> None:
+    """注册 v2 专属节点。"""
+    graph.add_node("director_v2", _wrap_node("director_v2", director_v2, deps))
+    graph.add_node("prompt_refine_v2", _wrap_node("prompt_refine_v2", prompt_refine_v2, deps))
+
+
+@lru_cache(maxsize=1)
+def build_workflow_v1():
+    """构建并缓存 v1 固定链路。"""
+    deps = build_dependencies()
+    graph = StateGraph(WorkflowState)
+    _register_shared_nodes(graph, deps)
+    _register_v1_nodes(graph, deps)
+=======
     graph.add_node("render_images", _wrap_node("render_images", render_images, deps))
     graph.add_node("overlay_text", _wrap_node("overlay_text", overlay_text, deps))
     graph.add_node("run_qc", _wrap_node("run_qc", run_qc, deps))
     graph.add_node("finalize", _wrap_node("finalize", finalize, deps))
 
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     graph.set_entry_point("ingest_assets")
     graph.add_edge("ingest_assets", "analyze_product")
     graph.add_edge("analyze_product", "style_director")
@@ -217,10 +281,71 @@ def build_workflow():
     return graph.compile()
 
 
+<<<<<<< HEAD
+@lru_cache(maxsize=1)
+def build_workflow_v2():
+    """构建并缓存 v2 三步主链。"""
+    deps = build_dependencies()
+    graph = StateGraph(WorkflowState)
+    _register_shared_nodes(graph, deps)
+    _register_v2_nodes(graph, deps)
+    graph.set_entry_point("ingest_assets")
+    graph.add_edge("ingest_assets", "director_v2")
+    graph.add_edge("director_v2", "prompt_refine_v2")
+    graph.add_edge("prompt_refine_v2", "render_images")
+    graph.add_edge("render_images", "overlay_text")
+    graph.add_edge("overlay_text", "run_qc")
+    graph.add_edge("run_qc", "finalize")
+    graph.add_edge("finalize", END)
+    return graph.compile()
+
+
+@lru_cache(maxsize=1)
+def build_workflow():
+    """构建并缓存支持 v1/v2 动态分流的 workflow 图。"""
+    logger.info("开始构建 workflow 图；如修改了配置，请先重载 runtime 再验证版本切换。")
+    deps = build_dependencies()
+    graph = StateGraph(WorkflowState)
+    _register_shared_nodes(graph, deps)
+    _register_v1_nodes(graph, deps)
+    _register_v2_nodes(graph, deps)
+    graph.set_entry_point("ingest_assets")
+    graph.add_conditional_edges(
+        "ingest_assets",
+        lambda state: _resolve_workflow_branch(state),
+        {"v1": "analyze_product", "v2": "director_v2"},
+    )
+    graph.add_edge("analyze_product", "style_director")
+    graph.add_edge("style_director", "plan_shots")
+    graph.add_edge("plan_shots", "generate_copy")
+    graph.add_edge("generate_copy", "generate_layout")
+    graph.add_edge("generate_layout", "shot_prompt_refiner")
+    graph.add_edge("shot_prompt_refiner", "build_prompts")
+    graph.add_edge("build_prompts", "render_images")
+    graph.add_edge("director_v2", "prompt_refine_v2")
+    graph.add_edge("prompt_refine_v2", "render_images")
+    graph.add_edge("render_images", "overlay_text")
+    graph.add_edge("overlay_text", "run_qc")
+    graph.add_edge("run_qc", "finalize")
+    graph.add_edge("finalize", END)
+    return graph.compile()
+
+
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 def reload_runtime() -> None:
     """清理配置和 workflow 缓存。"""
     reload_settings()
     build_workflow.cache_clear()
+<<<<<<< HEAD
+    build_workflow_v1.cache_clear()
+    build_workflow_v2.cache_clear()
+    logger.info("配置缓存和 workflow 缓存已清理，下次调用会按最新配置重建。")
+
+
+def run_render_stage_only(initial_state: WorkflowState) -> WorkflowState:
+    """只执行 render 之后的后半段节点。"""
+=======
     logger.info("配置缓存和 workflow 缓存已清理，下一次调用会按最新配置重建。")
 
 
@@ -234,6 +359,7 @@ def run_render_stage_only(initial_state: WorkflowState) -> WorkflowState:
     - preview 阶段前面的分析、规划、prompt 产物已经存在
     - final 阶段只需要继续执行渲染、后贴字、QC 和导出
     """
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     deps = build_dependencies()
     state = initial_state
     for node_name, handler in (

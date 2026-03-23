@@ -20,7 +20,10 @@
 from __future__ import annotations
 
 import logging
+<<<<<<< HEAD
+=======
 import re
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 
 from src.core.config import get_settings
 from src.domain.product_analysis import ProductAnalysis
@@ -38,6 +41,8 @@ from src.workflows.state import WorkflowDependencies, WorkflowState, format_conn
 
 logger = logging.getLogger(__name__)
 
+<<<<<<< HEAD
+=======
 TEXT_ANCHOR_MAX_COUNT = 5
 _TEXT_ANCHOR_INVALID_TOKENS = {"", "none", "null", "n/a", "-", "unknown"}
 _TEXT_ANCHOR_STATUS_MARKERS = {
@@ -97,6 +102,7 @@ _TEXT_HINT_MARKERS = (
 _TEXT_ANCHOR_UNIT_PATTERN = re.compile(r"\d+(?:\.\d+)?\s*(?:g|kg|ml|l|克|千克|毫升|升|袋|盒|罐|片|capsules?)", re.IGNORECASE)
 _LATIN_TOKEN_PATTERN = re.compile(r"[A-Za-z]")
 
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 
 def analyze_product(state: WorkflowState, deps: WorkflowDependencies) -> dict:
     """生成并落盘商品分析结果。
@@ -137,6 +143,9 @@ def analyze_product(state: WorkflowState, deps: WorkflowDependencies) -> dict:
     if should_use_cache(state):
         cached_analysis = deps.storage.load_cached_json_artifact("analyze_product", cache_key, ProductAnalysis)
         if cached_analysis is not None:
+<<<<<<< HEAD
+            deps.storage.save_json_artifact(task.task_id, "product_analysis.json", cached_analysis)
+=======
             cached_analysis = _normalize_product_lock_fields(
                 cached_analysis.model_copy(
                     update={
@@ -147,6 +156,7 @@ def analyze_product(state: WorkflowState, deps: WorkflowDependencies) -> dict:
             )
             deps.storage.save_json_artifact(task.task_id, "product_analysis.json", cached_analysis)
             logs.extend(_format_text_anchor_logs(node_name="analyze_product", analysis=cached_analysis))
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
             logs.extend(
                 [
                     f"[analyze_product] cache hit key={cache_key}",
@@ -160,10 +170,13 @@ def analyze_product(state: WorkflowState, deps: WorkflowDependencies) -> dict:
                 "analyze_reference_asset_ids": selected_asset_ids,
                 "analyze_selected_main_asset_id": selection.selected_main_asset_id,
                 "analyze_selected_detail_asset_id": selection.selected_detail_asset_id,
+<<<<<<< HEAD
+=======
                 "analyze_asset_completeness_mode": selection.asset_completeness_mode,
                 "analyze_text_anchor_source": cached_analysis.text_anchor_source,
                 "analyze_text_anchor_count": len(cached_analysis.must_preserve_texts),
                 "analyze_extracted_text_anchors": list(cached_analysis.must_preserve_texts),
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
                 "analyze_reference_selection_reason": selection.selection_reason,
                 "logs": [*logs, *format_connected_contract_logs({"product_analysis": cached_analysis, "product_lock": cached_analysis}, node_name="analyze_product")],
             }
@@ -206,6 +219,12 @@ def analyze_product(state: WorkflowState, deps: WorkflowDependencies) -> dict:
             assets=selected_assets,
             system_prompt=load_prompt_text("analyze_product.md"),
         )
+<<<<<<< HEAD
+        analysis = _normalize_product_lock_fields(analysis.model_copy(update={"source_asset_ids": selected_asset_ids}))
+    else:
+        analysis = build_mock_product_analysis(state.get("assets", []), task.product_name)
+        analysis = _normalize_product_lock_fields(analysis.model_copy(update={"source_asset_ids": selected_asset_ids}))
+=======
         analysis = _normalize_product_lock_fields(
             analysis.model_copy(
                 update={
@@ -224,11 +243,15 @@ def analyze_product(state: WorkflowState, deps: WorkflowDependencies) -> dict:
                 }
             )
         )
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 
     deps.storage.save_json_artifact(task.task_id, "product_analysis.json", analysis)
     if state.get("cache_enabled"):
         deps.storage.save_cached_json_artifact("analyze_product", cache_key, analysis, metadata=cache_context)
+<<<<<<< HEAD
+=======
     logs.extend(_format_text_anchor_logs(node_name="analyze_product", analysis=analysis))
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     logs.extend(
         [
             (
@@ -237,7 +260,10 @@ def analyze_product(state: WorkflowState, deps: WorkflowDependencies) -> dict:
                 f"subcategory={analysis.subcategory} "
                 f"product_form={analysis.product_form} "
                 f"package_template_family={analysis.package_template_family or '-'} "
+<<<<<<< HEAD
+=======
                 f"asset_completeness_mode={analysis.asset_completeness_mode or '-'} "
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
                 f"must_preserve={len(analysis.visual_identity.must_preserve)}"
             ),
             f"[analyze_product] vision_model={deps.vision_model_selection.model_id if deps.vision_model_selection else '-'}",
@@ -251,10 +277,13 @@ def analyze_product(state: WorkflowState, deps: WorkflowDependencies) -> dict:
         "analyze_reference_asset_ids": selected_asset_ids,
         "analyze_selected_main_asset_id": selection.selected_main_asset_id,
         "analyze_selected_detail_asset_id": selection.selected_detail_asset_id,
+<<<<<<< HEAD
+=======
         "analyze_asset_completeness_mode": selection.asset_completeness_mode,
         "analyze_text_anchor_source": analysis.text_anchor_source,
         "analyze_text_anchor_count": len(analysis.must_preserve_texts),
         "analyze_extracted_text_anchors": list(analysis.must_preserve_texts),
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
         "analyze_reference_selection_reason": selection.selection_reason,
         "logs": logs,
     }
@@ -282,13 +311,18 @@ def _format_selection_logs(*, node_name: str, selection: ReferenceSelection) -> 
         (
             f"[{node_name}] selected_main_asset_id={selection.selected_main_asset_id or '-'} "
             f"selected_detail_asset_id={selection.selected_detail_asset_id or '-'} "
+<<<<<<< HEAD
+=======
             f"asset_completeness_mode={selection.asset_completeness_mode} "
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
             f"selected_reference_asset_ids={selection.selected_asset_ids or []}"
         ),
         f"[{node_name}] selection_reason={selection.selection_reason}",
     ]
 
 
+<<<<<<< HEAD
+=======
 def _format_text_anchor_logs(*, node_name: str, analysis: ProductAnalysis) -> list[str]:
     """统一输出文字锚点提取结果，便于后续排查 OCR/QC 为什么拿不到有效文字证据。"""
     logs = [
@@ -307,6 +341,7 @@ def _format_text_anchor_logs(*, node_name: str, analysis: ProductAnalysis) -> li
     return logs
 
 
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 def _normalize_product_lock_fields(analysis: ProductAnalysis) -> ProductAnalysis:
     """把旧分析结果补齐成当前 image_edit 链路需要的 product_lock 字段。
 
@@ -326,7 +361,10 @@ def _normalize_product_lock_fields(analysis: ProductAnalysis) -> ProductAnalysis
         "front label layout",
     ]
     editable_elements = analysis.editable_elements or ["background", "props", "lighting", "crop"]
+<<<<<<< HEAD
+=======
     text_anchor_payload = _resolve_text_anchor_payload(analysis)
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     package_template_family = analysis.package_template_family or resolve_tea_package_template_family(
         analysis.model_copy(
             update={
@@ -340,6 +378,12 @@ def _normalize_product_lock_fields(analysis: ProductAnalysis) -> ProductAnalysis
     return analysis.model_copy(
         update={
             "locked_elements": locked_elements,
+<<<<<<< HEAD
+            "must_preserve_texts": analysis.must_preserve_texts or [],
+            "editable_elements": editable_elements,
+            "package_type": package_type,
+            "package_template_family": package_template_family,
+=======
             "must_preserve_texts": text_anchor_payload["anchors"],
             "text_anchor_status": text_anchor_payload["status"],
             "text_anchor_source": text_anchor_payload["source"],
@@ -348,11 +392,14 @@ def _normalize_product_lock_fields(analysis: ProductAnalysis) -> ProductAnalysis
             "package_type": package_type,
             "package_template_family": package_template_family,
             "asset_completeness_mode": analysis.asset_completeness_mode or "packshot_only",
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
             "primary_color": primary_color,
             "material": material,
             "label_structure": label_structure,
         }
     )
+<<<<<<< HEAD
+=======
 
 
 def _resolve_text_anchor_payload(analysis: ProductAnalysis) -> dict[str, object]:
@@ -511,3 +558,4 @@ def _merge_unique_strings(*groups: list[str]) -> list[str]:
             seen.add(text)
             merged.append(text)
     return merged
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c

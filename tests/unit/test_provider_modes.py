@@ -18,6 +18,10 @@ from src.providers.image.dashscope_image import DashScopeImageProvider
 from src.providers.image.runapi_gemini_image import RunApiGeminiImageProvider
 from src.providers.llm.dashscope_text import DashScopeTextProvider
 from src.providers.llm.nvidia_text import NVIDIATextProvider
+<<<<<<< HEAD
+from src.providers.llm.runapi_openai_text import RunApiOpenAITextProvider
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 from src.providers.vision.dashscope_vision import DashScopeVisionProvider
 from src.providers.vision.nvidia_product_analysis import NVIDIAVisionProductAnalysisProvider
 
@@ -39,6 +43,12 @@ def _clear_sensitive_envs(monkeypatch) -> None:
         "ECOM_IMAGE_AGENT_NVIDIA_API_KEY",
         "ECOM_IMAGE_AGENT_NVIDIA_VISION_API_KEY",
         "ECOM_IMAGE_AGENT_RUNAPI_API_KEY",
+<<<<<<< HEAD
+        "ECOM_IMAGE_AGENT_RUNAPI_TEXT_API_KEY",
+        "ECOM_IMAGE_AGENT_RUNAPI_TEXT_BASE_URL",
+        "ECOM_IMAGE_AGENT_RUNAPI_TEXT_MODEL",
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     ]:
         monkeypatch.delenv(name, raising=False)
 
@@ -92,6 +102,33 @@ def test_dashscope_text_provider_requires_api_key_in_real_mode(monkeypatch) -> N
         provider.generate_structured("Return JSON.", ProductAnalysis)
 
 
+<<<<<<< HEAD
+def test_runapi_openai_text_provider_prefers_text_key_and_falls_back_to_shared_key(monkeypatch) -> None:
+    _clear_sensitive_envs(monkeypatch)
+
+    shared_key_provider = RunApiOpenAITextProvider(
+        Settings(
+            text_provider_mode="real",
+            text_provider="runapi_openai",
+            runapi_text_api_key=None,
+            runapi_api_key="shared-runapi-key",
+        )
+    )
+    dedicated_key_provider = RunApiOpenAITextProvider(
+        Settings(
+            text_provider_mode="real",
+            text_provider="runapi_openai",
+            runapi_text_api_key="dedicated-runapi-text-key",
+            runapi_api_key="shared-runapi-key",
+        )
+    )
+
+    assert shared_key_provider._resolve_api_key() == "shared-runapi-key"
+    assert dedicated_key_provider._resolve_api_key() == "dedicated-runapi-text-key"
+
+
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 def test_dashscope_vision_provider_requires_api_key_in_real_mode(monkeypatch, tmp_path: Path) -> None:
     _clear_sensitive_envs(monkeypatch)
     image_path = tmp_path / "demo.png"

@@ -25,11 +25,19 @@ from src.providers.image.dashscope_image_edit import DashScopeImageEditProvider
 from src.providers.image.gemini_image import GeminiImageProvider
 from src.providers.image.routed_image import RoutedImageProvider
 from src.providers.image.runapi_gemini_image import RunApiGeminiImageProvider
+<<<<<<< HEAD
+from src.providers.image.runapi_gemini31_image import RunApiGemini31ImageProvider
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 from src.providers.llm.base import BaseTextProvider
 from src.providers.llm.dashscope_text import DashScopeTextProvider
 from src.providers.llm.gemini_text import GeminiTextProvider
 from src.providers.llm.nvidia_text import NVIDIATextProvider
 from src.providers.llm.ollama_text import OllamaTextProvider
+<<<<<<< HEAD
+from src.providers.llm.runapi_openai_text import RunApiOpenAITextProvider
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 from src.providers.llm.zhipu_text import ZhipuTextProvider
 from src.providers.vision.base import BaseVisionAnalysisProvider
 from src.providers.vision.dashscope_vision import DashScopeVisionProvider
@@ -109,6 +117,11 @@ def _build_planning_provider(
         return DashScopeTextProvider(settings), route, "ready", selection
     if route.alias in {"zhipu", "zhipu_glm47_flash", "zhipu_glm47"}:
         return ZhipuTextProvider(settings), route, "ready", selection
+<<<<<<< HEAD
+    if route.alias == "runapi_openai":
+        return RunApiOpenAITextProvider(settings), route, "ready", selection
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     raise RuntimeError(f"Unsupported text provider alias: {route.alias}")
 
 
@@ -143,6 +156,11 @@ def _build_image_provider(
         return _build_dashscope_image_provider(settings, route, selection)
     if route.alias == "runapi":
         return RunApiGeminiImageProvider(settings), route, "ready", selection
+<<<<<<< HEAD
+    if route.alias == "runapi_gemini31":
+        return RunApiGemini31ImageProvider(settings), route, "ready", selection
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     if route.alias == "zhipu":
         logger.warning("Image provider is routed but not wired yet: alias=%s", route.alias)
         return _UnsupportedImageProvider(route.alias), route, "planned-not-wired", selection
@@ -166,6 +184,12 @@ def _build_dashscope_image_provider(
         elif edit_route.alias == "runapi":
             edit_provider = RunApiGeminiImageProvider(settings)
             edit_status = "ready"
+<<<<<<< HEAD
+        elif edit_route.alias == "runapi_gemini31":
+            edit_provider = RunApiGemini31ImageProvider(settings)
+            edit_status = "ready"
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
         else:
             edit_status = "planned-not-wired"
             logger.warning("Image edit provider is not wired: alias=%s", edit_route.alias)

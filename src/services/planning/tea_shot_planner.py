@@ -41,6 +41,8 @@ TEA_TIN_CAN_PHASE1_SHOTS: tuple[tuple[str, str], ...] = (
     ("shot_05", "lifestyle_or_brewing_context"),
 )
 
+<<<<<<< HEAD
+=======
 TEA_TIN_CAN_PACKSHOT_ONLY_PHASE1_SHOTS: tuple[tuple[str, str], ...] = (
     ("shot_01", "hero_brand"),
     ("shot_02", "package_detail"),
@@ -49,6 +51,7 @@ TEA_TIN_CAN_PACKSHOT_ONLY_PHASE1_SHOTS: tuple[tuple[str, str], ...] = (
     ("shot_05", "package_in_brewing_context"),
 )
 
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 TEA_POUCH_PHASE1_SHOTS: tuple[tuple[str, str], ...] = (
     ("shot_01", "hero_brand"),
     ("shot_02", "package_detail"),
@@ -74,11 +77,16 @@ def build_tea_shot_slots(task: Task, analysis: ProductAnalysis) -> list[ShotSpec
     """
     del task
     template_family = resolve_tea_package_template_family(analysis)
+<<<<<<< HEAD
+    if template_family == "tea_tin_can":
+        return _build_tea_tin_can_slots(analysis)
+=======
     asset_completeness_mode = resolve_tea_asset_completeness_mode(analysis)
     if template_family == "tea_tin_can":
         if asset_completeness_mode == "packshot_only":
             return _build_tea_tin_can_packshot_only_slots(analysis)
         return _build_tea_tin_can_packshot_plus_detail_slots(analysis)
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     if template_family == "tea_pouch":
         return _build_tea_pouch_slots(analysis)
     return _build_tea_gift_box_slots(analysis)
@@ -117,6 +125,8 @@ def resolve_tea_package_template_family(analysis: ProductAnalysis) -> str:
     return "tea_gift_box"
 
 
+<<<<<<< HEAD
+=======
 def resolve_tea_asset_completeness_mode(analysis: ProductAnalysis) -> str:
     """解析茶叶模板使用的素材完备度模式。"""
     explicit_mode = str(getattr(analysis, "asset_completeness_mode", "") or "").strip().lower()
@@ -137,16 +147,21 @@ def resolve_tea_template_name(analysis: ProductAnalysis) -> str:
     return f"{template_family}_default"
 
 
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 def get_tea_template_shot_pairs(analysis: ProductAnalysis) -> tuple[tuple[str, str], ...]:
     """返回当前茶叶商品应该使用的固定五图顺序。
 
     这个函数给 planner、QC、测试共用，避免某处仍然写死礼盒模板。
     """
     template_family = resolve_tea_package_template_family(analysis)
+<<<<<<< HEAD
+    if template_family == "tea_tin_can":
+=======
     asset_completeness_mode = resolve_tea_asset_completeness_mode(analysis)
     if template_family == "tea_tin_can":
         if asset_completeness_mode == "packshot_only":
             return TEA_TIN_CAN_PACKSHOT_ONLY_PHASE1_SHOTS
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
         return TEA_TIN_CAN_PHASE1_SHOTS
     if template_family == "tea_pouch":
         return TEA_POUCH_PHASE1_SHOTS
@@ -201,8 +216,11 @@ def build_tea_enrichment_context(
         "planner_mode": "fixed_phase1_five_shots",
         "category_family": "tea",
         "package_template_family": resolve_tea_package_template_family(analysis),
+<<<<<<< HEAD
+=======
         "asset_completeness_mode": resolve_tea_asset_completeness_mode(analysis),
         "chosen_template_name": resolve_tea_template_name(analysis),
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
         "editable_fields": [
             "goal",
             "focus",
@@ -308,6 +326,10 @@ def _build_tea_gift_box_slots(analysis: ProductAnalysis) -> list[ShotSpec]:
     ]
 
 
+<<<<<<< HEAD
+def _build_tea_tin_can_slots(analysis: ProductAnalysis) -> list[ShotSpec]:
+    """金属罐模板：突出罐体识别、工艺细节和冲泡场景。"""
+=======
 def _build_tea_tin_can_packshot_plus_detail_slots(analysis: ProductAnalysis) -> list[ShotSpec]:
     """金属罐 packshot_plus_detail 模板。
 
@@ -318,6 +340,7 @@ def _build_tea_tin_can_packshot_plus_detail_slots(analysis: ProductAnalysis) -> 
     这套模板允许真实出现 `dry_leaf_detail / tea_soup_experience`，
     因为系统可以依赖细节素材，而不是强行把同一张包装图变体化。
     """
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     primary_color = analysis.primary_color or "red"
     package_type = analysis.package_type or "cylindrical tea tin"
     package_label = analysis.label_structure or "front label layout"
@@ -400,6 +423,8 @@ def _build_tea_tin_can_packshot_plus_detail_slots(analysis: ProductAnalysis) -> 
     ]
 
 
+<<<<<<< HEAD
+=======
 def _build_tea_tin_can_packshot_only_slots(analysis: ProductAnalysis) -> list[ShotSpec]:
     """金属罐 packshot_only 模板。
 
@@ -493,6 +518,7 @@ def _build_tea_tin_can_packshot_only_slots(analysis: ProductAnalysis) -> list[Sh
     ]
 
 
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 def _build_tea_pouch_slots(analysis: ProductAnalysis) -> list[ShotSpec]:
     """袋装模板：延续轻量生活化展示，但围绕袋装结构而不是礼盒结构。"""
     primary_color = analysis.primary_color or "green"

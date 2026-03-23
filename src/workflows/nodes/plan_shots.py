@@ -27,9 +27,13 @@ from src.services.planning.tea_shot_planner import (
     build_tea_shot_plan,
     build_tea_shot_slots,
     merge_tea_slot_details,
+<<<<<<< HEAD
+    resolve_tea_package_template_family,
+=======
     resolve_tea_asset_completeness_mode,
     resolve_tea_package_template_family,
     resolve_tea_template_name,
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 )
 from src.services.prompting.context_builder import build_plan_shots_context, infer_category_family
 from src.workflows.nodes.cache_utils import (
@@ -71,12 +75,15 @@ def plan_shots(state: WorkflowState, deps: WorkflowDependencies) -> dict:
     package_template_family = (
         resolve_tea_package_template_family(state["product_analysis"]) if tea_template_enabled else ""
     )
+<<<<<<< HEAD
+=======
     asset_completeness_mode = (
         resolve_tea_asset_completeness_mode(state["product_analysis"]) if tea_template_enabled else ""
     )
     chosen_template_name = (
         resolve_tea_template_name(state["product_analysis"]) if tea_template_enabled else ""
     )
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     shot_type_summary = ", ".join(f"{shot.shot_id}:{shot.shot_type}" for shot in tea_slots) or "-"
     fixed_shot_ids = [shot.shot_id for shot in tea_slots]
     cache_key, cache_context = build_node_cache_key(
@@ -109,10 +116,13 @@ def plan_shots(state: WorkflowState, deps: WorkflowDependencies) -> dict:
             f"[plan_shots] template_source={template_source}",
             f"[plan_shots] tea_fixed_phase1_template={str(tea_template_enabled).lower()}",
             f"[plan_shots] package_template_family={package_template_family or '-'}",
+<<<<<<< HEAD
+=======
             f"[plan_shots] asset_completeness_mode={asset_completeness_mode or '-'}",
             f"[plan_shots] selected_main_asset_id={state.get('analyze_selected_main_asset_id') or '-'}",
             f"[plan_shots] selected_detail_asset_id={state.get('analyze_selected_detail_asset_id') or '-'}",
             f"[plan_shots] chosen_template_name={chosen_template_name or '-'}",
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
         ]
     )
     if tea_template_enabled:
@@ -121,7 +131,11 @@ def plan_shots(state: WorkflowState, deps: WorkflowDependencies) -> dict:
             [
                 f"[plan_shots] fixed_shot_ids={fixed_shot_ids}",
                 f"[plan_shots] shot_type_summary={shot_type_summary}",
+<<<<<<< HEAD
+                f"[plan_shots] fixed_template_name={package_template_family or 'tea_gift_box'}",
+=======
                 f"[plan_shots] fixed_template_name={chosen_template_name or package_template_family or 'tea_gift_box_default'}",
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
                 "[plan_shots] model_enrichment_only=true fields=goal,focus,scene_direction,composition_direction,text_safe_zone_preference",
             ]
         )

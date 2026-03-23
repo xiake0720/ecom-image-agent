@@ -19,7 +19,17 @@ from pathlib import Path
 
 from src.domain.task import TaskStatus
 from src.services.storage.zip_export import export_full_task_bundle, export_task_zip
+<<<<<<< HEAD
+from src.workflows.state import (
+    CORE_CONTRACT_ARTIFACTS,
+    V2_CONTRACT_ARTIFACTS,
+    WorkflowDependencies,
+    WorkflowState,
+    build_connected_contract_summary,
+)
+=======
 from src.workflows.state import CORE_CONTRACT_ARTIFACTS, WorkflowDependencies, WorkflowState, build_connected_contract_summary
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 
 
 def finalize(state: WorkflowState, deps: WorkflowDependencies) -> dict:
@@ -72,7 +82,12 @@ def finalize(state: WorkflowState, deps: WorkflowDependencies) -> dict:
         }
 
     # final 模式会根据 QC 结果决定任务状态，并导出成品与完整任务包。
+<<<<<<< HEAD
+    qc_report = state.get("qc_report_v2") or state["qc_report"]
+    task = task.model_copy(update={"status": TaskStatus.COMPLETED if qc_report.passed else TaskStatus.REVIEW_REQUIRED})
+=======
     task = task.model_copy(update={"status": TaskStatus.COMPLETED if state["qc_report"].passed else TaskStatus.REVIEW_REQUIRED})
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     deps.storage.save_task_manifest(task)
     final_dir = task_dir / "final"
     final_images_zip_path = export_task_zip(deps.storage, task.task_id, final_dir, suffix="final_images")
@@ -95,7 +110,11 @@ def _build_contract_artifact_presence(task_dir: Path) -> dict[str, bool]:
     """检查主链路核心 contract 文件是否已稳定落盘。"""
     return {
         filename: (task_dir / filename).exists()
+<<<<<<< HEAD
+        for filename in [*CORE_CONTRACT_ARTIFACTS.values(), *V2_CONTRACT_ARTIFACTS.values()]
+=======
         for filename in CORE_CONTRACT_ARTIFACTS.values()
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     }
 
 
@@ -103,5 +122,9 @@ def _build_contract_artifact_paths(task_dir: Path) -> dict[str, Path]:
     """返回核心 contract 文件在任务目录中的固定路径。"""
     return {
         contract_name: task_dir / filename
+<<<<<<< HEAD
+        for contract_name, filename in {**CORE_CONTRACT_ARTIFACTS, **V2_CONTRACT_ARTIFACTS}.items()
+=======
         for contract_name, filename in CORE_CONTRACT_ARTIFACTS.items()
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     }

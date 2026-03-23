@@ -1,3 +1,5 @@
+<<<<<<< HEAD
+=======
 """文案 fallback 规则。
 
 文件位置：
@@ -8,6 +10,7 @@
 - 保证 fallback 文案本身也适合 1440x1440 叠字，不输出长句、bullets 堆叠或 CTA
 """
 
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -27,6 +30,13 @@ class CopyPlanMergeResult:
     duplicate_shot_ids: list[str]
 
 
+<<<<<<< HEAD
+def build_default_copy_item_for_shot(shot: ShotSpec) -> CopyItem:
+    return CopyItem(
+        shot_id=shot.shot_id,
+        title=_build_default_title(shot),
+        subtitle="",
+=======
 def build_default_copy_item_for_shot(shot: ShotSpec, *, task=None, product_analysis=None) -> CopyItem:
     """按 shot_type 生成兜底短版文案，默认不输出 bullets 和 CTA。"""
     title, subtitle = _build_default_overlay_copy(shot=shot, task=task, product_analysis=product_analysis)
@@ -34,6 +44,7 @@ def build_default_copy_item_for_shot(shot: ShotSpec, *, task=None, product_analy
         shot_id=shot.shot_id,
         title=title,
         subtitle=subtitle,
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
         bullets=[],
         cta=None,
     )
@@ -78,6 +89,28 @@ def merge_copy_plan_with_shots(copy_plan: CopyPlan, shots: Iterable[ShotSpec]) -
     )
 
 
+<<<<<<< HEAD
+def _build_default_title(shot: ShotSpec) -> str:
+    primary = _first_non_empty(
+        shot.goal,
+        shot.focus,
+        shot.title,
+        shot.shot_type.replace("_", " ").strip(),
+        shot.purpose,
+        shot.copy_goal,
+    )
+    normalized = " ".join(primary.split())
+    if not normalized:
+        return "商品展示"
+    return normalized[:24]
+
+
+def _first_non_empty(*values: str) -> str:
+    for value in values:
+        if value and value.strip():
+            return value.strip()
+    return ""
+=======
 def _build_default_overlay_copy(*, shot: ShotSpec, task=None, product_analysis=None) -> tuple[str, str]:
     """根据 shot_type 输出更像电商贴图的标题和副标题。"""
     product_phrase = _resolve_product_phrase(task=task, product_analysis=product_analysis)
@@ -139,3 +172,4 @@ def _hero_subtitle(*, task=None, product_analysis=None) -> str:
     if "pouch" in package_type.lower() or "袋" in package_type:
         return "轻装便携日常好泡"
     return "茶香清雅日常好泡"
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c

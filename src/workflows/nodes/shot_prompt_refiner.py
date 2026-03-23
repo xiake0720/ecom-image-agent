@@ -15,7 +15,10 @@
 
 from __future__ import annotations
 
+<<<<<<< HEAD
+=======
 from dataclasses import dataclass
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 import logging
 
 from src.core.config import get_settings
@@ -42,6 +45,8 @@ from src.workflows.state import WorkflowDependencies, WorkflowState, format_conn
 logger = logging.getLogger(__name__)
 
 
+<<<<<<< HEAD
+=======
 @dataclass(frozen=True)
 class ShotExecutionProfile:
     """单个 shot_type 的执行画像。
@@ -69,6 +74,7 @@ class ShotExecutionProfile:
     allow_hand_only: bool = False
 
 
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 def shot_prompt_refiner(state: WorkflowState, deps: WorkflowDependencies) -> dict:
     """生成每张图的结构化 prompt spec。
 
@@ -119,7 +125,11 @@ def shot_prompt_refiner(state: WorkflowState, deps: WorkflowDependencies) -> dic
                     "[shot_prompt_refiner] saved shot_prompt_specs.json from cache",
                 ]
             )
+<<<<<<< HEAD
+            logs.extend(_build_spec_debug_logs(cached))
+=======
             logs.extend(_build_spec_debug_logs(cached, state["product_analysis"]))
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
             logs.extend(
                 format_connected_contract_logs(
                     {**state, "shot_prompt_specs": cached},
@@ -157,7 +167,11 @@ def shot_prompt_refiner(state: WorkflowState, deps: WorkflowDependencies) -> dic
             "[shot_prompt_refiner] saved shot_prompt_specs.json",
         ]
     )
+<<<<<<< HEAD
+    logs.extend(_build_spec_debug_logs(plan))
+=======
     logs.extend(_build_spec_debug_logs(plan, state["product_analysis"]))
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     logs.extend(
         format_connected_contract_logs(
             {**state, "shot_prompt_specs": plan},
@@ -242,16 +256,27 @@ def _merge_spec_plan_with_defaults(
 
 def _build_base_spec(*, shot: ShotSpec, layout_item, product_analysis, style_architecture, generation_context: dict[str, object]) -> ShotPromptSpec:
     """按固定规则生成单张图的基础 spec。"""
+<<<<<<< HEAD
+    preferred_zone = _resolve_preferred_text_safe_zone(shot, layout_item)
+    product_lock = _build_product_lock(product_analysis)
+=======
     profile = _build_shot_execution_profile(shot, product_analysis)
     preferred_zone = _resolve_preferred_text_safe_zone(shot, layout_item, profile)
     product_lock = _build_product_lock(product_analysis, profile)
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     layout_constraints = LayoutConstraintSpec(
         preferred_text_safe_zone=preferred_zone,
         avoid_overlap_with_subject=True,
         max_text_layers=2,
+<<<<<<< HEAD
+        subject_placement_hint=_resolve_subject_placement_hint(shot, preferred_zone),
+    )
+    render_constraints = _build_render_constraints(shot, generation_context)
+=======
         subject_placement_hint=_resolve_subject_placement_hint(shot, preferred_zone, profile),
     )
     render_constraints = _build_render_constraints(shot, generation_context, profile)
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     saturated_background_rule = _build_background_saturation_rule(product_analysis)
     common_style_summary = " | ".join(
         [
@@ -265,6 +290,16 @@ def _build_base_spec(*, shot: ShotSpec, layout_item, product_analysis, style_arc
         shot_type=shot.shot_type,
         goal=shot.goal or shot.title,
         product_lock=product_lock,
+<<<<<<< HEAD
+        subject_prompt=_build_subject_prompt(shot, product_analysis),
+        package_appearance_prompt=_build_package_appearance_prompt(product_analysis),
+        composition_prompt=_build_composition_prompt(shot, preferred_zone),
+        background_prompt=_build_background_prompt(shot, style_architecture, saturated_background_rule),
+        lighting_prompt=_build_lighting_prompt(shot, style_architecture),
+        style_prompt=f"{common_style_summary}. keep the full set visually unified.",
+        quality_prompt=_build_quality_prompt(shot),
+        negative_prompt=_build_negative_prompt(product_analysis, style_architecture),
+=======
         subject_prompt=_build_subject_prompt(shot, product_analysis, profile),
         package_appearance_prompt=_build_package_appearance_prompt(product_analysis),
         composition_prompt=_build_composition_prompt(shot, preferred_zone, profile),
@@ -273,12 +308,40 @@ def _build_base_spec(*, shot: ShotSpec, layout_item, product_analysis, style_arc
         style_prompt=f"{common_style_summary}. keep the full set visually unified.",
         quality_prompt=_build_quality_prompt(shot, profile),
         negative_prompt=_build_negative_prompt(product_analysis, style_architecture, profile),
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
         layout_constraints=layout_constraints,
         render_constraints=render_constraints,
         copy_intent=_build_copy_intent(shot),
     )
 
 
+<<<<<<< HEAD
+def _build_subject_prompt(shot: ShotSpec, product_analysis) -> str:
+    if shot.shot_type == "hero_brand":
+        return (
+            "Use the uploaded product as the exact hero subject. "
+            "Keep the full package clearly recognizable as the primary visual center."
+        )
+    if shot.shot_type == "carry_action":
+        return (
+            "Use the uploaded product as the exact subject in a restrained carry or gifting action. "
+            "Only a hand gesture may appear when needed."
+        )
+    if shot.shot_type == "open_box_structure":
+        return (
+            "Use the uploaded product package in an opened or structure-revealing state. "
+            "The opening logic and internal arrangement must stay believable."
+        )
+    if shot.shot_type == "dry_leaf_detail":
+        return (
+            "Show dry tea leaf detail as the immediate visual focus while keeping the uploaded package as the brand anchor."
+        )
+    if shot.shot_type == "tea_soup_experience":
+        return (
+            "Show brewed tea experience with tea soup as the foreground focus while keeping the uploaded package as the scene anchor."
+        )
+    return f"Use the uploaded {product_analysis.package_type or 'product package'} as the exact subject."
+=======
 def _build_subject_prompt(shot: ShotSpec, product_analysis, profile: ShotExecutionProfile) -> str:
     """构建主体层，明确主次主体和不得退化的执行边界。"""
     package_label = product_analysis.package_type or "product package"
@@ -290,6 +353,7 @@ def _build_subject_prompt(shot: ShotSpec, product_analysis, profile: ShotExecuti
             *profile.subject_rules,
         ]
     )
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 
 
 def _build_package_appearance_prompt(product_analysis) -> str:
@@ -302,6 +366,49 @@ def _build_package_appearance_prompt(product_analysis) -> str:
     )
 
 
+<<<<<<< HEAD
+def _build_composition_prompt(shot: ShotSpec, preferred_zone: str) -> str:
+    composition_base = shot.composition_direction or shot.composition_hint or "keep the composition stable and commercial"
+    if shot.shot_type == "carry_action":
+        return (
+            f"{composition_base} Place the text area on the opposite side of the action direction and keep the copy zone clean."
+        )
+    if shot.shot_type == "open_box_structure":
+        return (
+            f"{composition_base} Keep the structural read clean and reserve a top or upper-right copy zone."
+        )
+    if shot.shot_type == "dry_leaf_detail":
+        return (
+            f"{composition_base} Keep a clean background patch for text instead of placing text over the tea leaf texture."
+        )
+    if shot.shot_type == "tea_soup_experience":
+        return f"{composition_base} Keep the upper area open for copy and avoid clutter behind the liquid."
+    return f"{composition_base} Preferred text-safe zone: {preferred_zone}."
+
+
+def _build_background_prompt(shot: ShotSpec, style_architecture, saturated_background_rule: str) -> str:
+    background_base = "; ".join(style_architecture.background_strategy)
+    if shot.shot_type == "dry_leaf_detail":
+        return f"{background_base}. Use a calm neutral surface with an explicit clean text patch. {saturated_background_rule}"
+    return f"{background_base}. {saturated_background_rule}"
+
+
+def _build_lighting_prompt(shot: ShotSpec, style_architecture) -> str:
+    lighting_base = "; ".join(style_architecture.lighting_strategy)
+    lens_base = "; ".join(style_architecture.lens_strategy)
+    return f"{lighting_base}. Keep the lens language consistent: {lens_base}. Shot type: {shot.shot_type}."
+
+
+def _build_quality_prompt(shot: ShotSpec) -> str:
+    if shot.shot_type == "dry_leaf_detail":
+        return "high-end commercial macro detail photography, crisp texture, premium material fidelity, clean depth separation"
+    if shot.shot_type == "tea_soup_experience":
+        return "high-end commercial beverage photography, transparent tea soup, premium mood, clean reflections"
+    return "high-end commercial e-commerce photography, premium material fidelity, stable composition, clean product edges"
+
+
+def _build_negative_prompt(product_analysis, style_architecture) -> list[str]:
+=======
 def _build_composition_prompt(shot: ShotSpec, preferred_zone: str, profile: ShotExecutionProfile) -> str:
     """构图层使用明确镜头执行语句，不再只做宽泛描述。"""
     composition_base = shot.composition_direction or shot.composition_hint or "keep the composition stable and commercial"
@@ -354,6 +461,7 @@ def _build_quality_prompt(shot: ShotSpec, profile: ShotExecutionProfile) -> str:
 
 
 def _build_negative_prompt(product_analysis, style_architecture, profile: ShotExecutionProfile) -> list[str]:
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     return _merge_unique_strings(
         style_architecture.global_negative_rules,
         [
@@ -361,13 +469,20 @@ def _build_negative_prompt(product_analysis, style_architecture, profile: ShotEx
             "do not redesign the label",
             "do not change package proportions",
             "do not add oversaturated background colors",
+<<<<<<< HEAD
+=======
             *profile.negative_rules,
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
             *[f"must not change {item}" for item in product_analysis.locked_elements],
         ],
     )
 
 
+<<<<<<< HEAD
+def _build_product_lock(product_analysis) -> ProductLockSpec:
+=======
 def _build_product_lock(product_analysis, profile: ShotExecutionProfile) -> ProductLockSpec:
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     must_not_change = _merge_unique_strings(
         [
             product_analysis.package_type or "",
@@ -379,11 +494,34 @@ def _build_product_lock(product_analysis, profile: ShotExecutionProfile) -> Prod
     return ProductLockSpec(
         must_preserve=_merge_unique_strings(product_analysis.locked_elements, product_analysis.visual_identity.must_preserve),
         must_preserve_texts=product_analysis.must_preserve_texts,
+<<<<<<< HEAD
+        editable_regions=product_analysis.editable_elements,
+=======
         editable_regions=_merge_unique_strings(product_analysis.editable_elements, profile.editable_regions),
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
         must_not_change=must_not_change,
     )
 
 
+<<<<<<< HEAD
+def _build_render_constraints(shot: ShotSpec, generation_context: dict[str, object]) -> RenderConstraintSpec:
+    generation_mode = str(generation_context["generation_mode"])
+    reference_image_priority = "none"
+    consistency_strength = "medium"
+    if generation_mode == "image_edit":
+        if shot.shot_type == "dry_leaf_detail":
+            reference_image_priority = "main_packshot_plus_detail_if_available"
+            consistency_strength = "medium_high"
+        else:
+            reference_image_priority = "main_packshot"
+            consistency_strength = "high" if shot.shot_type in {"hero_brand", "carry_action"} else "medium_high"
+    return RenderConstraintSpec(
+        generation_mode=generation_mode,
+        reference_image_priority=reference_image_priority,
+        consistency_strength=consistency_strength,
+        allow_human_presence=shot.shot_type == "carry_action",
+        allow_hand_only=shot.shot_type == "carry_action",
+=======
 def _build_render_constraints(
     shot: ShotSpec,
     generation_context: dict[str, object],
@@ -399,6 +537,7 @@ def _build_render_constraints(
         editable_region_strategy=profile.editable_region_strategy,
         allow_human_presence=profile.allow_human_presence,
         allow_hand_only=profile.allow_hand_only,
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     )
 
 
@@ -416,6 +555,8 @@ def _build_copy_intent(shot: ShotSpec) -> CopyIntentSpec:
     return CopyIntentSpec(title_role=shot.copy_goal or shot.title, subtitle_role="", bullet_role="optional", cta_role="none")
 
 
+<<<<<<< HEAD
+=======
 def _build_shot_execution_profile(shot: ShotSpec, product_analysis) -> ShotExecutionProfile:
     """按 shot_type 汇总执行画像，统一管理主次主体、排他规则和锁定强度。"""
     shot_type = str(shot.shot_type or "").strip()
@@ -726,6 +867,7 @@ def _join_prompt_sentences(parts: list[str]) -> str:
     return " ".join(merged)
 
 
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 def _resolve_target_generation_context(state: WorkflowState, deps: WorkflowDependencies) -> dict[str, object]:
     """预判这批 spec 更偏向 image_edit 还是 t2i。
 
@@ -757,8 +899,12 @@ def _build_user_preference_summary(task, style_architecture) -> dict[str, object
     }
 
 
+<<<<<<< HEAD
+def _resolve_preferred_text_safe_zone(shot: ShotSpec, layout_item) -> str:
+=======
 def _resolve_preferred_text_safe_zone(shot: ShotSpec, layout_item, profile: ShotExecutionProfile) -> str:
     """根据 shot 画像和 layout 输出最终可执行的文字安全区偏好。"""
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     layout_zone = getattr(layout_item, "text_safe_zone", "") or shot.preferred_text_safe_zone
     if shot.shot_type == "hero_brand":
         return layout_zone if layout_zone in {"top_left", "top_right", "top"} else "top_right"
@@ -766,6 +912,16 @@ def _resolve_preferred_text_safe_zone(shot: ShotSpec, layout_item, profile: Shot
         return "opposite_of_action_direction"
     if shot.shot_type == "open_box_structure":
         return layout_zone if layout_zone in {"top", "top_right"} else "top_right"
+<<<<<<< HEAD
+    if shot.shot_type == "dry_leaf_detail":
+        return "background_clean_area"
+    if shot.shot_type == "tea_soup_experience":
+        return "top"
+    return layout_zone or "top_right"
+
+
+def _resolve_subject_placement_hint(shot: ShotSpec, preferred_zone: str) -> str:
+=======
     if shot.shot_type in {"dry_leaf_detail", "label_or_material_detail"}:
         return "background_clean_area"
     if shot.shot_type in {"tea_soup_experience", "lifestyle_or_brewing_context", "package_in_brewing_context"}:
@@ -777,26 +933,33 @@ def _resolve_preferred_text_safe_zone(shot: ShotSpec, layout_item, profile: Shot
 
 def _resolve_subject_placement_hint(shot: ShotSpec, preferred_zone: str, profile: ShotExecutionProfile) -> str:
     """输出给 layout/render 共用的主体摆位摘要。"""
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     if shot.shot_type == "hero_brand":
         return "stable hero package with clean upper-area copy zone"
     if shot.shot_type == "carry_action":
         return "subject follows the hand motion, copy stays on the opposite side"
     if shot.shot_type == "open_box_structure":
         return "opened package stays central and structural read remains clear"
+<<<<<<< HEAD
+=======
     if shot.shot_type == "package_detail":
         return "package detail crop dominates, hero framing forbidden, copy stays off the texture focus"
     if shot.shot_type == "label_or_material_detail":
         return "label or material detail dominates, package remains only a small anchor"
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     if shot.shot_type == "dry_leaf_detail":
         return "tea leaf detail foreground, package anchor background, text stays in clean background area"
     if shot.shot_type == "tea_soup_experience":
         return "tea soup foreground, package anchor background, upper area kept clear"
+<<<<<<< HEAD
+=======
     if shot.shot_type in {"lifestyle_or_brewing_context", "package_in_brewing_context"}:
         return "context props and brewing anchors must be visible, package must not read as isolated studio hero"
     if shot.shot_type == "package_with_leaf_hint":
         return "package remains main subject while leaf cue supports in foreground or side"
     if "hero" in profile.banned_fallback_pattern:
         return f"avoid hero fallback, prefer copy zone at {preferred_zone}"
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     return f"prefer copy zone at {preferred_zone}"
 
 
@@ -853,14 +1016,23 @@ def _merge_render_constraints(base: RenderConstraintSpec, generated: RenderConst
             "generation_mode": base.generation_mode,
             "reference_image_priority": base.reference_image_priority,
             "consistency_strength": base.consistency_strength or generated.consistency_strength,
+<<<<<<< HEAD
+=======
             "product_lock_level": base.product_lock_level or generated.product_lock_level,
             "editable_region_strategy": base.editable_region_strategy or generated.editable_region_strategy,
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
             "allow_human_presence": base.allow_human_presence,
             "allow_hand_only": base.allow_hand_only,
         }
     )
 
 
+<<<<<<< HEAD
+def _build_spec_debug_logs(plan: ShotPromptSpecPlan) -> list[str]:
+    """输出每个 shot 的关键 spec 摘要，便于调试。"""
+    logs: list[str] = []
+    for spec in plan.specs:
+=======
 def _build_spec_debug_logs(plan: ShotPromptSpecPlan, product_analysis) -> list[str]:
     """输出每个 shot 的差异化执行摘要，便于定位是否退化成 hero。"""
     logs: list[str] = []
@@ -869,6 +1041,7 @@ def _build_spec_debug_logs(plan: ShotPromptSpecPlan, product_analysis) -> list[s
             ShotSpec(shot_id=spec.shot_id, shot_type=spec.shot_type, title="", purpose="", composition_hint="", copy_goal=""),
             product_analysis,
         )
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
         style_summary = spec.style_prompt[:100] + ("..." if len(spec.style_prompt) > 100 else "")
         logs.append(
             (
@@ -877,10 +1050,13 @@ def _build_spec_debug_logs(plan: ShotPromptSpecPlan, product_analysis) -> list[s
                 f"shot_type={spec.shot_type} "
                 f"style_theme_summary={style_summary} "
                 f"generation_mode={spec.render_constraints.generation_mode} "
+<<<<<<< HEAD
+=======
                 f"primary_subject={profile.primary_subject} "
                 f"secondary_subject={profile.secondary_subject} "
                 f"shot_differentiation_summary={profile.differentiation_summary} "
                 f"banned_fallback_pattern={profile.banned_fallback_pattern} "
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
                 f"complete_eight_layers={str(spec.has_complete_prompt_layers()).lower()}"
             )
         )

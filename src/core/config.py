@@ -17,7 +17,10 @@ from functools import lru_cache
 import logging
 import os
 from pathlib import Path
+<<<<<<< HEAD
+=======
 import sys
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 from typing import Any
 
 from dotenv import load_dotenv
@@ -64,8 +67,20 @@ class Settings(BaseSettings):
     enable_ocr_qc: bool = False
     enable_node_cache: bool = True
     budget_mode: str = "production"
+<<<<<<< HEAD
+    workflow_version: str = "v2"
     prompt_build_mode: str | None = None
     render_mode: str | None = None
+    direct_text_on_image: bool = True
+    enable_overlay_fallback: bool = True
+    default_platform: str = "tmall"
+    default_shot_count: int = 8
+    default_image_aspect_ratio: str = "1:1"
+    default_image_size: str = "2K"
+=======
+    prompt_build_mode: str | None = None
+    render_mode: str | None = None
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     preview_shot_count: int = 2
     preview_output_size: str = "1024x1024"
     analyze_max_reference_images: int = 2
@@ -119,6 +134,12 @@ class Settings(BaseSettings):
     nvidia_vision_base_url: str = "https://integrate.api.nvidia.com/v1"
     nvidia_vision_model: str | None = None
     runapi_api_key: str | None = None
+<<<<<<< HEAD
+    runapi_text_base_url: str = "https://runapi.co/v1"
+    runapi_text_model: str = "gpt-5-nano"
+    runapi_text_api_key: str | None = None
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     runapi_image_base_url: str = "https://runapi.co"
     runapi_image_model: str = "gemini-2.5-flash-image"
     provider_timeout_seconds: int = 120
@@ -127,10 +148,13 @@ class Settings(BaseSettings):
     default_font_path: Path = Path("assets/fonts/NotoSansSC-Regular.otf")
     text_render_preset: str = "premium_minimal"
     text_render_adaptive_style_enabled: bool = True
+<<<<<<< HEAD
+=======
     text_render_min_title_font_size: int = 40
     text_render_min_subtitle_font_size: int = 24
     text_render_min_bullets_font_size: int = 22
     text_render_min_cta_font_size: int = 22
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     outputs_dir: Path = Path("outputs")
     tasks_dir: Path = Path("outputs/tasks")
     cache_dir: Path = Path("outputs/cache")
@@ -197,6 +221,10 @@ class Settings(BaseSettings):
         image_edit_selection = self.resolve_image_edit_model_selection()
         return {
             "budget_mode": self.resolve_budget_mode(),
+<<<<<<< HEAD
+            "workflow_version": self.workflow_version,
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
             "text_provider_mode": self.text_provider_mode,
             "vision_provider_mode": self.vision_provider_mode,
             "image_provider_mode": self.image_provider_mode,
@@ -230,6 +258,15 @@ class Settings(BaseSettings):
             "log_level": self.log_level,
             "prompt_build_mode": self.resolve_prompt_build_mode(),
             "render_mode": self.resolve_render_mode(),
+<<<<<<< HEAD
+            "direct_text_on_image": "true" if self.direct_text_on_image else "false",
+            "enable_overlay_fallback": "true" if self.enable_overlay_fallback else "false",
+            "default_platform": self.default_platform,
+            "default_shot_count": str(self.default_shot_count),
+            "default_image_aspect_ratio": self.default_image_aspect_ratio,
+            "default_image_size": self.default_image_size,
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
             "preview_shot_count": str(self.preview_shot_count),
             "preview_output_size": self.preview_output_size,
             "analyze_max_reference_images": str(self.analyze_max_reference_images),
@@ -239,6 +276,10 @@ class Settings(BaseSettings):
             "image_edit_max_reference_images": str(self.resolve_image_edit_max_reference_images()),
             "enable_node_cache": "true" if self.enable_node_cache else "false",
             "enable_file_log": "true" if self.enable_file_log else "false",
+<<<<<<< HEAD
+            "text_render_preset": self.resolve_text_render_preset(),
+            "text_render_adaptive_style_enabled": "true" if self.text_render_adaptive_style_enabled else "false",
+=======
             "default_font_path": str(self.default_font_path),
             "text_render_preset": self.resolve_text_render_preset(),
             "text_render_adaptive_style_enabled": "true" if self.text_render_adaptive_style_enabled else "false",
@@ -246,10 +287,15 @@ class Settings(BaseSettings):
             "text_render_min_subtitle_font_size": str(self.text_render_min_subtitle_font_size),
             "text_render_min_bullets_font_size": str(self.text_render_min_bullets_font_size),
             "text_render_min_cta_font_size": str(self.text_render_min_cta_font_size),
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
             "proxy_enabled": "true" if self.is_proxy_enabled() else "false",
             "dashscope_api_key_loaded": "true" if bool(self.dashscope_api_key) else "false",
             "dashscope_base_url": self.dashscope_base_url,
             "image_allow_mock_fallback": "true" if self.image_allow_mock_fallback else "false",
+<<<<<<< HEAD
+            "runapi_text_model": self.runapi_text_model,
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
             "runapi_image_model": self.runapi_image_model,
             "outputs_dir": str(self.outputs_dir),
             "tasks_dir": str(self.tasks_dir),
@@ -353,9 +399,27 @@ class Settings(BaseSettings):
                 label="GLM-4.7",
                 source=route.source,
             )
+<<<<<<< HEAD
+        if provider_key == "runapi_openai":
+            model_id = self.text_model or self.text_model_id or self.runapi_text_model
+            source = route.source
+            if not (self.text_model or self.text_model_id):
+                source = self.env_name_for("runapi_text_model")
+            return ResolvedModelSelection(
+                capability="planning",
+                provider_key="runapi_openai",
+                model_id=model_id,
+                label=self._label_for_model(provider_key, model_id),
+                source=source,
+            )
+        raise RuntimeError(
+            "不支持的文本模型开关："
+            f"{provider_key}。当前仅支持 nvidia / ollama / dashscope / zhipu / runapi_openai，"
+=======
         raise RuntimeError(
             "不支持的文本模型开关："
             f"{provider_key}。当前仅支持 nvidia / ollama / dashscope / zhipu，"
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
             "如需自定义模型，请显式设置 ECOM_IMAGE_AGENT_TEXT_MODEL_ID。"
         )
 
@@ -440,6 +504,17 @@ class Settings(BaseSettings):
                 label="RunAPI",
                 source=route.source,
             )
+<<<<<<< HEAD
+        if provider_key == "runapi_gemini31":
+            return ResolvedModelSelection(
+                capability="image",
+                provider_key="runapi_gemini31",
+                model_id="gemini-3.1-flash-image-preview",
+                label=self._label_for_model(provider_key, "gemini-3.1-flash-image-preview"),
+                source=route.source,
+            )
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
         if provider_key == "dashscope":
             model_id = self.image_model or self.image_model_id or "wanx2.1-t2i-turbo"
             return ResolvedModelSelection(
@@ -521,6 +596,17 @@ class Settings(BaseSettings):
                 label="RunAPI",
                 source=source,
             )
+<<<<<<< HEAD
+        if route.alias == "runapi_gemini31":
+            return ResolvedModelSelection(
+                capability="image_edit",
+                provider_key="runapi_gemini31",
+                model_id="gemini-3.1-flash-image-preview",
+                label=self._label_for_model(route.alias, "gemini-3.1-flash-image-preview"),
+                source=route.source,
+            )
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
         model_id = self.image_edit_model or self.resolve_image_model_selection().model_id
         source = "ECOM_IMAGE_AGENT_IMAGE_EDIT_MODEL" if self.image_edit_model else route.source
         return ResolvedModelSelection(
@@ -587,6 +673,8 @@ class Settings(BaseSettings):
             )
         return explicit_value
 
+<<<<<<< HEAD
+=======
     def resolve_text_render_min_font_size(self, block_kind: str) -> int:
         """返回指定文字块允许缩小到的最小字号。"""
         min_size_map = {
@@ -660,6 +748,7 @@ class Settings(BaseSettings):
             Path("/usr/share/fonts/opentype/source-han-sans/SourceHanSansSC-Regular.otf"),
         )
 
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     def resolve_text_provider_route(self) -> ResolvedProviderRoute:
         """解析当前文本 provider 路由。"""
         mode = self._resolve_effective_provider_mode("text")
@@ -723,6 +812,13 @@ class Settings(BaseSettings):
             return "GLM-4.7-Flash"
         if "glm-4.7" in lowered:
             return "GLM-4.7"
+<<<<<<< HEAD
+        if "gpt-5-nano" in lowered:
+            return "GPT-5-Nano"
+        if "gemini-3.1-flash-image-preview" in lowered:
+            return "Gemini 3.1 Flash Image Preview"
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
         if "qwen" in lowered:
             return "Qwen3.5"
         if normalized == "glm5":

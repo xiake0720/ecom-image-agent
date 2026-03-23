@@ -1,5 +1,44 @@
 # Prompt 说明
 
+<<<<<<< HEAD
+## 原则
+- prompt 只服务于结构化输出
+- 节点职责单一
+- v1 prompt 和 v2 prompt 并存
+
+## v1 prompt
+- `analyze_product.md`
+- `style_director.md`
+- `plan_shots.md`
+- `generate_copy.md`
+- `generate_layout.md`
+- `shot_prompt_refiner.md`
+- `build_image_prompts.md`
+
+## v2 新增 prompt
+
+### `director_v2.md`
+- 节点：
+  - `src/workflows/nodes/director_v2.py`
+- 目标：
+  - 输出 `DirectorOutput`
+- 约束：
+  - 面向天猫茶叶商品
+  - 输出 8 张图规划
+  - 只允许结构化 JSON
+
+### `prompt_refine_v2.md`
+- 节点：
+  - `src/workflows/nodes/prompt_refine_v2.py`
+- 目标：
+  - 输出 `PromptPlanV2`
+- 约束：
+  - `title_copy` 建议 4 到 8 字
+  - `subtitle_copy` 建议 8 到 15 字
+  - `render_prompt` 必须能直接交给图片模型执行
+  - `layout_hint` 必须可供图片模型和 overlay fallback 共用
+  - 只允许结构化 JSON
+=======
 ## 一、文档目的
 本文件用于说明项目中各类 prompt 的作用、边界和当前实现状态。
 
@@ -149,3 +188,4 @@
 - 图组边界和整组风格锚点由 `plan_shots` 先建立
 - `build_prompts` 只基于结构化结果逐张生成 prompt，不再重复传图
 
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c

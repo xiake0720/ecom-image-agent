@@ -158,12 +158,16 @@ def _build_image_prompt(
     """
     del copy_item
     text_safe_zone = getattr(layout_item, "text_safe_zone", "")
+<<<<<<< HEAD
+    product_lock_rules = spec.product_lock.flattened_rules()
+=======
     product_lock_rules = _resolve_prompt_keep_subject_rules(spec=spec, product_analysis=product_analysis)
     editable_regions = _resolve_prompt_editable_regions(
         shot_type=shot.shot_type,
         spec=spec,
         product_analysis=product_analysis,
     )
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     layout_constraint_lines = spec.layout_constraints.as_prompt_lines()
     render_constraint_lines = spec.render_constraints.as_prompt_lines()
     preserve_rules = [*product_analysis.locked_elements, *product_analysis.visual_identity.must_preserve]
@@ -200,7 +204,11 @@ def _build_image_prompt(
         output_size=task_output_size,
         preserve_rules=preserve_rules,
         keep_subject_rules=product_lock_rules or preserve_rules,
+<<<<<<< HEAD
+        editable_regions=spec.product_lock.editable_regions or product_analysis.editable_elements,
+=======
         editable_regions=editable_regions,
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
         locked_regions=product_analysis.locked_elements,
         background_direction="; ".join(style_architecture.background_strategy + [spec.background_prompt]),
         lighting_direction="; ".join(style_architecture.lighting_strategy + [spec.lighting_prompt]),
@@ -212,6 +220,8 @@ def _build_image_prompt(
     )
 
 
+<<<<<<< HEAD
+=======
 def _resolve_prompt_keep_subject_rules(*, spec, product_analysis) -> list[str]:
     """把结构化商品锁定规则整理成兼容层也能稳定消费的去重列表。"""
     return _merge_unique_strings(
@@ -287,6 +297,7 @@ def _merge_unique_strings(*groups: list[str]) -> list[str]:
     return merged
 
 
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 def _resolve_target_generation_context(state: WorkflowState, deps: WorkflowDependencies) -> dict[str, object]:
     """在 `build_prompts` 阶段预判后续渲染会走哪种 generation mode。"""
     selected_assets = select_reference_assets(

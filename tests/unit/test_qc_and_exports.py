@@ -46,18 +46,24 @@ class FakeTextRenderer:
         Image.new("RGB", (1440, 1440), color=(255, 255, 255)).save(output_path)
         return SimpleNamespace(
             output_path=output_path,
+<<<<<<< HEAD
+=======
             font_source="windows_system_font",
             font_loaded=True,
             fallback_used=True,
             requested_font_path="assets/fonts/NotoSansSC-Regular.otf",
             resolved_font_path="C:/Windows/Fonts/msyh.ttc",
             fallback_target="C:/Windows/Fonts/msyh.ttc",
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
             blocks=[
                 SimpleNamespace(
                     kind="title",
                     requested_font_size=64,
                     used_font_size=60,
+<<<<<<< HEAD
+=======
                     min_font_size_hit=False,
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
                     line_count=2,
                     x=96,
                     y=88,
@@ -77,7 +83,10 @@ class FakeTextRenderer:
                     kind="subtitle",
                     requested_font_size=42,
                     used_font_size=40,
+<<<<<<< HEAD
+=======
                     min_font_size_hit=False,
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
                     line_count=1,
                     x=102,
                     y=196,
@@ -120,12 +129,18 @@ def test_run_qc_adds_structure_dimension_and_new_image_checks() -> None:
     assert "shot_completeness_check" in check_names
     assert "product_consistency_check" in check_names
     assert "shot_type_match_check" in check_names
+<<<<<<< HEAD
+=======
     assert "visual_shot_diversity_check" in check_names
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     assert "qc_report_exists" in check_names
     assert report.shot_completeness_check
     assert report.product_consistency_check
     assert report.shot_type_match_check
+<<<<<<< HEAD
+=======
     assert report.visual_shot_diversity_check
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     assert (task_dir / "qc_report.json").exists()
 
 
@@ -196,11 +211,15 @@ def test_overlay_text_persists_actual_text_regions_json() -> None:
     payload = json.loads(regions_path.read_text(encoding="utf-8"))
     shot_payload = payload["shots"][0]
     assert shot_payload["shot_id"] == "shot-01"
+<<<<<<< HEAD
+    assert shot_payload["actual_text_regions"]
+=======
     assert shot_payload["font_source"] == "windows_system_font"
     assert shot_payload["font_loaded"] is True
     assert shot_payload["fallback_used"] is True
     assert shot_payload["actual_text_regions"]
     assert shot_payload["actual_text_regions"][0]["min_font_size_hit"] is False
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     assert shot_payload["merged_text_region"] == {"x": 96, "y": 88, "width": 320, "height": 150}
     assert shot_payload["title_region"]["kind"] == "title"
     assert shot_payload["subtitle_region"]["kind"] == "subtitle"
@@ -303,7 +322,10 @@ def test_run_qc_fails_when_text_overflow_info_exists() -> None:
                     "kind": "title",
                     "requested_font_size": 80,
                     "used_font_size": 18,
+<<<<<<< HEAD
+=======
                     "min_font_size_hit": True,
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
                     "line_count": 6,
                     "x": 80,
                     "y": 80,
@@ -330,6 +352,8 @@ def test_run_qc_fails_when_text_overflow_info_exists() -> None:
     assert "text_overflow_detected" in readability_check.details
 
 
+<<<<<<< HEAD
+=======
 def test_run_qc_warns_when_used_font_size_is_below_commercial_threshold() -> None:
     task_id = "task-qc-small-font"
     task_dir = _reset_task_dir(task_id)
@@ -385,6 +409,7 @@ def test_run_qc_warns_when_used_font_size_is_below_commercial_threshold() -> Non
     assert "used_font_sizes=" in readability_check.details
 
 
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 def test_run_qc_falls_back_to_layout_when_actual_text_regions_missing() -> None:
     task_id = "task-qc-fallback-text-region"
     task_dir = _reset_task_dir(task_id)
@@ -462,8 +487,11 @@ def test_run_qc_does_not_pass_product_consistency_without_evidence() -> None:
         update={
             "must_preserve_texts": [],
             "locked_elements": [],
+<<<<<<< HEAD
+=======
             "text_anchor_source": "none",
             "text_anchor_status": "unreadable",
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
             "primary_color": "",
         }
     )
@@ -475,8 +503,11 @@ def test_run_qc_does_not_pass_product_consistency_without_evidence() -> None:
     assert consistency_check.status != "passed"
     assert consistency_check.evidence_completeness == "missing"
     assert "brand_text_targets=['none']" in consistency_check.details
+<<<<<<< HEAD
+=======
     assert "text_anchor_source=none" in consistency_check.details
     assert "text_anchor_status=unreadable" in consistency_check.details
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     assert "ocr_texts=['none']" in consistency_check.details
     assert "primary_color_detected=None" in consistency_check.details
     assert "decision_reason=no_reliable_product_evidence_available" in consistency_check.details
@@ -499,7 +530,10 @@ def test_run_qc_marks_partial_product_evidence_as_warning() -> None:
     consistency_check = next(check for check in result["qc_report"].checks if check.check_name == "product_consistency_check")
     assert consistency_check.status == "warning"
     assert consistency_check.evidence_completeness == "partial"
+<<<<<<< HEAD
+=======
     assert "text_anchor_count=1" in consistency_check.details
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     assert "decision_reason=partial_product_evidence_only" in consistency_check.details
 
 
@@ -513,11 +547,16 @@ def test_run_qc_builds_shot_type_match_summary_for_tea_phase1() -> None:
     assert len(result["qc_report"].shot_type_match_check) == 5
     related_ids = {item.related_shot_id for item in result["qc_report"].shot_type_match_check}
     assert related_ids == {"shot_01", "shot_02", "shot_03", "shot_04", "shot_05"}
+<<<<<<< HEAD
+=======
     assert len(result["qc_report"].visual_shot_diversity_check) == 1
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     assert len(result["qc_report"].text_safe_zone_check) == 5
     assert len(result["qc_report"].text_readability_check) == 5
 
 
+<<<<<<< HEAD
+=======
 def test_run_qc_warns_when_five_shots_are_visually_too_similar() -> None:
     task_id = "task-qc-low-diversity"
     task_dir = _reset_task_dir(task_id)
@@ -553,6 +592,7 @@ def test_run_qc_shot_type_match_uses_image_signals_not_only_prompt_metadata() ->
     assert "visual_warnings=" in shot_type_checks["shot_05"].details
 
 
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 def test_different_shots_do_not_share_identical_text_rect_when_actual_regions_exist() -> None:
     task_id = "task-qc-different-text-rects"
     task_dir = _reset_task_dir(task_id)
@@ -882,6 +922,18 @@ def _build_tea_phase1_qc_state(*, task_id: str, task_dir: Path, image_count: int
     return state, deps
 
 
+<<<<<<< HEAD
+def _build_text_region_report(x: int, y: int, width: int, height: int) -> dict:
+    return {
+        "shot_id": f"shot-{x}",
+        "actual_text_regions": [
+            {"kind": "title", "x": x, "y": y, "width": width, "height": int(height * 0.56)},
+            {"kind": "subtitle", "x": x + 8, "y": y + int(height * 0.62), "width": width - 16, "height": int(height * 0.28)},
+        ],
+        "merged_text_region": {"x": x, "y": y, "width": width, "height": height},
+        "title_region": {"kind": "title", "x": x, "y": y, "width": width, "height": int(height * 0.56)},
+        "subtitle_region": {"kind": "subtitle", "x": x + 8, "y": y + int(height * 0.62), "width": width - 16, "height": int(height * 0.28)},
+=======
 def _build_tea_tin_can_qc_state(*, task_id: str, task_dir: Path, image_count: int) -> tuple[dict, WorkflowDependencies]:
     task = Task(
         task_id=task_id,
@@ -999,5 +1051,6 @@ def _build_text_region_report(x: int, y: int, width: int, height: int) -> dict:
         "merged_text_region": {"x": x, "y": y, "width": width, "height": height},
         "title_region": {"kind": "title", "x": x, "y": y, "width": width, "height": int(height * 0.56), "min_font_size_hit": False},
         "subtitle_region": {"kind": "subtitle", "x": x + 8, "y": y + int(height * 0.62), "width": width - 16, "height": int(height * 0.28), "min_font_size_hit": False},
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     }
 

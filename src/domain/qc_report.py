@@ -65,6 +65,9 @@ class QCReport(BaseModel):
     shot_completeness_check: list[QCCheckSummary] = Field(default_factory=list)
     product_consistency_check: list[QCCheckSummary] = Field(default_factory=list)
     shot_type_match_check: list[QCCheckSummary] = Field(default_factory=list)
+<<<<<<< HEAD
+=======
     visual_shot_diversity_check: list[QCCheckSummary] = Field(default_factory=list)
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     text_safe_zone_check: list[QCCheckSummary] = Field(default_factory=list)
     text_readability_check: list[QCCheckSummary] = Field(default_factory=list)

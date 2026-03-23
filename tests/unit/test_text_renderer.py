@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+<<<<<<< HEAD
+from pathlib import Path
+
+from PIL import Image
+
+=======
 import json
 from pathlib import Path
 
@@ -7,13 +13,18 @@ from PIL import Image
 import pytest
 
 from src.core.config import get_settings
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 from src.domain.copy_plan import CopyItem
 from src.domain.layout_plan import LayoutBlock, LayoutItem
 from src.services.rendering.text_renderer import TextRenderer
 
 
+<<<<<<< HEAD
+def test_text_renderer_outputs_image_and_shrinks_text(tmp_path: Path) -> None:
+=======
 def test_text_renderer_outputs_image_and_records_font_metadata(tmp_path: Path) -> None:
     renderer = TextRenderer(font_path=_find_available_cjk_font())
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     base_path = tmp_path / "base.png"
     Image.new("RGB", (800, 800), color=(255, 255, 255)).save(base_path)
 
@@ -22,17 +33,30 @@ def test_text_renderer_outputs_image_and_records_font_metadata(tmp_path: Path) -
         canvas_width=800,
         canvas_height=800,
         blocks=[
+<<<<<<< HEAD
+            LayoutBlock(kind="title", x=40, y=40, width=220, height=80, font_size=72),
+            LayoutBlock(kind="subtitle", x=40, y=150, width=280, height=120, font_size=36),
+=======
             LayoutBlock(kind="title", x=40, y=40, width=280, height=90, font_size=72),
             LayoutBlock(kind="subtitle", x=40, y=150, width=320, height=120, font_size=36),
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
         ],
     )
     copy_item = CopyItem(
         shot_id="shot-01",
+<<<<<<< HEAD
+        title="This title is intentionally long enough to trigger font shrinking",
+        subtitle="Subtitle line for wrapping.",
+    )
+    output_path = tmp_path / "rendered.png"
+    report = TextRenderer().render_copy(
+=======
         title="高山云雾鲜爽回甘",
         subtitle="中文副标题换行测试。",
     )
     output_path = tmp_path / "rendered.png"
     report = renderer.render_copy(
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
         input_image_path=str(base_path),
         copy_item=copy_item,
         layout_item=layout,
@@ -40,6 +64,11 @@ def test_text_renderer_outputs_image_and_records_font_metadata(tmp_path: Path) -
     )
 
     assert output_path.exists()
+<<<<<<< HEAD
+    assert report.blocks[0].used_font_size <= report.blocks[0].requested_font_size
+
+
+=======
     assert report.font_loaded is True
     assert report.font_source
     assert report.resolved_font_path
@@ -105,6 +134,7 @@ def test_text_renderer_hits_min_font_size_and_flags_overflow(tmp_path: Path) -> 
     assert title_block.overflow_detected is True
 
 
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 def test_dark_background_prefers_light_text() -> None:
     renderer = TextRenderer()
     token = renderer._get_typography_token("title")
@@ -152,6 +182,8 @@ def test_background_plate_can_be_triggered_on_busy_mid_tone_region() -> None:
     style = renderer._resolve_adaptive_style_from_region(region, token)
 
     assert style.plate.enabled is True
+<<<<<<< HEAD
+=======
 
 
 def test_render_test_image_writes_font_metadata_sidecar(tmp_path: Path) -> None:
@@ -177,3 +209,4 @@ def _find_available_cjk_font() -> Path:
         if candidate.exists():
             return candidate
     pytest.skip("No CJK font candidate available in current environment.")
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c

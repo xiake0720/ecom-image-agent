@@ -51,10 +51,18 @@ DEBUG_JSON_FILENAMES = [
     "product_analysis.json",
     "style_architecture.json",
     "shot_plan.json",
+<<<<<<< HEAD
+    "director_output.json",
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     "copy_plan.json",
     "layout_plan.json",
     "shot_prompt_specs.json",
     "image_prompt_plan.json",
+<<<<<<< HEAD
+    "prompt_plan_v2.json",
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     "qc_report.json",
     "qc_report_preview.json",
 ]
@@ -139,6 +147,11 @@ def _run_task(form_data: dict[str, object], uploads, *, forced_render_mode: str)
         output_size=str(form_data["output_size"]),
         shot_count=int(form_data["shot_count"]),
         copy_tone=str(form_data["copy_tone"]),
+<<<<<<< HEAD
+        workflow_version=str(form_data.get("workflow_version", settings.workflow_version or "v2")),
+        enable_overlay_fallback=bool(form_data.get("enable_overlay_fallback", settings.enable_overlay_fallback)),
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
         status=TaskStatus.RUNNING,
         task_dir=str(task_dirs["task"]),
     )
@@ -161,8 +174,16 @@ def _run_task(form_data: dict[str, object], uploads, *, forced_render_mode: str)
                 "task": task,
                 "assets": assets,
                 "logs": initial_logs,
+<<<<<<< HEAD
+                "workflow_version": task.workflow_version,
                 "cache_enabled": bool(form_data.get("cache_enabled", settings.enable_node_cache)),
                 "ignore_cache": bool(form_data.get("ignore_cache", False)),
+                "direct_text_on_image": bool(settings.direct_text_on_image),
+                "enable_overlay_fallback": bool(form_data.get("enable_overlay_fallback", settings.enable_overlay_fallback)),
+=======
+                "cache_enabled": bool(form_data.get("cache_enabled", settings.enable_node_cache)),
+                "ignore_cache": bool(form_data.get("ignore_cache", False)),
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
                 "prompt_build_mode": str(form_data.get("prompt_build_mode", settings.resolve_prompt_build_mode())),
                 "render_mode": forced_render_mode,
                 "analyze_max_reference_images": int(form_data.get("analyze_max_reference_images", settings.analyze_max_reference_images)),
@@ -203,6 +224,14 @@ def _continue_final_from_existing_task(existing_task_state: dict | None) -> dict
             ],
             "cache_enabled": bool(existing_task_state.get("cache_enabled", settings.enable_node_cache)),
             "ignore_cache": bool(existing_task_state.get("ignore_cache", False)),
+<<<<<<< HEAD
+            "workflow_version": str(existing_task_state.get("workflow_version") or getattr(task, "workflow_version", settings.workflow_version)),
+            "enable_overlay_fallback": bool(
+                existing_task_state.get("enable_overlay_fallback", getattr(task, "enable_overlay_fallback", settings.enable_overlay_fallback))
+            ),
+            "direct_text_on_image": bool(settings.direct_text_on_image),
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
             "render_mode": "final",
             "render_variant": "final",
             "preview_generation_result": preview_generation_result,
@@ -227,12 +256,28 @@ def _normalize_task_state(state: dict, debug_info: dict[str, object]) -> dict:
         normalized["task"] = normalized["task"].model_dump(mode="json")
     if "generation_result" in normalized and hasattr(normalized["generation_result"], "model_dump"):
         normalized["generation_result"] = normalized["generation_result"].model_dump(mode="json")
+<<<<<<< HEAD
+    if "generation_result_v2" in normalized and hasattr(normalized["generation_result_v2"], "model_dump"):
+        normalized["generation_result_v2"] = normalized["generation_result_v2"].model_dump(mode="json")
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     if "preview_generation_result" in normalized and hasattr(normalized["preview_generation_result"], "model_dump"):
         normalized["preview_generation_result"] = normalized["preview_generation_result"].model_dump(mode="json")
     if "qc_report" in normalized and hasattr(normalized["qc_report"], "model_dump"):
         normalized["qc_report"] = normalized["qc_report"].model_dump(mode="json")
+<<<<<<< HEAD
+    if "qc_report_v2" in normalized and hasattr(normalized["qc_report_v2"], "model_dump"):
+        normalized["qc_report_v2"] = normalized["qc_report_v2"].model_dump(mode="json")
     if "preview_qc_report" in normalized and hasattr(normalized["preview_qc_report"], "model_dump"):
         normalized["preview_qc_report"] = normalized["preview_qc_report"].model_dump(mode="json")
+    if "director_output" in normalized and hasattr(normalized["director_output"], "model_dump"):
+        normalized["director_output"] = normalized["director_output"].model_dump(mode="json")
+    if "prompt_plan_v2" in normalized and hasattr(normalized["prompt_plan_v2"], "model_dump"):
+        normalized["prompt_plan_v2"] = normalized["prompt_plan_v2"].model_dump(mode="json")
+=======
+    if "preview_qc_report" in normalized and hasattr(normalized["preview_qc_report"], "model_dump"):
+        normalized["preview_qc_report"] = normalized["preview_qc_report"].model_dump(mode="json")
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     normalized_logs = _append_observability_summaries(normalized.get("logs", []), normalized)
     normalized["logs"] = normalized_logs
     normalized["debug"] = _merge_runtime_debug_info(debug_info, normalized, normalized_logs)
@@ -276,6 +321,11 @@ def _build_debug_info(task: Task, settings, task_log_path: Path | None) -> dict[
     task_dir = Path(task.task_dir)
     return {
         **settings.build_debug_summary(),
+<<<<<<< HEAD
+        "workflow_version": getattr(task, "workflow_version", settings.workflow_version),
+        "enable_overlay_fallback": "true" if getattr(task, "enable_overlay_fallback", settings.enable_overlay_fallback) else "false",
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
         "text_provider_impl": bindings.planning_provider_name,
         "vision_provider_impl": bindings.vision_provider_name,
         "image_provider_impl": bindings.image_provider_name,
@@ -300,6 +350,10 @@ def _merge_runtime_debug_info(debug_info: dict[str, object], state: dict, logs: 
     contract_summary = build_connected_contract_summary(state)
     merged.update(
         {
+<<<<<<< HEAD
+            "workflow_version": str(state.get("workflow_version") or merged.get("workflow_version", "-")),
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
             "cache_enabled": bool(state.get("cache_enabled", False)),
             "ignore_cache": bool(state.get("ignore_cache", False)),
             "cache_hit_nodes": _extract_cache_hit_nodes(logs),
@@ -309,9 +363,18 @@ def _merge_runtime_debug_info(debug_info: dict[str, object], state: dict, logs: 
             "render_reference_asset_ids": list(state.get("render_reference_asset_ids", []) or []),
             "image_provider_impl": str(state.get("render_image_provider_impl") or merged.get("image_provider_impl", "-")),
             "image_model_id": str(state.get("render_image_model_id") or merged.get("image_model_id", "-")),
+<<<<<<< HEAD
+            "needs_overlay_fallback": bool(state.get("needs_overlay_fallback", False)),
+            "overlay_fallback_candidates": list(state.get("overlay_fallback_candidates", []) or []),
             "connected_contract_files": contract_summary["connected_contract_files"],
             "style_architecture_connected": contract_summary["style_architecture_connected"],
             "shot_prompt_specs_available_for_render": contract_summary["shot_prompt_specs_available_for_render"],
+            "prompt_plan_v2_available_for_render": contract_summary["prompt_plan_v2_available_for_render"],
+=======
+            "connected_contract_files": contract_summary["connected_contract_files"],
+            "style_architecture_connected": contract_summary["style_architecture_connected"],
+            "shot_prompt_specs_available_for_render": contract_summary["shot_prompt_specs_available_for_render"],
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
             "product_lock_connected": contract_summary["product_lock_connected"],
         }
     )

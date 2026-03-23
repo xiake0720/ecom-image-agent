@@ -1,5 +1,97 @@
 # Provider 与模型路由说明
 
+<<<<<<< HEAD
+## 当前结论
+- v2 文本默认模型：`gpt-5-nano`
+- v2 图片默认模型：`gemini-3.1-flash-image-preview`
+- 旧 provider 继续保留，新增 alias 不覆盖旧逻辑
+
+## 入口
+- `src/core/config.py`
+- `src/providers/router.py`
+
+## 文本 provider
+
+### 支持的 alias
+- `dashscope`
+- `nvidia`
+- `ollama`
+- `zhipu`
+- `runapi_openai`
+- `mock`
+
+### `runapi_openai`
+- 文件：`src/providers/llm/runapi_openai_text.py`
+- 基于：
+  - `src/providers/llm/openai_compatible_text.py`
+- 接口：
+  - `POST {runapi_text_base_url}/chat/completions`
+- 默认：
+  - `runapi_text_base_url = https://runapi.co/v1`
+  - `runapi_text_model = gpt-5-nano`
+- API Key 优先级：
+  1. `ECOM_IMAGE_AGENT_RUNAPI_TEXT_API_KEY`
+  2. `ECOM_IMAGE_AGENT_RUNAPI_API_KEY`
+
+## 图片 provider
+
+### 支持的 alias
+- `dashscope`
+- `runapi`
+- `runapi_gemini31`
+- `mock`
+
+### `runapi_gemini31`
+- 文件：`src/providers/image/runapi_gemini31_image.py`
+- 模型固定：
+  - `gemini-3.1-flash-image-preview`
+- 接口：
+  - `POST /v1/models/{model}:generateContent`
+- 支持：
+  - `contents[].parts[].text`
+  - `contents[].parts[].inlineData`
+  - `generationConfig.responseModalities`
+  - `generationConfig.imageConfig.aspectRatio`
+  - `generationConfig.imageConfig.imageSize`
+- 支持 1 到 2 张参考图
+- 返回结果从 `inlineData` 解析 base64 图片并写盘
+
+说明：
+- `runapi_gemini31` 不再复用旧的全局图片模型默认值
+- 原因是旧 DashScope/Wanx 默认模型会污染 Gemini 3.1 路由
+
+## router 行为
+
+### 文本
+- `text_provider=runapi_openai`
+  - 返回 `RunApiOpenAITextProvider`
+
+### 图片
+- `image_provider=runapi_gemini31`
+  - 返回 `RunApiGemini31ImageProvider`
+- `image_provider=dashscope`
+  - 返回 `RoutedImageProvider`
+  - 根据参考图和配置在 `t2i / image_edit` 间分流
+
+## v2 渲染策略
+- `render_images` 在 v2 下优先消费 `prompt_plan_v2`
+- 直接图内出字优先
+- 单张失败时才写出 overlay fallback 标记
+
+## 关键配置项
+- `workflow_version`
+- `runapi_text_base_url`
+- `runapi_text_model`
+- `runapi_text_api_key`
+- `runapi_api_key`
+- `runapi_image_base_url`
+- `direct_text_on_image`
+- `enable_overlay_fallback`
+- `default_image_aspect_ratio`
+- `default_image_size`
+
+## 调试字段
+=======
 ## 1. 文档目的
 本文档说明当前仓库中：
 - 文本 provider 如何选择
@@ -129,6 +221,7 @@
 ## 7. 当前调试字段
 
 ### 页面 debug 和 state 字段
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 - `render_generation_mode`
 - `render_reference_asset_ids`
 - `render_image_provider_impl`
@@ -136,6 +229,8 @@
 - `render_selected_main_asset_id`
 - `render_selected_detail_asset_id`
 - `render_reference_selection_reason`
+<<<<<<< HEAD
+=======
 
 ### 关键日志
 - `[render] mode=... variant=... generation_mode=... refs=[...]`
@@ -188,3 +283,4 @@
   - `must_not_change`
 - 这些字段会先做程序层清洗，避免把 tuple、dict items 或对象直接字符串化到 prompt 里。
 - 因此调试日志中的 `keep_subject_rules / editable_regions` 现在应保持为干净字符串列表，不应再出现 `('must_preserve', [...])` 这类内容。
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c

@@ -9,7 +9,10 @@ from src.domain.asset import Asset, AssetType
 from src.domain.generation_result import GenerationResult
 from src.domain.image_prompt_plan import ImagePrompt, ImagePromptPlan
 from src.domain.layout_plan import LayoutPlan
+<<<<<<< HEAD
+=======
 from src.domain.shot_plan import ShotPlan, ShotSpec
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 from src.domain.task import Task
 from src.services.analysis.product_analyzer import build_mock_product_analysis
 from src.services.planning.layout_generator import build_mock_layout_plan
@@ -233,6 +236,8 @@ def test_shot_prompt_refiner_outputs_structured_eight_layer_specs() -> None:
     assert any("generation_mode_summary=t2i" in line for line in result["logs"])
 
 
+<<<<<<< HEAD
+=======
 def test_shot_prompt_refiner_adds_exclusive_rules_for_tin_can_detail_modes() -> None:
     task = _build_task("task-shot-spec-diff")
     analysis = build_mock_product_analysis([], task.product_name).model_copy(
@@ -330,6 +335,7 @@ def test_shot_prompt_refiner_adds_exclusive_rules_for_tin_can_detail_modes() -> 
     assert any("banned_fallback_pattern=full front hero package composition" in line for line in result["logs"])
 
 
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 def test_render_images_assembles_execution_prompt_from_shot_spec(tmp_path: Path) -> None:
     task = _build_task(f"task-render-spec-{tmp_path.name}")
     analysis = build_mock_product_analysis([], task.product_name)
@@ -387,6 +393,16 @@ def test_render_images_assembles_execution_prompt_from_shot_spec(tmp_path: Path)
     result = render_images(state, deps)
 
     captured_prompt = deps.image_generation_provider.captured_plan.prompts[0].edit_instruction
+<<<<<<< HEAD
+    assert "[Product Identity Lock]" in captured_prompt
+    assert "[Global Style Architecture]" in captured_prompt
+    assert "[Current Shot Direction]" in captured_prompt
+    assert "[Layout And Text Safe Zone]" in captured_prompt
+    assert "Keep original product identity unchanged." in captured_prompt
+    assert "Must preserve from shot spec:" in captured_prompt
+    assert "Preserve brand and package texts exactly:" in captured_prompt
+    assert "must not change" in captured_prompt
+=======
     assert captured_prompt.index("[Task Type And Current Shot Objective]") < captured_prompt.index("[Product Identity Lock]")
     assert captured_prompt.index("[Shot Differentiation Rules]") < captured_prompt.index("[Product Identity Lock]")
     assert captured_prompt.index("[Allowed Editable Regions]") < captured_prompt.index("[Product Identity Lock]")
@@ -403,12 +419,16 @@ def test_render_images_assembles_execution_prompt_from_shot_spec(tmp_path: Path)
     assert "Must preserve texts:" in captured_prompt
     assert "Must not change:" in captured_prompt
     assert "Editable region strategy:" in captured_prompt
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     assert "legacy prompt" not in captured_prompt
     assert "('" not in captured_prompt
     assert any("execution_source=image_edit_contract_mode" in line for line in result["logs"])
     assert any("reference_asset_ids=['asset-01', 'asset-02']" in line for line in result["logs"])
+<<<<<<< HEAD
+=======
     assert any("allowed_scene_change_level=" in line for line in result["logs"])
     assert any("editable_regions_final=" in line for line in result["logs"])
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     assert not any("keep_subject_rules=[\"('" in line or "keep_subject_rules=['(\"" in line for line in result["logs"])
 
 

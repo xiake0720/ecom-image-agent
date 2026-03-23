@@ -18,7 +18,10 @@ from __future__ import annotations
 import colorsys
 import math
 from pathlib import Path
+<<<<<<< HEAD
+=======
 import re
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 
 from PIL import Image, ImageFilter, ImageStat
 
@@ -32,6 +35,8 @@ from src.services.planning.tea_shot_planner import TEA_PHASE1_SHOTS, get_tea_tem
 
 
 TEA_CATEGORY_FAMILY = {"tea", "tea_gift_box", "tea_packaging"}
+<<<<<<< HEAD
+=======
 MIN_COMMERCIAL_FONT_SIZES = {
     "title": 40,
     "subtitle": 24,
@@ -42,6 +47,7 @@ SEVERE_MIN_FONT_SCALE = 0.8
 MIN_TEXT_REGION_RATIO_WARNING = 0.012
 MIN_TEXT_REGION_RATIO_FAILED = 0.006
 VISUAL_SIMILARITY_WARNING_THRESHOLD = 0.94
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 
 
 def build_file_exists_check(*, shot_id: str, path: Path, check_name: str) -> QCCheck:
@@ -236,6 +242,10 @@ def build_text_readability_check(
         text_render_report=text_render_report,
     )
     overflow_detected = _has_text_overflow(text_render_report=text_render_report)
+<<<<<<< HEAD
+    density_ratio = _resolve_text_density_ratio(text_render_report=text_render_report, copy_item=copy_item, layout_item=layout_item)
+    hierarchy_ok = _has_basic_text_hierarchy(text_render_report=text_render_report, layout_item=layout_item)
+=======
     min_font_size_hit = _has_min_font_size_hit(text_render_report=text_render_report)
     density_ratio = _resolve_text_density_ratio(text_render_report=text_render_report, copy_item=copy_item, layout_item=layout_item)
     hierarchy_ok = _has_basic_text_hierarchy(text_render_report=text_render_report, layout_item=layout_item)
@@ -247,6 +257,7 @@ def build_text_readability_check(
     )
     font_source = str((text_render_report or {}).get("font_source", "-"))
     fallback_used = bool((text_render_report or {}).get("fallback_used", False))
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 
     issues: list[str] = []
     if overflow_detected:
@@ -259,6 +270,10 @@ def build_text_readability_check(
         issues.append("text_too_dense")
     if not hierarchy_ok:
         issues.append("title_subtitle_hierarchy_weak")
+<<<<<<< HEAD
+
+    if overflow_detected:
+=======
     issues.extend(small_font_issues)
     if merged_text_region_ratio < MIN_TEXT_REGION_RATIO_FAILED:
         issues.append("merged_text_region_too_small")
@@ -266,6 +281,7 @@ def build_text_readability_check(
         issues.append("merged_text_region_small")
 
     if overflow_detected or severe_small_font or merged_text_region_ratio < MIN_TEXT_REGION_RATIO_FAILED:
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
         status = "failed"
     elif issues:
         status = "warning"
@@ -280,6 +296,10 @@ def build_text_readability_check(
             f"contrast_score={contrast_score:.3f},"
             f"complexity_score={complexity_score:.3f},"
             f"density_ratio={density_ratio:.3f},"
+<<<<<<< HEAD
+            f"hierarchy_ok={hierarchy_ok},"
+            f"overflow_detected={overflow_detected},"
+=======
             f"merged_text_region_ratio={merged_text_region_ratio:.4f},"
             f"region_ratio_source={region_ratio_source},"
             f"hierarchy_ok={hierarchy_ok},"
@@ -290,6 +310,7 @@ def build_text_readability_check(
             f"overflow_detected={overflow_detected},"
             f"font_source={font_source},"
             f"fallback_used={fallback_used},"
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
             f"issues={issues or ['none']}"
         ),
         related_shot_id=shot_id,
@@ -361,6 +382,8 @@ def build_shot_completeness_check(
     )
 
 
+<<<<<<< HEAD
+=======
 def build_visual_shot_diversity_check(
     *,
     generation_result: GenerationResult,
@@ -435,6 +458,7 @@ def build_visual_shot_diversity_check(
     )
 
 
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 def build_product_consistency_check(
     *,
     image: GeneratedImage,
@@ -479,15 +503,21 @@ def build_product_consistency_check(
     valid_ocr_texts = _filter_effective_texts(ocr_texts)
     target_brand_texts = _collect_brand_anchor_texts(product_analysis)
     valid_brand_targets = _filter_effective_texts(target_brand_texts)
+<<<<<<< HEAD
+    brand_text_matched = True
+=======
     text_anchor_source = str(getattr(product_analysis, "text_anchor_source", "") or "none")
     text_anchor_status = str(getattr(product_analysis, "text_anchor_status", "") or "unreadable")
     brand_text_matched = True
     text_anchor_consistency = "no_text_anchor"
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     if valid_brand_targets and valid_ocr_texts:
         normalized_ocr = " ".join(_normalize_text(item).lower() for item in valid_ocr_texts)
         brand_text_matched = any(_normalize_text(item).lower() in normalized_ocr for item in valid_brand_targets)
         if not brand_text_matched:
             warnings.append("brand_text_anchor_not_detected")
+<<<<<<< HEAD
+=======
             text_anchor_consistency = "mismatch"
         else:
             text_anchor_consistency = "matched"
@@ -495,6 +525,7 @@ def build_product_consistency_check(
         warnings.append("ocr_missing_for_text_anchor_compare")
         brand_text_matched = False
         text_anchor_consistency = "ocr_missing"
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 
     primary_color_value = getattr(product_analysis, "primary_color", "")
     primary_color_detected = _detect_primary_color_presence(image.image_path, primary_color_value)
@@ -504,6 +535,8 @@ def build_product_consistency_check(
     subject_signal_present = _detect_center_subject_signal(image.image_path)
     if not subject_signal_present:
         warnings.append("package_subject_signal_weak")
+<<<<<<< HEAD
+=======
     visual_consistency = _resolve_visual_consistency_label(
         expected_generation_mode=expected_generation_mode,
         actual_generation_mode=actual_generation_mode,
@@ -511,6 +544,7 @@ def build_product_consistency_check(
         primary_color_detected=primary_color_detected,
         subject_signal_present=subject_signal_present,
     )
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 
     # 商品一致性检查必须建立在“有证据”的前提上。
     # 如果品牌文字、OCR、主色或 image_edit 参考图这些基础证据缺失，就不能默认放行。
@@ -561,6 +595,10 @@ def build_product_consistency_check(
             f"prompt_generation_mode={prompt_generation_mode},"
             f"reference_asset_ids={reference_asset_ids},"
             f"brand_text_targets={valid_brand_targets or ['none']},"
+<<<<<<< HEAD
+            f"ocr_texts={valid_ocr_texts[:5] or ['none']},"
+            f"brand_text_matched={brand_text_matched},"
+=======
             f"text_anchor_source={text_anchor_source},"
             f"text_anchor_status={text_anchor_status},"
             f"text_anchor_count={len(valid_brand_targets)},"
@@ -568,6 +606,7 @@ def build_product_consistency_check(
             f"brand_text_matched={brand_text_matched},"
             f"text_anchor_consistency={text_anchor_consistency},"
             f"visual_consistency={visual_consistency},"
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
             f"primary_color={primary_color_value or '-'},"
             f"primary_color_detected={primary_color_detected},"
             f"subject_signal_present={subject_signal_present},"
@@ -581,6 +620,9 @@ def build_product_consistency_check(
     )
 
 
+<<<<<<< HEAD
+def build_shot_type_match_check(*, image: GeneratedImage, shot: ShotSpec | None, shot_prompt_spec=None) -> QCCheck:
+=======
 def build_shot_type_match_check(
     *,
     image: GeneratedImage,
@@ -588,6 +630,7 @@ def build_shot_type_match_check(
     shot_prompt_spec=None,
     hero_reference_image_path: str = "",
 ) -> QCCheck:
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     """检查当前 shot 的结构化描述是否与既定图位类型一致。
 
     这里先做 metadata-based 规则：
@@ -606,17 +649,24 @@ def build_shot_type_match_check(
         )
 
     combined_text = _build_shot_type_evidence_text(shot=shot, shot_prompt_spec=shot_prompt_spec)
+<<<<<<< HEAD
+    required_tokens, warnings = _evaluate_shot_type_rules(
+=======
     required_tokens, metadata_warnings = _evaluate_shot_type_rules(
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
         shot_type=shot.shot_type,
         combined_text=combined_text,
         shot_prompt_spec=shot_prompt_spec,
     )
+<<<<<<< HEAD
+=======
     visual_warnings, visual_metrics = _evaluate_shot_type_visual_rules(
         image_path=image.image_path,
         shot_type=shot.shot_type,
         hero_reference_image_path=hero_reference_image_path,
     )
     warnings = [*metadata_warnings, *visual_warnings]
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     status = "warning" if warnings else "passed"
     return QCCheck(
         shot_id=image.shot_id,
@@ -626,9 +676,12 @@ def build_shot_type_match_check(
         details=(
             f"shot_type={shot.shot_type},required_tokens={required_tokens},"
             f"evidence_summary={combined_text[:220]},warnings={warnings or ['none']}"
+<<<<<<< HEAD
+=======
             f",metadata_warnings={metadata_warnings or ['none']}"
             f",visual_warnings={visual_warnings or ['none']}"
             f",visual_metrics={visual_metrics}"
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
         ),
         related_shot_id=image.shot_id,
     )
@@ -810,6 +863,8 @@ def _has_text_overflow(*, text_render_report: dict | None) -> bool:
     return any(bool(block.get("overflow_detected", False)) for block in text_render_report.get("blocks", []))
 
 
+<<<<<<< HEAD
+=======
 def _has_min_font_size_hit(*, text_render_report: dict | None) -> bool:
     """判断是否有文本块已经压到了最小可读字号。"""
     if not text_render_report:
@@ -817,6 +872,7 @@ def _has_min_font_size_hit(*, text_render_report: dict | None) -> bool:
     return any(bool(block.get("min_font_size_hit", False)) for block in text_render_report.get("blocks", []))
 
 
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 def _resolve_text_density_ratio(*, text_render_report: dict | None, copy_item: CopyItem, layout_item: LayoutItem) -> float:
     if text_render_report and text_render_report.get("blocks"):
         return max(float(block.get("density_ratio", 0.0)) for block in text_render_report["blocks"])
@@ -837,6 +893,8 @@ def _has_basic_text_hierarchy(*, text_render_report: dict | None, layout_item: L
     return True
 
 
+<<<<<<< HEAD
+=======
 def _resolve_used_font_sizes(*, text_render_report: dict | None, layout_item: LayoutItem) -> tuple[dict[str, int], str]:
     """优先读取真实 used_font_size；缺失时回退到 layout 里的规划字号。"""
     if text_render_report and text_render_report.get("blocks"):
@@ -873,6 +931,7 @@ def _resolve_merged_text_region_ratio(*, text_render_report: dict | None, layout
     return region_area / canvas_area, source
 
 
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 def _is_tea_phase1(*, product_analysis: ProductAnalysis | None, shot_plan: ShotPlan) -> bool:
     category = str(getattr(product_analysis, "category", "") or "").strip().lower()
     shot_pairs = [(shot.shot_id, shot.shot_type) for shot in shot_plan.shots]
@@ -883,6 +942,14 @@ def _is_tea_phase1(*, product_analysis: ProductAnalysis | None, shot_plan: ShotP
 def _collect_brand_anchor_texts(product_analysis: ProductAnalysis | None) -> list[str]:
     if product_analysis is None:
         return []
+<<<<<<< HEAD
+    values = [
+        *list(getattr(product_analysis, "must_preserve_texts", []) or []),
+        *list(getattr(product_analysis, "locked_elements", []) or []),
+    ]
+    anchors = [value for value in values if len(value.strip()) <= 16][:3]
+    return anchors
+=======
     provider_anchors = [
         value
         for value in list(getattr(product_analysis, "must_preserve_texts", []) or [])
@@ -1123,6 +1190,7 @@ def _calculate_signature_similarity(left: dict[str, float | list[float] | list[i
     )
     texture_similarity = 1.0 - min(1.0, abs(float(left["texture_score_center"]) - float(right["texture_score_center"])))
     return (hash_similarity * 0.55) + (color_similarity * 0.35) + (texture_similarity * 0.10)
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 
 
 def _detect_primary_color_presence(image_path: str, primary_color: str) -> bool | None:
@@ -1248,6 +1316,8 @@ def _evaluate_shot_type_rules(*, shot_type: str, combined_text: str, shot_prompt
         required_tokens = ["tea soup", "cup", "brewed"]
         if not any(token in combined_text for token in ("tea soup", "brewed", "teacup", "cup", "gaiwan", "vessel")):
             warnings.append("tea_soup_experience_missing_brewed_tea_anchor")
+<<<<<<< HEAD
+=======
     elif shot_type == "label_or_material_detail":
         required_tokens = ["label", "material", "detail"]
         if not any(token in combined_text for token in ("label", "material", "foil", "texture", "lid", "craft", "detail")):
@@ -1260,6 +1330,7 @@ def _evaluate_shot_type_rules(*, shot_type: str, combined_text: str, shot_prompt
         required_tokens = ["package", "brewing context", "props"]
         if not any(token in combined_text for token in ("package", "tin", "pouch", "brewing", "cup", "kettle", "context")):
             warnings.append("package_in_brewing_context_missing_brewing_anchor")
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     else:
         required_tokens = [shot_type]
     return required_tokens, warnings

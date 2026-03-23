@@ -3,9 +3,17 @@ from __future__ import annotations
 from src.core.config import Settings
 from src.providers.image.gemini_image import GeminiImageProvider
 from src.providers.image.routed_image import RoutedImageProvider
+<<<<<<< HEAD
+from src.providers.image.runapi_gemini31_image import RunApiGemini31ImageProvider
 from src.providers.llm.dashscope_text import DashScopeTextProvider
 from src.providers.llm.gemini_text import GeminiTextProvider
 from src.providers.llm.ollama_text import OllamaTextProvider
+from src.providers.llm.runapi_openai_text import RunApiOpenAITextProvider
+=======
+from src.providers.llm.dashscope_text import DashScopeTextProvider
+from src.providers.llm.gemini_text import GeminiTextProvider
+from src.providers.llm.ollama_text import OllamaTextProvider
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 from src.providers.llm.zhipu_text import ZhipuTextProvider
 from src.providers.router import build_capability_bindings
 from src.providers.vision.dashscope_vision import DashScopeVisionProvider
@@ -24,6 +32,13 @@ def _clear_provider_envs(monkeypatch) -> None:
         "ECOM_IMAGE_AGENT_IMAGE_PROVIDER_MODE",
         "ECOM_IMAGE_AGENT_TEXT_MODEL",
         "ECOM_IMAGE_AGENT_TEXT_MODEL_ID",
+<<<<<<< HEAD
+        "ECOM_IMAGE_AGENT_RUNAPI_TEXT_MODEL",
+        "ECOM_IMAGE_AGENT_RUNAPI_TEXT_BASE_URL",
+        "ECOM_IMAGE_AGENT_RUNAPI_TEXT_API_KEY",
+        "ECOM_IMAGE_AGENT_RUNAPI_API_KEY",
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
         "ECOM_IMAGE_AGENT_VISION_MODEL",
         "ECOM_IMAGE_AGENT_VISION_MODEL_ID",
         "ECOM_IMAGE_AGENT_IMAGE_MODEL",
@@ -104,6 +119,31 @@ def test_explicit_ollama_override_still_supported(monkeypatch) -> None:
     assert isinstance(build_capability_bindings(settings).planning_provider, OllamaTextProvider)
 
 
+<<<<<<< HEAD
+def test_explicit_runapi_openai_text_provider_is_supported(monkeypatch) -> None:
+    _clear_provider_envs(monkeypatch)
+    settings = Settings(text_provider="runapi_openai")
+    bindings = build_capability_bindings(settings)
+
+    assert settings.resolve_text_provider_route().alias == "runapi_openai"
+    assert settings.resolve_text_model_selection().provider_key == "runapi_openai"
+    assert settings.resolve_text_model_selection().model_id == "gpt-5-nano"
+    assert isinstance(bindings.planning_provider, RunApiOpenAITextProvider)
+
+
+def test_explicit_runapi_gemini31_image_provider_is_supported(monkeypatch) -> None:
+    _clear_provider_envs(monkeypatch)
+    settings = Settings(image_provider="runapi_gemini31")
+    bindings = build_capability_bindings(settings)
+
+    assert settings.resolve_image_provider_route().alias == "runapi_gemini31"
+    assert settings.resolve_image_model_selection().provider_key == "runapi_gemini31"
+    assert settings.resolve_image_model_selection().model_id == "gemini-3.1-flash-image-preview"
+    assert isinstance(bindings.image_generation_provider, RunApiGemini31ImageProvider)
+
+
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 def test_explicit_provider_override_wins_over_budget_mode(monkeypatch) -> None:
     _clear_provider_envs(monkeypatch)
     settings = Settings(

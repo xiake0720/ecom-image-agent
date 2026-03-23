@@ -1,5 +1,62 @@
 # QC 策略说明
 
+<<<<<<< HEAD
+## 原则
+- QC 负责暴露工程错误和最低业务风险
+- 不做重型 AI 审美评分
+- v1 / v2 共用 `QCReport`
+
+## v1
+- 保持原有检查：
+  - 目录结构
+  - 出图尺寸
+  - 文字区域风险
+  - OCR 可读性
+  - 产品一致性
+
+## v2 最小闭环
+
+### 核心检查
+- `shot_completeness_check`
+  - 目标集合来自 `prompt_plan_v2.shots`
+- `text_readability_check`
+  - OCR 与 `title_copy / subtitle_copy` 做最小匹配
+- `product_consistency_check`
+  - 复用现有轻量一致性检查
+- 结构检查：
+  - `task.json`
+  - `director_output.json`
+  - `prompt_plan_v2.json`
+
+### overlay fallback 触发
+- 渲染阶段单张图直出失败
+- 或 QC 阶段发现：
+  - OCR 没有检测到应有文案
+  - OCR 文案与预期标题/副标题明显不匹配
+
+### v2 关键字段
+- `needs_overlay_fallback`
+- `overlay_fallback_candidates`
+
+### `overlay_fallback_candidates` 最小字段
+- `shot_id`
+- `shot_role`
+- `generated_image_path`
+- `title_copy`
+- `subtitle_copy`
+- `layout_hint`
+- `reason`
+- `fallback_stage`
+
+## 状态语义
+- `passed`
+- `warning`
+- `failed`
+
+汇总规则：
+- 存在 `failed` 时，`passed = false`
+- 存在 `warning` 或 `failed` 时，`review_required = true`
+=======
 ## 1. 文档目的
 当前 QC 目标不是做 AI 审美打分，而是：
 - 兜住明显工程错误
@@ -308,3 +365,4 @@ QC 会综合以下信息：
   - `similar_pairs`
   - `hero_like_shots`
   - `hero_shot_id`
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c

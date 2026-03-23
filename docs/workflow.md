@@ -1,8 +1,20 @@
+<<<<<<< HEAD
+# Workflow 说明
+
+## 当前状态
+- 项目已支持 `v1 / v2` 双流程。
+- `v1` 保留旧链路和旧 schema。
+- `v2` 围绕“天猫茶叶电商图 8 张、图内文案、可 overlay fallback”收口。
+- `build_workflow()` 会根据 `state.workflow_version` 或 `settings.workflow_version` 分流。
+
+## v1 链路
+=======
 # 工作流说明
 
 ## 当前主链路
 当前 workflow 使用 LangGraph 固定编排，节点顺序为：
 
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 1. `ingest_assets`
 2. `analyze_product`
 3. `style_director`
@@ -16,6 +28,142 @@
 11. `run_qc`
 12. `finalize`
 
+<<<<<<< HEAD
+## v2 链路
+1. `ingest_assets`
+2. `director_v2`
+3. `prompt_refine_v2`
+4. `render_images`
+5. `overlay_text`
+6. `run_qc`
+7. `finalize`
+
+说明：
+- v2 中的 `overlay_text` 是 fallback 节点，不是默认全量贴字节点。
+- v2 优先尝试图片模型直接生成图内文案。
+
+## v2 节点职责
+
+### `director_v2`
+- 输入：
+  - `task`
+  - `assets`
+  - 可选 `product_analysis`
+- 输出：
+  - `state.director_output`
+  - `director_output.json`
+- 作用：
+  - 生成 8 张图的导演级图组规划。
+
+### `prompt_refine_v2`
+- 输入：
+  - `director_output`
+- 输出：
+  - `state.prompt_plan_v2`
+  - `prompt_plan_v2.json`
+- 作用：
+  - 生成每张图最终可执行的 `render_prompt`
+  - 同时产出 `title_copy / subtitle_copy / layout_hint / aspect_ratio / image_size`
+
+### `render_images`
+- v1：
+  - 读取 `image_prompt_plan`
+- v2：
+  - 读取 `prompt_plan_v2`
+  - 优先图内直出文字
+  - 单张图失败时写出：
+    - `needs_overlay_fallback`
+    - `overlay_fallback_candidates`
+  - 结果写回：
+    - `generation_result`
+    - `generation_result_v2`
+
+### `overlay_text`
+- v1：
+  - 保持原有全量 Pillow 后贴字
+- v2：
+  - 仅处理 `overlay_fallback_candidates`
+  - 非 fallback 图片直接透传到最终结果目录
+  - 写出：
+    - `text_render_reports`
+    - `final_text_regions.json`
+    - `preview_text_regions.json`
+
+### `run_qc`
+- v1：
+  - 保持原有工程检查和文字可读性检查
+- v2：
+  - 以 `prompt_plan_v2` 为目标图位集合
+  - OCR 对比 `title_copy / subtitle_copy`
+  - 复用现有产品一致性检查
+  - 必要时补充 `overlay_fallback_candidates`
+  - 结果写回：
+    - `qc_report`
+    - `qc_report_v2`
+
+## 关键 state 字段
+
+### v1 保留字段
+- `style_architecture`
+- `shot_plan`
+- `copy_plan`
+- `layout_plan`
+- `shot_prompt_specs`
+- `image_prompt_plan`
+- `generation_result`
+- `qc_report`
+
+### v2 新增字段
+- `workflow_version`
+- `director_output`
+- `prompt_plan_v2`
+- `generation_result_v2`
+- `qc_report_v2`
+- `direct_text_on_image`
+- `enable_overlay_fallback`
+- `needs_overlay_fallback`
+- `overlay_fallback_candidates`
+- `text_render_reports`
+- `preview_qc_report`
+
+## 任务和产物
+
+### `task.json`
+- 新增：
+  - `workflow_version`
+  - `enable_overlay_fallback`
+
+### v2 新增产物
+- `director_output.json`
+- `prompt_plan_v2.json`
+
+### 通用产物
+- `generated/` 或 `generated_preview/`
+- `final/` 或 `final_preview/`
+- `qc_report.json` 或 `qc_report_preview.json`
+- `final_text_regions.json` 或 `preview_text_regions.json`
+- `exports/`
+
+## UI 默认项
+- `workflow_version = v2`
+- `platform = tmall`
+- `shot_count = 8`
+- `enable_overlay_fallback = true`
+
+## 调试字段
+- `workflow_version`
+- `render_generation_mode`
+- `render_reference_asset_ids`
+- `needs_overlay_fallback`
+- `overlay_fallback_candidates`
+- `prompt_plan_v2_available_for_render`
+
+## 本地验证
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/unit -q
+.\.venv\Scripts\python.exe -m compileall src
+```
+=======
 说明：
 - `style_director` 负责整组视觉风格架构，不负责单张 prompt。
 - `plan_shots` 负责固定五图模板和图位细节。
@@ -574,3 +722,4 @@
 - `product_consistency_summary`
 - `shot_type_match_summary`
 - `visual_shot_diversity_summary`
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c

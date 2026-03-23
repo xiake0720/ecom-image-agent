@@ -17,7 +17,11 @@
 
 from __future__ import annotations
 
+<<<<<<< HEAD
+from src.domain.asset import Asset
+=======
 from src.domain.asset import Asset, AssetType
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 from src.domain.product_analysis import (
     MaterialGuess,
     PackagingStructure,
@@ -31,7 +35,10 @@ from src.services.planning.tea_shot_planner import resolve_tea_package_template_
 def build_mock_product_analysis(assets: list[Asset], product_name: str) -> ProductAnalysis:
     """构造本地 mock 的 SKU 级商品锁定分析结果。"""
     asset_ids = [asset.asset_id for asset in assets]
+<<<<<<< HEAD
+=======
     has_detail_asset = any(asset.asset_type == AssetType.DETAIL for asset in assets)
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     product_name_lower = str(product_name or "").lower()
     # 这里先用轻量关键词做包型判断，目标不是精准 CV 识别，而是给 shot planning 足够稳定的模板输入。
     if any(token in product_name_lower for token in ("tin", "can", "罐", "金属罐", "铁罐")):
@@ -100,12 +107,17 @@ def build_mock_product_analysis(assets: list[Asset], product_name: str) -> Produ
         source_asset_ids=asset_ids,
         locked_elements=["package silhouette", "front label layout", "brand mark placement"],
         must_preserve_texts=[product_name] if product_name else [],
+<<<<<<< HEAD
+        editable_elements=["background", "props", "lighting", "camera crop"],
+        package_type=package_type,
+=======
         text_anchor_status="readable" if product_name else "unreadable",
         text_anchor_source="fallback" if product_name else "none",
         text_anchor_notes=[] if product_name else ["mock analysis could not infer stable package text anchors"],
         editable_elements=["background", "props", "lighting", "camera crop"],
         package_type=package_type,
         asset_completeness_mode="packshot_plus_detail" if has_detail_asset else "packshot_only",
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
         primary_color="red",
         material=material,
         label_structure=label_structure,

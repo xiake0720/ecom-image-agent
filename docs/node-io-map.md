@@ -371,7 +371,10 @@ mock / real 切换点：
 - 用 `save_preview()` 额外写缩略预览图
 - 把 `GenerationResult.images[*].image_path` 改写为 `final/*.png`
 - `status` 改为 `finalized`
+<<<<<<< HEAD
+=======
 - 同时把字体来源、fallback 状态、`requested_font_size / used_font_size / min_font_size_hit / overflow_detected` 写回 `text_render_reports`
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 
 mock / real 切换点：
 
@@ -522,6 +525,11 @@ workflow 成功返回后，`_run_task()` 还会额外生成：
 
 - `previews/text_render_base.png`
 - `previews/text_render_test.png`
+<<<<<<< HEAD
+
+这两个文件不属于 10 个节点的标准产物，而是首页为调试后贴字链路额外补的一组样图。
+=======
 - `previews/text_render_test.meta.json`
 
 这些文件不属于 10 个节点的标准产物，而是首页为调试后贴字链路额外补的一组样图与 metadata。
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c

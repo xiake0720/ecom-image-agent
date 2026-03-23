@@ -1,5 +1,37 @@
 # ecom-image-agent
 
+<<<<<<< HEAD
+面向茶叶电商图的本地 Streamlit + LangGraph 项目。
+
+## 当前状态
+- 唯一 UI 入口：`streamlit_app.py`
+- 当前已支持 `v1 / v2` 双流程
+- `v1` 保留旧链路
+- `v2` 基于 `gpt-5-nano + gemini-3.1-flash-image-preview`
+- 项目目标仍然是本地可运行、链路清晰、结构化落盘、便于回放与排查
+
+## 快速启动
+```powershell
+python -m venv .venv
+.\.venv\Scripts\activate
+python -m pip install -U pip
+python -m pip install -e .[dev]
+python -m streamlit run streamlit_app.py
+```
+
+## 本地验证
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests/unit -q
+.\.venv\Scripts\python.exe -m compileall src
+```
+
+## 关键文档
+- `docs/workflow.md`
+- `docs/providers.md`
+- `docs/qc-policy.md`
+- `docs/contracts/director_output.md`
+- `docs/contracts/prompt_plan_v2.md`
+=======
 这是一个面向茶叶品类的本地 Streamlit 电商图片生成工具。
 
 当前仓库处于第二阶段“真实 provider 接线阶段”，但仍然以本地可运行、结构化 JSON 落盘、链路清晰、便于检查与回放为优先目标，不应描述为生产可用系统。
@@ -260,3 +292,4 @@ ECOM_IMAGE_AGENT_RUNAPI_IMAGE_MODEL=gemini-2.5-flash-image
 - rembg 仍未接入真实运行时
 - 当前没有多模型 fallback
 - 当前没有数据库、鉴权、消息队列、云部署和前后端分离
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c

@@ -42,6 +42,13 @@ def render_result_view(task_state: dict | None) -> None:
     st.subheader("调试信息")
     _render_debug_panel(debug_info, logs)
 
+<<<<<<< HEAD
+    if task_state.get("director_output") or task_state.get("prompt_plan_v2"):
+        st.subheader("v2 调试产物")
+        _render_v2_debug_artifacts(task_state)
+
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     preview_paths, final_paths = resolve_result_image_paths(task_state)
 
     st.subheader("预览结果")
@@ -126,7 +133,11 @@ def _render_debug_panel(debug_info: dict, logs: list[str]) -> None:
     summary_col1, summary_col2, summary_col3, summary_col4 = st.columns(4)
     summary_col1.metric("Task ID", str(debug_info.get("task_id", "-")))
     summary_col2.metric("Budget Mode", str(debug_info.get("budget_mode", "-")))
+<<<<<<< HEAD
+    summary_col3.metric("Workflow", str(debug_info.get("workflow_version", "-")))
+=======
     summary_col3.metric("Prompt Build", str(debug_info.get("prompt_build_mode", "-")))
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     summary_col4.metric("Render Mode", str(debug_info.get("render_mode", "-")))
 
     debug_cols = st.columns(4)
@@ -147,7 +158,14 @@ def _render_debug_panel(debug_info: dict, logs: list[str]) -> None:
                 f"connected_contract_files: {debug_info.get('connected_contract_files', [])}",
                 f"style_architecture_connected: {debug_info.get('style_architecture_connected', False)}",
                 f"shot_prompt_specs_available_for_render: {debug_info.get('shot_prompt_specs_available_for_render', False)}",
+<<<<<<< HEAD
+                f"prompt_plan_v2_available_for_render: {debug_info.get('prompt_plan_v2_available_for_render', False)}",
                 f"product_lock_connected: {debug_info.get('product_lock_connected', False)}",
+                f"needs_overlay_fallback: {debug_info.get('needs_overlay_fallback', False)}",
+                f"overlay_fallback_candidates: {debug_info.get('overlay_fallback_candidates', [])}",
+=======
+                f"product_lock_connected: {debug_info.get('product_lock_connected', False)}",
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
             ]
         ),
         language="text",
@@ -166,3 +184,30 @@ def _render_debug_panel(debug_info: dict, logs: list[str]) -> None:
     if st.checkbox("显示最近 8 条执行日志", value=False, key="debug_show_recent_logs"):
         recent_logs = logs[-8:] if logs else []
         st.code("\n".join(recent_logs) if recent_logs else "暂无日志", language="text")
+<<<<<<< HEAD
+
+
+def _render_v2_debug_artifacts(task_state: dict) -> None:
+    """展示 v2 director_output 和 prompt_plan_v2 的最小调试摘要。"""
+    director_output = task_state.get("director_output") or {}
+    prompt_plan_v2 = task_state.get("prompt_plan_v2") or {}
+    if director_output:
+        st.code(
+            "\n".join(
+                [
+                    f"product_summary: {director_output.get('product_summary', '-')}",
+                    f"platform: {director_output.get('platform', '-')}",
+                    f"shot_count: {len(director_output.get('shots', []) or [])}",
+                ]
+            ),
+            language="text",
+        )
+    if prompt_plan_v2:
+        preview_lines = []
+        for shot in (prompt_plan_v2.get("shots", []) or [])[:4]:
+            preview_lines.append(
+                f"{shot.get('shot_id', '-')} | {shot.get('shot_role', '-')} | {shot.get('title_copy', '-')} | {shot.get('subtitle_copy', '-')}"
+            )
+        st.code("\n".join(preview_lines) if preview_lines else "暂无 prompt_plan_v2", language="text")
+=======
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c

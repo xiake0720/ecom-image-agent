@@ -83,6 +83,11 @@ def test_reference_selector_picks_main_before_detail_and_other() -> None:
 
     assert selection.selected_main_asset_id == "asset-main"
     assert selection.selected_detail_asset_id == "asset-detail"
+<<<<<<< HEAD
+    assert selection.selected_asset_ids == ["asset-main", "asset-detail"]
+
+
+=======
     assert selection.asset_completeness_mode == "packshot_plus_detail"
     assert selection.selected_asset_ids == ["asset-main", "asset-detail"]
 
@@ -100,6 +105,7 @@ def test_reference_selector_marks_packshot_only_when_detail_asset_missing() -> N
     assert selection.asset_completeness_mode == "packshot_only"
 
 
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 def test_analyze_and_render_share_consistent_selection_strategy(tmp_path: Path) -> None:
     task = Task(
         task_id="task-reference-consistency",
@@ -155,8 +161,11 @@ def test_analyze_and_render_share_consistent_selection_strategy(tmp_path: Path) 
 
     assert analyze_result["analyze_selected_main_asset_id"] == "asset-main"
     assert analyze_result["analyze_selected_detail_asset_id"] == "asset-detail"
+<<<<<<< HEAD
+=======
     assert analyze_result["analyze_asset_completeness_mode"] == "packshot_plus_detail"
     assert analyze_result["product_analysis"].asset_completeness_mode == "packshot_plus_detail"
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     assert analyze_result["analyze_reference_asset_ids"] == ["asset-main", "asset-detail"]
     assert render_result["render_selected_main_asset_id"] == "asset-main"
     assert render_result["render_selected_detail_asset_id"] == "asset-detail"

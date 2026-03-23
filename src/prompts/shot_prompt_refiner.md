@@ -28,6 +28,15 @@ Hard constraints:
 - Inherit the unified style architecture as the master rule set.
 - High-saturation products must use low-saturation backgrounds.
 - Inherit unified lighting direction, lens language, and prop system from `style_architecture`.
+<<<<<<< HEAD
+
+Shot-type rules:
+- `hero_brand`: text-safe zone must prefer top_left, top_right, or top.
+- `carry_action`: text must go on the opposite side of the action direction.
+- `open_box_structure`: text-safe zone must prefer top or top_right.
+- `dry_leaf_detail`: text must stay in a clean background area, not on top of leaf texture.
+- `tea_soup_experience`: text-safe zone must prefer the upper area.
+=======
 - Prefer imperative execution rules over descriptive prose.
 - Each shot must include explicit negative constraints that prevent fallback into the hero packshot.
 - Distinguish primary subject vs secondary subject clearly; they must not compete for the same visual priority unless the shot spec explicitly allows it.
@@ -46,12 +55,16 @@ Shot-type rules:
 - `lifestyle_or_brewing_context`: brewing props or scene anchors are mandatory; do not output an isolated studio packshot with token shadows.
 - `package_in_brewing_context`: package may stay readable, but brewing context must still be explicit and cannot collapse back to hero framing.
 - `package_with_leaf_hint`: package remains main subject, but a visible leaf cue is mandatory so the frame does not degrade into isolated hero packshot.
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 
 `render_constraints` must include:
 - generation_mode
 - reference_image_priority
 - consistency_strength
+<<<<<<< HEAD
+=======
 - product_lock_level
 - editable_region_strategy
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 - allow_human_presence
 - allow_hand_only

@@ -16,9 +16,12 @@
   - state：
     - `product_analysis`
     - `product_lock`，作为同一份分析结果的兼容别名
+<<<<<<< HEAD
+=======
     - `analyze_text_anchor_source`
     - `analyze_text_anchor_count`
     - `analyze_extracted_text_anchors`
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 - `style_architecture`
   - 落盘：`style_architecture.json`
   - state：`style_architecture`
@@ -33,6 +36,16 @@
 - 这四类文件不是仅供人工排查的旁路产物，而是后续节点可直接读取的正式 contract。
 - `render_images` 当前阶段仍保留旧 prompt plan 执行链路，但已经要求 `shot_prompt_specs` 在 state 中可读。
 
+<<<<<<< HEAD
+## 茶叶类固定五图
+当商品属于茶叶类族群时，`plan_shots` 必须固定输出：
+
+1. `shot_01: hero_brand`
+2. `shot_02: carry_action`
+3. `shot_03: open_box_structure`
+4. `shot_04: dry_leaf_detail`
+5. `shot_05: tea_soup_experience`
+=======
 ## `product_analysis.json`
 `analyze_product` 当前除视觉结构字段外，还必须尽量提取稳定包装文字锚点。
 
@@ -83,6 +96,7 @@
 - `text_safe_zone_preference`
 
 不能新增、删除或替换固定五图 slot。
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 
 模型只能补这些图位细节字段：
 - `goal`
@@ -126,6 +140,8 @@
 - `text_strategy`
 - `global_negative_rules`
 
+<<<<<<< HEAD
+=======
 ## `copy_plan.json`
 `generate_copy` 会基于：
 - `task`
@@ -157,6 +173,7 @@
 - 品牌锚点不合法时，不允许把原文案直接透传到 `overlay_text`
 - mock 与 fallback 也必须输出适合 1440x1440 中文贴图的短版文案
 
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 ## `shot_prompt_specs.json`
 `shot_prompt_refiner` 会基于：
 - `product_analysis / product_lock`
@@ -202,32 +219,62 @@
 - 茶汤图：文字优先上方留白
 - 高饱和产品必须配低饱和背景
 - 全组继承 `style_architecture` 的统一光线、镜头和道具体系
+<<<<<<< HEAD
+=======
 - 每个 `shot_type` 都会先映射到 `ShotExecutionProfile`，再由它生成 `subject / composition / background / lighting / negative / render_constraints`。
 - 茶叶 `tea_tin_can` 模板下的 `package_detail / dry_leaf_detail / tea_soup_experience / lifestyle_or_brewing_context / package_in_brewing_context` 都有显式排他规则，避免退化成 hero packshot。
 - `hero_brand` 强制 full package hero subject；`package_detail` 强制近距离细节图；`dry_leaf_detail` 强制茶干前景第一主体；`tea_soup_experience` 强制茶汤与杯具第一主体；context 类图强制出现冲泡道具或场景锚点。
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 
 ## `render_constraints`
 当前至少包含：
 - `generation_mode`
 - `reference_image_priority`
 - `consistency_strength`
+<<<<<<< HEAD
+=======
 - `product_lock_level`
 - `editable_region_strategy`
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 - `allow_human_presence`
 - `allow_hand_only`
 
 说明：
 - 它表达的是 spec 设计期的目标渲染策略。
 - 它不直接替代 render 阶段的真实 provider 路由。
+<<<<<<< HEAD
+=======
 - `product_lock_level` 当前分为：
   - `strong_product_lock`
   - `medium_product_lock`
   - `anchor_only_product_lock`
 - `editable_region_strategy` 用来约束 provider 在 image_edit 模式下更偏向背景扩展、细节裁切、茶干前景、茶汤前景或场景构建哪类可编辑区域。
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 
 ## image_edit 执行 contract 使用说明
 当 `render_images` 判定当前 shot 走 `image_edit` 时，执行 prompt 当前按以下优先级组装：
 
+<<<<<<< HEAD
+1. `product_lock / product_analysis`
+2. `style_architecture`
+3. 当前 shot 的 `shot_prompt_spec`
+4. `layout_constraints` 中的 `preferred_text_safe_zone`
+
+其中 product lock 当前必须可被程序明确展开为：
+- `must_preserve`
+- `must_preserve_texts`
+- `editable_regions`
+- `must_not_change`
+
+组装结构固定为：
+- `Product Identity Lock`
+- `Global Style Architecture`
+- `Current Shot Direction`
+- `Layout And Text Safe Zone`
+- `Render Constraints`
+- `Negative Rules`
+
+=======
 1. 当前 shot 的差异化目标
    - `shot_type / goal / allowed_scene_change_level`
 2. 当前 shot 的执行分镜规则
@@ -261,6 +308,7 @@
 - `forbidden_regression_pattern`
 - `editable_regions_final`
 
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 如果缺少任一关键 contract，才回退到旧链路：
 - 优先 `edit_instruction`
 - 否则回退 `prompt`
@@ -289,15 +337,21 @@
   - `final` 必须完整 5 张
 - `product_consistency_check`
   - 至少检查 `image_edit` 是否真的带参考图，以及品牌/主色/主体锚点是否还在
+<<<<<<< HEAD
+=======
   - 当前优先消费 `product_analysis.must_preserve_texts`
   - 会在 `details` 中显式写出 `text_anchor_source / text_anchor_status / text_anchor_count`
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 - `shot_type_match_check`
   - 至少检查固定图位是否仍满足对应的最小语义约束
 ## 茶叶包装模板族
 - 茶叶 Phase 1 现在不再把所有商品都强制视为礼盒。
 - `product_analysis` 新增：
   - `package_template_family`
+<<<<<<< HEAD
+=======
   - `asset_completeness_mode`
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 - 当前至少支持：
   - `tea_gift_box`
   - `tea_tin_can`
@@ -313,12 +367,21 @@
 
 ### `tea_tin_can`
 - 当前用于圆柱金属罐、单罐装等更适合“包型细节 + 冲泡场景”的商品。
+<<<<<<< HEAD
+- 五图为：
+=======
 - `packshot_plus_detail` 五图为：
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
   1. `shot_01: hero_brand`
   2. `shot_02: package_detail`
   3. `shot_03: dry_leaf_detail`
   4. `shot_04: tea_soup_experience`
   5. `shot_05: lifestyle_or_brewing_context`
+<<<<<<< HEAD
+
+### `tea_pouch`
+- 当前沿用轻量袋装模板，五图结构与金属罐类似，但围绕袋装结构描述。
+=======
 - `packshot_only` 五图为：
   1. `shot_01: hero_brand`
   2. `shot_02: package_detail`
@@ -379,3 +442,4 @@
 - `visual_shot_diversity_check`
 - `text_safe_zone_check`
 - `text_readability_check`
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c

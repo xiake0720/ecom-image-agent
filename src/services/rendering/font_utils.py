@@ -1,3 +1,22 @@
+<<<<<<< HEAD
+from __future__ import annotations
+
+from functools import lru_cache
+from pathlib import Path
+
+from PIL import ImageFont
+
+
+@lru_cache(maxsize=32)
+def load_font(font_path: Path, font_size: int) -> ImageFont.ImageFont:
+    if font_path.exists():
+        return ImageFont.truetype(str(font_path), font_size)
+    try:
+        return ImageFont.truetype("DejaVuSans.ttf", font_size)
+    except OSError:
+        pass
+    return ImageFont.load_default()
+=======
 """中文字体解析与加载工具。
 
 文件位置：
@@ -172,3 +191,4 @@ def _normalize_path_key(path: Path) -> str:
         return str(path.resolve()).lower()
     except OSError:
         return str(path).lower()
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c

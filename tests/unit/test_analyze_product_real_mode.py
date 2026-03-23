@@ -56,6 +56,8 @@ class FakeVisionProvider:
         )
 
 
+<<<<<<< HEAD
+=======
 class EmptyTextAnchorVisionProvider:
     def __init__(self) -> None:
         self.called = False
@@ -94,6 +96,7 @@ class EmptyTextAnchorVisionProvider:
         )
 
 
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 class DummyRenderer:
     pass
 
@@ -148,14 +151,22 @@ def test_analyze_product_real_mode_uses_selected_reference_assets_only(tmp_path:
     assert vision_provider.called is True
     assert vision_provider.asset_ids == ["asset-01", "asset-02"]
     assert result["product_analysis"].source_asset_ids == ["asset-01", "asset-02"]
+<<<<<<< HEAD
+    assert result["analyze_selected_main_asset_id"] == "asset-01"
+    assert result["analyze_selected_detail_asset_id"] == "asset-02"
+=======
     assert result["product_analysis"].asset_completeness_mode == "packshot_plus_detail"
     assert result["analyze_selected_main_asset_id"] == "asset-01"
     assert result["analyze_selected_detail_asset_id"] == "asset-02"
     assert result["analyze_asset_completeness_mode"] == "packshot_plus_detail"
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     assert result["analyze_reference_asset_ids"] == ["asset-01", "asset-02"]
     assert "main=" in result["analyze_reference_selection_reason"]
     assert any("selected_main_asset_id=asset-01" in log for log in result["logs"])
     assert any("selected_detail_asset_id=asset-02" in log for log in result["logs"])
+<<<<<<< HEAD
+    assert (get_task_dir(task.task_id) / "product_analysis.json").exists()
+=======
     assert any("asset_completeness_mode=packshot_plus_detail" in log for log in result["logs"])
     assert (get_task_dir(task.task_id) / "product_analysis.json").exists()
 
@@ -251,3 +262,4 @@ def test_analyze_product_logs_weak_text_anchor_evidence_when_no_anchor_available
     assert analysis.text_anchor_source == "none"
     assert analysis.text_anchor_status == "unreadable"
     assert any("warning text anchor evidence weak" in log for log in result["logs"])
+>>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
