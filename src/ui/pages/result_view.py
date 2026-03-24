@@ -34,13 +34,14 @@ def render_result_view(task_state: dict | None) -> None:
         st.caption(f"已生成 {len(image_paths)}/{shot_total} 张，剩余图片仍在生成中。")
 
     render_preview_grid(image_paths)
+    render_nonce = _next_download_render_nonce()
     render_download_panel(
         image_paths,
         task_state.get("export_zip_path"),
         zip_label="下载结果 ZIP",
         bundle_zip_path=task_state.get("full_task_bundle_zip_path"),
         bundle_zip_label="下载完整任务包 ZIP",
-        panel_key_prefix="final",
+        panel_key_prefix=f"final-{render_nonce}",
     )
 
 
@@ -59,3 +60,12 @@ def _resolve_total_count(task_state: dict[str, object]) -> int:
         except (TypeError, ValueError):
             return 0
     return 0
+
+
+def _next_download_render_nonce() -> int:
+    """为下载组件生成本次渲染唯一前缀，避免增量刷新时 key 冲突。"""
+
+    state_key = "_result_download_render_nonce"
+    current = int(st.session_state.get(state_key, 0)) + 1
+    st.session_state[state_key] = current
+    return current

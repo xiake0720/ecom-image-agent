@@ -41,7 +41,7 @@ def render_download_panel(
                 file_name=archive.name,
                 mime="application/zip",
                 key=build_download_widget_key(f"{panel_key_prefix}-zip", archive),
-                use_container_width=True,
+                width="stretch",
             )
     if bundle_zip_path:
         bundle = Path(bundle_zip_path)
@@ -52,7 +52,7 @@ def render_download_panel(
                 file_name=bundle.name,
                 mime="application/zip",
                 key=build_download_widget_key(f"{panel_key_prefix}-bundle", bundle),
-                use_container_width=True,
+                width="stretch",
             )
 
 

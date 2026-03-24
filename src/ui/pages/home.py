@@ -42,9 +42,9 @@ def render_home_page() -> None:
     status_placeholder = st.empty()
     result_placeholder = st.empty()
     _render_progress(progress_placeholder, status_placeholder, st.session_state.get("task_state"))
-    _render_result_section(result_placeholder, st.session_state.get("task_state"))
 
-    if st.button("开始生成", type="primary", use_container_width=True):
+    start_clicked = st.button("开始生成", type="primary", width="stretch")
+    if start_clicked:
         _submit_task(
             form_data=form_data,
             uploads=uploads,
@@ -56,7 +56,8 @@ def render_home_page() -> None:
     if st.session_state.get("task_error"):
         st.error(st.session_state["task_error"])
 
-    _render_result_section(result_placeholder, st.session_state.get("task_state"))
+    if not start_clicked:
+        _render_result_section(result_placeholder, st.session_state.get("task_state"))
 
 
 def _submit_task(
