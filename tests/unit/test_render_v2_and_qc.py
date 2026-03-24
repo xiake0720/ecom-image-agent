@@ -24,17 +24,26 @@ class FakeImageProvider:
     def __init__(self) -> None:
         self.v2_calls: list[str] = []
         self.compat_calls: list[str] = []
+        self.v2_prompts: list[str] = []
 
-    def generate_images_v2(self, prompt_plan, *, output_dir: Path, reference_assets=None) -> GenerationResult:
-        del reference_assets
+    def generate_images_v2(
+        self,
+        prompt_plan,
+        *,
+        output_dir: Path,
+        reference_assets=None,
+        background_style_assets=None,
+    ) -> GenerationResult:
+        del reference_assets, background_style_assets
         shot = prompt_plan.shots[0]
         self.v2_calls.append(shot.shot_id)
+        self.v2_prompts.append(shot.render_prompt)
         if shot.shot_id == "shot_01":
             raise RuntimeError("force overlay fallback")
         return self.generate_images(_compat_plan_for_test(shot.shot_id), output_dir=output_dir, reference_assets=None)
 
-    def generate_images(self, plan, *, output_dir: Path, reference_assets=None) -> GenerationResult:
-        del reference_assets
+    def generate_images(self, plan, *, output_dir: Path, reference_assets=None, background_style_assets=None) -> GenerationResult:
+        del reference_assets, background_style_assets
         prompt = plan.prompts[0]
         self.compat_calls.append(prompt.shot_id)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -146,6 +155,7 @@ def test_render_qc_finalize_keeps_overlay_fallback_inside_render(monkeypatch, tm
     assert len(render_result["generation_result_v2"].images) == 2
     assert render_result["text_render_reports"]["shot_01"]["overlay_applied"] is True
     assert render_result["text_render_reports"]["shot_02"]["overlay_applied"] is False
+    assert render_result["text_render_reports"]["shot_01"]["fallback_reason"] == "v2_generation_failed"
     assert provider.v2_calls == ["shot_01", "shot_02"]
     assert provider.compat_calls == ["shot_01", "shot_02"]
     assert isinstance(qc_result["qc_report_v2"], QCReport)
@@ -205,6 +215,7 @@ def test_render_images_reports_partial_results_per_shot(monkeypatch, tmp_path: P
     assert progress_events[0]["task"].current_step == "render_images"
     assert progress_events[0]["task"].current_step_label == "正在生成图片（1/2）"
     assert progress_events[1]["task"].current_step_label == "正在生成图片（2/2）"
+    assert "严禁转写、复用、概括任何参考图可见文字" in provider.v2_prompts[0]
 
 
 def test_runapi_gemini31_request_disables_environment_proxy(monkeypatch) -> None:
@@ -261,6 +272,7 @@ def test_runapi_gemini31_request_disables_environment_proxy(monkeypatch) -> None
         shot_id="shot_01",
         prompt_text="test prompt",
         reference_assets=[],
+        background_style_assets=[],
         aspect_ratio="1:1",
         image_size="2K",
     )
@@ -340,6 +352,7 @@ def test_runapi_gemini31_supports_file_data_uri_response(monkeypatch) -> None:
         shot_id="shot_01",
         prompt_text="test prompt",
         reference_assets=[],
+        background_style_assets=[],
         aspect_ratio="1:1",
         image_size="2K",
     )

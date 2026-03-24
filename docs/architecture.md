@@ -11,12 +11,18 @@
 ## 分层
 
 ### `src/ui/`
-- 只负责页面、交互和结果展示
-- 当前页面只保留上传、必要参数、执行、进度、最终结果
+- 只负责页面、交互和结果展示。
+- 当前页面负责：
+  - 上传产品图与背景风格参考图
+  - 配置文案模式
+  - 输入标题、副标题、卖点
+  - 输入风格类型、偏好、自定义元素、避免元素
+  - 执行任务并展示增量结果
 
 ### `src/workflows/`
-- 只负责主链状态和节点编排
-- `graph.py` 固定为单链路执行器
+- 只负责主链状态和节点编排。
+- `graph.py` 固定为单链路执行器。
+- `director_v2 -> prompt_refine_v2 -> render_images` 负责把结构化规划逐层收紧为最终生图请求。
 
 ### `src/domain/`
 - 只保留当前主链需要的 contract：
@@ -29,17 +35,23 @@
   - `image_prompt_plan`（仅供 render fallback 兼容）
 
 ### `src/providers/`
-- 只保留当前主链实际可用的文本与图片 provider
+- 只保留当前主链实际可用的文本与图片 provider。
+- 图片 provider 负责接收：
+  - 最终 render prompt
+  - 产品参考图
+  - 背景风格参考图
 
 ### `src/services/`
-- 只保留素材选择、Pillow 后贴字、本地存储与 ZIP 导出等通用能力
+- 只保留素材选择、Pillow 后贴字、本地存储与 ZIP 导出等通用能力。
 
 ## 当前执行模式
 - 唯一 UI 入口：`streamlit_app.py`
 - 唯一 workflow：v2 固定主链
 - 唯一存储介质：本地文件系统
 
-## 设计取舍
+## 当前关键约束
 - overlay fallback 保留，但内聚到 `render_images`
+- 参考图中的可见文字不能进入广告 copy 链路
+- 产品参考图与背景风格参考图必须分流处理
+- `hero` 图必须在导演层、prompt 精修层、render 层都强调主体约 `2/3`
 - QC 仅保留最小闭环，不再做旧链路复杂审查
-- 不再暴露 debug 页面、链路图和中间 JSON

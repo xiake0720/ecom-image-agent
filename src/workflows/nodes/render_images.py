@@ -6,8 +6,8 @@
 职责：
 - 消费 `prompt_plan_v2`
 - 调用图片 provider 生成图片
-- 在节点内部完成 overlay fallback，不再保留独立 `overlay_text` 节点
-- 按张回传局部结果，供 Streamlit 页面实时展示
+- 在节点内部完成 overlay fallback，不再保留独立旧节点
+- 明确区分产品参考图与背景风格参考图
 """
 
 from __future__ import annotations
@@ -45,17 +45,19 @@ def render_images(state: WorkflowState, deps: WorkflowDependencies) -> dict:
     generated_dir.mkdir(parents=True, exist_ok=True)
     final_dir.mkdir(parents=True, exist_ok=True)
 
-    selection = select_reference_bundle(state.get("assets", []), max_images=2)
+    selection = select_reference_bundle(state.get("assets", []), max_images=2, max_background_style_images=2)
     generation_context = _resolve_generation_context(
         provider=deps.image_generation_provider,
         fallback_model_id=deps.image_model_selection.model_id if deps.image_model_selection else settings.runapi_image_model,
-        reference_assets=selection.selected_assets,
+        reference_assets=selection.product_reference_assets,
+        background_style_assets=selection.background_style_assets,
     )
     logs = [
         *state.get("logs", []),
         *format_connected_contract_logs(state, node_name="render_images"),
         f"[render_images] start shot_count={len(prompt_plan.shots)} model={generation_context['model_id']}",
-        f"[render_images] reference_asset_ids={generation_context['reference_asset_ids']}",
+        f"[render_images] product_reference_asset_ids={generation_context['reference_asset_ids']}",
+        f"[render_images] background_style_asset_ids={generation_context['background_style_asset_ids']}",
         f"[render_images] overlay_fallback_enabled={str(settings.enable_overlay_fallback).lower()}",
     ]
 
@@ -69,7 +71,8 @@ def render_images(state: WorkflowState, deps: WorkflowDependencies) -> dict:
             shot=shot,
             generated_dir=generated_dir,
             final_dir=final_dir,
-            reference_assets=selection.selected_assets,
+            reference_assets=selection.product_reference_assets,
+            background_style_assets=selection.background_style_assets,
             deps=deps,
             overlay_fallback_enabled=settings.enable_overlay_fallback,
         )
@@ -77,7 +80,7 @@ def render_images(state: WorkflowState, deps: WorkflowDependencies) -> dict:
         text_render_reports[shot.shot_id] = report
         fallback_count += 1 if used_fallback else 0
         logs.append(
-            f"[render_images] shot_id={shot.shot_id} role={shot.shot_role} overlay_fallback={str(used_fallback).lower()} final_path={generated_image.image_path}"
+            f"[render_images] shot_id={shot.shot_id} role={shot.shot_role} copy_source={shot.copy_source} overlay_fallback={str(used_fallback).lower()} final_path={generated_image.image_path}"
         )
         _publish_partial_render_result(
             base_state=state,
@@ -113,33 +116,41 @@ def _render_single_shot(
     generated_dir: Path,
     final_dir: Path,
     reference_assets: list,
+    background_style_assets: list,
     deps: WorkflowDependencies,
     overlay_fallback_enabled: bool,
 ) -> tuple[GeneratedImage, dict[str, object], bool]:
     """执行单张图生成，并在失败时回退到 Pillow 贴字。"""
 
     provider = deps.image_generation_provider
+    execution_shot = _build_execution_shot(shot)
     raw_result: GenerationResult | None = None
     raw_image: GeneratedImage | None = None
     used_fallback = False
+    fallback_reason = ""
 
     if hasattr(provider, "generate_images_v2"):
         try:
             raw_result = provider.generate_images_v2(
-                PromptPlanV2(shots=[shot]),
+                PromptPlanV2(shots=[execution_shot]),
                 output_dir=generated_dir,
                 reference_assets=reference_assets,
+                background_style_assets=background_style_assets,
             )
             raw_image = _first_image(raw_result, shot.shot_id)
         except Exception:
+            fallback_reason = "v2_generation_failed"
             if not overlay_fallback_enabled:
                 raise
+    else:
+        fallback_reason = "provider_without_v2"
     if raw_image is None:
         used_fallback = True
         raw_result = provider.generate_images(
-            _build_compatibility_plan(shot),
+            _build_compatibility_plan(execution_shot),
             output_dir=generated_dir,
             reference_assets=reference_assets,
+            background_style_assets=background_style_assets,
         )
         raw_image = _first_image(raw_result, shot.shot_id)
 
@@ -154,6 +165,7 @@ def _render_single_shot(
             output_path=str(final_path),
             title=shot.title_copy,
             subtitle=shot.subtitle_copy,
+            selling_points=shot.selling_points_for_render,
             layout_hint=shot.layout_hint,
         )
         final_image = _build_final_image(shot_id=shot.shot_id, final_path=final_path)
@@ -162,8 +174,12 @@ def _render_single_shot(
             "overlay_applied": True,
             "font_source": render_report.font_source,
             "fallback_used": render_report.fallback_used,
+            "fallback_reason": fallback_reason or "overlay_text_render",
+            "copy_source": shot.copy_source,
+            "selling_points_for_render": shot.selling_points_for_render,
             "title_box": _box_to_payload(render_report.title_box),
             "subtitle_box": _box_to_payload(render_report.subtitle_box),
+            "selling_points_boxes": [_box_to_payload(box) for box in render_report.selling_points_boxes],
         }
         return final_image, report, True
 
@@ -173,10 +189,45 @@ def _render_single_shot(
         "overlay_applied": False,
         "font_source": "",
         "fallback_used": False,
+        "fallback_reason": "",
+        "copy_source": shot.copy_source,
+        "selling_points_for_render": shot.selling_points_for_render,
         "title_box": None,
         "subtitle_box": None,
+        "selling_points_boxes": [],
     }
     return final_image, report, False
+
+
+def _build_execution_shot(shot: PromptShot) -> PromptShot:
+    """在渲染层补齐最终 prompt 装配，确保硬约束一定下发。"""
+
+    assembled_prompt = _assemble_final_render_prompt(shot)
+    return shot.model_copy(update={"render_prompt": assembled_prompt})
+
+
+def _assemble_final_render_prompt(shot: PromptShot) -> str:
+    """把 render 层硬约束、图内文案和参考图边界收口成最终 prompt。"""
+
+    lines = [
+        shot.render_prompt,
+        "最终执行约束：广告文案只允许使用下列主标题、副标题、卖点，严禁转写、复用、概括任何参考图可见文字。",
+        "最终执行约束：产品参考图只用于保持包装结构、材质、颜色与标签一致。",
+        "最终执行约束：背景风格参考图只用于学习背景氛围、色调与场景语言，不得替换产品包装。",
+    ]
+    if shot.title_copy:
+        lines.append(f"主标题：{shot.title_copy}")
+    if shot.subtitle_copy:
+        lines.append(f"副标题：{shot.subtitle_copy}")
+    if shot.selling_points_for_render:
+        lines.append(f"卖点：{'；'.join(shot.selling_points_for_render)}")
+    if shot.layout_hint:
+        lines.append(f"文字区域：{shot.layout_hint}")
+    if shot.typography_hint:
+        lines.append(f"文字层级：{shot.typography_hint}")
+    if shot.subject_occupancy_ratio:
+        lines.append(f"主体占比目标：约 {int(shot.subject_occupancy_ratio * 100)}%，不要让商品过小。")
+    return "\n".join(lines).strip()
 
 
 def _publish_partial_render_result(
@@ -228,20 +279,31 @@ def _build_compatibility_plan(shot: PromptShot) -> ImagePromptPlan:
     return ImagePromptPlan(generation_mode="t2i", prompts=[prompt])
 
 
-def _resolve_generation_context(*, provider, fallback_model_id: str, reference_assets: list) -> dict[str, object]:
+def _resolve_generation_context(
+    *,
+    provider,
+    fallback_model_id: str,
+    reference_assets: list,
+    background_style_assets: list,
+) -> dict[str, object]:
     """提取图片 provider 的最小执行上下文。"""
 
     if hasattr(provider, "resolve_generation_context"):
-        context = provider.resolve_generation_context(reference_assets=reference_assets)
+        context = provider.resolve_generation_context(
+            reference_assets=reference_assets,
+            background_style_assets=background_style_assets,
+        )
         return {
             "generation_mode": getattr(context, "generation_mode", "t2i"),
             "model_id": getattr(context, "model_id", fallback_model_id),
             "reference_asset_ids": list(getattr(context, "reference_asset_ids", [])),
+            "background_style_asset_ids": list(getattr(context, "background_style_asset_ids", [])),
         }
     return {
         "generation_mode": "t2i",
         "model_id": fallback_model_id,
         "reference_asset_ids": [asset.asset_id for asset in reference_assets],
+        "background_style_asset_ids": [asset.asset_id for asset in background_style_assets],
     }
 
 

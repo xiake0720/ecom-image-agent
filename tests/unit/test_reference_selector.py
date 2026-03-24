@@ -16,4 +16,6 @@ def test_reference_selector_prefers_white_bg_then_detail() -> None:
     assert selection.selected_asset_ids == ["asset-01", "asset-02"]
     assert selection.selected_main_asset_id == "asset-01"
     assert selection.selected_detail_asset_id == "asset-02"
-    assert selection.selection_reason == "prefer_white_bg_then_detail"
+    assert selection.product_reference_assets[0].asset_id == "asset-01"
+    assert selection.background_style_asset_ids == []
+    assert selection.selection_reason == "prefer_white_bg_then_detail_keep_background_style_separate"

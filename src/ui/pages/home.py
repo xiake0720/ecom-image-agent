@@ -10,6 +10,7 @@ from src.core.config import get_settings
 from src.core.constants import DEFAULT_CATEGORY
 from src.core.logging import attach_task_file_handler, detach_task_file_handler, initialize_logging, log_context
 from src.core.paths import ensure_task_dirs
+from src.domain.asset import AssetType
 from src.domain.task import Task, TaskStatus
 from src.services.storage.local_storage import LocalStorageService
 from src.ui.components.upload_panel import render_upload_panel
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 def render_home_page() -> None:
-    """渲染极简首页。"""
+    """渲染首页。"""
 
     settings = get_settings()
     initialize_logging(settings)
@@ -31,7 +32,7 @@ def render_home_page() -> None:
     ensure_ui_state()
 
     st.title("电商图生成")
-    st.caption("上传素材并选择必要参数，系统会按固定 v2 流程生成最终电商图。")
+    st.caption("上传产品图与背景风格参考图，系统会按固定 v2 主链生成适合天猫的 8 张电商图。")
 
     uploads = render_upload_panel()
     form_data = render_task_form()
@@ -96,7 +97,8 @@ def _run_task(*, form_data: dict[str, object], uploads: dict[str, object], on_pr
     """创建任务目录、保存输入并执行固定主链。"""
 
     white_bg = uploads.get("white_bg")
-    references = list(uploads.get("references") or [])
+    product_references = list(uploads.get("product_references") or [])
+    background_style_references = list(uploads.get("background_style_references") or [])
     if white_bg is None:
         raise WorkflowExecutionError("素材缺失，请上传外包装白底图后重试。", logs=[])
 
@@ -117,12 +119,23 @@ def _run_task(*, form_data: dict[str, object], uploads: dict[str, object], on_pr
         image_size=str(form_data["image_size"]),
         status=TaskStatus.RUNNING,
         task_dir=str(task_dirs["task"]),
+        copy_mode=str(form_data["copy_mode"]),
+        title_text=str(form_data["title_text"]),
+        subtitle_text=str(form_data["subtitle_text"]),
+        selling_points=list(form_data["selling_points"]),
+        style_type=str(form_data["style_type"]),
+        style_preferences=str(form_data["style_preferences"]),
+        custom_elements=list(form_data["custom_elements"]),
+        avoid_elements=list(form_data["avoid_elements"]),
     )
     try:
         with log_context(task_id=task_id):
             storage.save_task_manifest(task)
-            upload_files = [white_bg, *references]
-            uploads_payload = [(upload.name, upload.getvalue()) for upload in upload_files]
+            uploads_payload = [
+                (white_bg.name, white_bg.getvalue(), AssetType.WHITE_BG),
+                *[(upload.name, upload.getvalue(), AssetType.DETAIL) for upload in product_references],
+                *[(upload.name, upload.getvalue(), AssetType.BACKGROUND_STYLE) for upload in background_style_references],
+            ]
             assets = storage.save_uploads(task_id, uploads_payload)
             initial_state: WorkflowState = {
                 "task": task,

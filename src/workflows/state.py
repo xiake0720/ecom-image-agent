@@ -164,11 +164,7 @@ def update_task_progress(
 
 
 def build_render_progress_task(task: Task, *, completed_count: int, total_count: int) -> Task:
-    """构造 `render_images` 节点内部的增量进度。
-
-    这里不再按张线性推进百分比，而是维持渲染阶段的固定百分比，
-    重点通过步骤文案告诉前端当前已经生成到第几张图。
-    """
+    """构造 `render_images` 节点内部的增量进度。"""
 
     safe_total = max(total_count, 1)
     safe_completed = max(0, min(completed_count, safe_total))
@@ -181,7 +177,7 @@ def build_render_progress_task(task: Task, *, completed_count: int, total_count:
 
 
 def build_connected_contract_summary(state: WorkflowState) -> dict[str, object]:
-    """汇总当前 state 中已经接入的核心 contract。"""
+    """汇总当前 state 中已接入的核心 contract。"""
 
     connected_files = [
         filename

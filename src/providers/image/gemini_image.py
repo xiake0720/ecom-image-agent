@@ -1,3 +1,5 @@
+"""Mock 图片 provider。"""
+
 from __future__ import annotations
 
 import logging
@@ -14,6 +16,8 @@ logger = logging.getLogger(__name__)
 
 
 class GeminiImageProvider(BaseImageProvider):
+    """用于本地调试的占位图片 provider。"""
+
     def __init__(self) -> None:
         pass
 
@@ -23,13 +27,16 @@ class GeminiImageProvider(BaseImageProvider):
         *,
         output_dir: Path,
         reference_assets: list[Asset] | None = None,
+        background_style_assets: list[Asset] | None = None,
     ) -> GenerationResult:
+        """生成本地占位图。"""
+
+        del reference_assets, background_style_assets
         logger.info(
             "当前图片 provider 模式为 mock，开始生成占位图，数量=%s，输出目录=%s",
             len(plan.prompts),
             output_dir,
         )
-        # TODO: Replace this mock canvas renderer with a real image model provider after MVP approval.
         output_dir.mkdir(parents=True, exist_ok=True)
         images: list[GeneratedImage] = []
         for index, prompt in enumerate(plan.prompts, start=1):
@@ -49,6 +56,8 @@ class GeminiImageProvider(BaseImageProvider):
         return GenerationResult(images=images)
 
     def _render_placeholder(self, width: int, height: int, prompt: str, output_path: Path) -> None:
+        """渲染简易占位图。"""
+
         image = Image.new("RGB", (width, height), color=(236, 244, 232))
         draw = ImageDraw.Draw(image)
         accent_width = max(80, width // 8)

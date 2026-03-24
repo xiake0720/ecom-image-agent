@@ -5,7 +5,7 @@
 
 核心职责：
 - 封装 RunAPI 的 Gemini 3.1 Flash Image Preview 接口
-- 支持 text + inlineData 的多模态请求
+- 支持文本 + 多组参考图的多模态请求
 - 支持 v2 `PromptPlanV2` 和兼容层 `ImagePromptPlan`
 - 解析返回中的 inlineData base64 图片并落盘为任务图片
 """
@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import base64
+from dataclasses import dataclass
 from io import BytesIO
 import logging
 from pathlib import Path
@@ -28,10 +29,8 @@ from src.domain.generation_result import GeneratedImage, GenerationResult
 from src.domain.image_prompt_plan import ImagePromptPlan
 from src.domain.prompt_plan_v2 import PromptPlanV2
 from src.providers.image.base import BaseImageProvider
-from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
-
 
 RUNAPI_GEMINI31_MODEL_ID = "gemini-3.1-flash-image-preview"
 
@@ -45,41 +44,41 @@ class ImageGenerationContext:
     model_id: str
     reference_asset_ids: list[str]
     selected_reference_assets: list[Asset]
+    background_style_asset_ids: list[str]
+    selected_background_style_assets: list[Asset]
 
 
 class RunApiGemini31ImageProvider(BaseImageProvider):
-    """通过 RunAPI 调用 Gemini 3.1 图片生成接口。
-
-    设计说明：
-    - 这个 provider 是 v2 直出图内文案的主入口，因此同时承担
-      `PromptPlanV2 -> HTTP 请求 -> 图片落盘` 三段职责。
-    - 旧链路仍然可能通过 router 把它当作兼容层 provider 使用，
-      所以保留了 `generate_images()`，避免强迫旧节点一次性改完。
-    - 对外统一返回 `GenerationResult`，这样 render/QC/finalize 不需要
-      再感知 Gemini 3.1 的原始响应格式。
-    """
+    """通过 RunAPI 调用 Gemini 3.1 图片生成接口。"""
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        # 这个 provider 既可能作为主 image provider 使用，也可能作为
-        # DashScope 路由下的 image_edit provider 使用，因此不能直接复用
-        # 全局 image_model 默认值，否则会把 Wanx 默认模型误带进来。
         if settings.resolve_image_provider_route().alias == "runapi_gemini31":
             self.model_id = settings.resolve_image_model_selection().model_id
         else:
             self.model_id = RUNAPI_GEMINI31_MODEL_ID
         self.last_request_payloads: dict[str, dict[str, object]] = {}
         self.last_reference_asset_ids: list[str] = []
+        self.last_background_style_asset_ids: list[str] = []
 
-    def resolve_generation_context(self, *, reference_assets: list[Asset] | None = None) -> ImageGenerationContext:
+    def resolve_generation_context(
+        self,
+        *,
+        reference_assets: list[Asset] | None = None,
+        background_style_assets: list[Asset] | None = None,
+    ) -> ImageGenerationContext:
         """返回当前图片 provider 的运行上下文，便于 render/QC 记录调试信息。"""
+
         prepared_assets = self._prepare_reference_assets(reference_assets)
+        prepared_background_assets = self._prepare_background_style_assets(background_style_assets)
         return ImageGenerationContext(
             generation_mode="t2i",
             provider_alias="runapi_gemini31",
             model_id=self.model_id,
             reference_asset_ids=[asset.asset_id for asset in prepared_assets],
             selected_reference_assets=prepared_assets,
+            background_style_asset_ids=[asset.asset_id for asset in prepared_background_assets],
+            selected_background_style_assets=prepared_background_assets,
         )
 
     def generate_images(
@@ -88,30 +87,30 @@ class RunApiGemini31ImageProvider(BaseImageProvider):
         *,
         output_dir: Path,
         reference_assets: list[Asset] | None = None,
+        background_style_assets: list[Asset] | None = None,
     ) -> GenerationResult:
-        """兼容旧的 `ImagePromptPlan` 调用方式，按默认比例和尺寸发起请求。
+        """兼容旧的 `ImagePromptPlan` 调用方式。"""
 
-        上下游关系：
-        - 上游通常是 v1 的 `render_images`
-        - 下游统一回到 `GenerationResult`
-        - 这里不做旧链路 schema 改造，只做最小兼容
-        """
         output_dir.mkdir(parents=True, exist_ok=True)
         prepared_assets = self._prepare_reference_assets(reference_assets)
+        prepared_background_assets = self._prepare_background_style_assets(background_style_assets)
         self.last_reference_asset_ids = [asset.asset_id for asset in prepared_assets]
+        self.last_background_style_asset_ids = [asset.asset_id for asset in prepared_background_assets]
         images: list[GeneratedImage] = []
         for index, prompt in enumerate(plan.prompts, start=1):
             prompt_text = prompt.edit_instruction or prompt.prompt
             logger.info(
-                "开始调用 Gemini 3.1 图片生成，mode=legacy-v1, shot_id=%s, reference_count=%s, output_name=%s",
+                "开始调用 Gemini 3.1 图片生成，mode=legacy-v1, shot_id=%s, reference_count=%s, background_style_count=%s, output_name=%s",
                 prompt.shot_id,
                 len(prepared_assets),
+                len(prepared_background_assets),
                 f"{index:02d}_{prompt.shot_id}.png",
             )
             image_bytes = self._generate_single(
                 shot_id=prompt.shot_id,
                 prompt_text=prompt_text,
                 reference_assets=prepared_assets,
+                background_style_assets=prepared_background_assets,
                 aspect_ratio=self.settings.default_image_aspect_ratio,
                 image_size=self.settings.default_image_size,
             )
@@ -124,25 +123,24 @@ class RunApiGemini31ImageProvider(BaseImageProvider):
         *,
         output_dir: Path,
         reference_assets: list[Asset] | None = None,
+        background_style_assets: list[Asset] | None = None,
     ) -> GenerationResult:
-        """按 v2 prompt plan 逐张生图并落盘。
+        """按 v2 prompt plan 逐张生图并落盘。"""
 
-        为什么逐张调用：
-        - v2 需要对“单张图直出失败”做 overlay fallback
-        - 如果整套图一次请求，失败时很难只重做某一张
-        - 逐张执行虽然更慢，但更符合当前 PR 的可追踪和可回退目标
-        """
         output_dir.mkdir(parents=True, exist_ok=True)
         prepared_assets = self._prepare_reference_assets(reference_assets)
+        prepared_background_assets = self._prepare_background_style_assets(background_style_assets)
         self.last_reference_asset_ids = [asset.asset_id for asset in prepared_assets]
+        self.last_background_style_asset_ids = [asset.asset_id for asset in prepared_background_assets]
         images: list[GeneratedImage] = []
         for index, shot in enumerate(prompt_plan.shots, start=1):
-            request_mode = "multimodal_t2i_with_refs" if prepared_assets else "t2i_text_only"
+            request_mode = "multimodal_t2i_with_refs" if prepared_assets or prepared_background_assets else "t2i_text_only"
             logger.info(
-                "开始调用 Gemini 3.1 图片生成，mode=v2, request_mode=%s, shot_id=%s, reference_count=%s, output_name=%s",
+                "开始调用 Gemini 3.1 图片生成，mode=v2, request_mode=%s, shot_id=%s, reference_count=%s, background_style_count=%s, output_name=%s",
                 request_mode,
                 shot.shot_id,
                 len(prepared_assets),
+                len(prepared_background_assets),
                 f"{index:02d}_{shot.shot_id}.png",
             )
             prompt_text = self._compose_v2_prompt_text(shot)
@@ -150,6 +148,7 @@ class RunApiGemini31ImageProvider(BaseImageProvider):
                 shot_id=shot.shot_id,
                 prompt_text=prompt_text,
                 reference_assets=prepared_assets,
+                background_style_assets=prepared_background_assets,
                 aspect_ratio=shot.aspect_ratio,
                 image_size=shot.image_size,
             )
@@ -157,18 +156,22 @@ class RunApiGemini31ImageProvider(BaseImageProvider):
         return GenerationResult(images=images)
 
     def _compose_v2_prompt_text(self, shot) -> str:
-        """把 v2 shot 结构压成实际发给图片模型的文本描述。
+        """把 v2 shot 结构压成实际发给图片模型的文本描述。"""
 
-        这里故意不只传 `render_prompt`，而是把标题、副标题、版式提示一起
-        下发给图片模型。这样 v2 才能真正尝试“图内直接带字”。
-        """
         lines = [shot.render_prompt]
         if shot.title_copy:
             lines.append(f"主标题：{shot.title_copy}")
         if shot.subtitle_copy:
             lines.append(f"副标题：{shot.subtitle_copy}")
+        if shot.selling_points_for_render:
+            lines.append(f"卖点：{'；'.join(shot.selling_points_for_render)}")
         if shot.layout_hint:
             lines.append(f"版式提示：{shot.layout_hint}")
+        if shot.typography_hint:
+            lines.append(f"文字层级：{shot.typography_hint}")
+        if shot.subject_occupancy_ratio:
+            lines.append(f"主体占比：约 {int(shot.subject_occupancy_ratio * 100)}%")
+        lines.append("广告文案只允许使用上述标题、副标题、卖点，严禁转写、复用、概括任何参考图可见文字。")
         return "\n".join(lines).strip()
 
     def _generate_single(
@@ -177,16 +180,12 @@ class RunApiGemini31ImageProvider(BaseImageProvider):
         shot_id: str,
         prompt_text: str,
         reference_assets: list[Asset],
+        background_style_assets: list[Asset] | None = None,
         aspect_ratio: str,
         image_size: str,
     ) -> bytes:
-        """执行单次图片生成请求，并从响应中提取图片字节。
+        """执行单次图片生成请求，并从响应中提取图片字节。"""
 
-        失败边界：
-        - 请求失败：抛 RuntimeError，让 `render_images` 决定是否进入 fallback
-        - 响应不是 JSON：直接报错，不做静默吞掉
-        - 响应没有图片：直接报错，避免写出空文件污染任务目录
-        """
         if self.settings.image_provider_mode == "mock":
             raise RuntimeError("RunApiGemini31ImageProvider cannot run in mock mode.")
         if not self.settings.runapi_api_key:
@@ -195,18 +194,20 @@ class RunApiGemini31ImageProvider(BaseImageProvider):
         payload = self._build_request_payload(
             prompt_text=prompt_text,
             reference_assets=reference_assets,
+            background_style_assets=background_style_assets or [],
             aspect_ratio=aspect_ratio,
             image_size=image_size,
         )
         self.last_request_payloads[shot_id] = payload
         url = f"{self.settings.runapi_image_base_url.rstrip('/')}/v1/models/{self.model_id}:generateContent"
         logger.info(
-            "发送 Gemini 3.1 图片请求，shot_id=%s, url=%s, aspect_ratio=%s, image_size=%s, reference_count=%s, proxy=%s",
+            "发送 Gemini 3.1 图片请求，shot_id=%s, url=%s, aspect_ratio=%s, image_size=%s, reference_count=%s, background_style_count=%s, proxy=%s",
             shot_id,
             url,
             aspect_ratio,
             image_size,
             len(reference_assets),
+            len(background_style_assets or []),
             describe_proxy_status(),
         )
         started_at = perf_counter()
@@ -253,32 +254,19 @@ class RunApiGemini31ImageProvider(BaseImageProvider):
         *,
         prompt_text: str,
         reference_assets: list[Asset],
+        background_style_assets: list[Asset],
         aspect_ratio: str,
         image_size: str,
     ) -> dict[str, object]:
-        """构造符合 Gemini 3.1 generateContent 的请求体。
+        """构造符合 Gemini 3.1 generateContent 的请求体。"""
 
-        结构约定：
-        - 第一段 `text` 一定放完整执行 prompt
-        - 后续 `inlineData` 只放经过筛选的 1~2 张参考图
-        - `aspectRatio / imageSize` 由 v2 prompt plan 显式传入，避免 provider
-          自己猜尺寸
-        """
         parts: list[dict[str, object]] = [{"text": prompt_text}]
-        for asset in reference_assets:
-            asset_path = Path(asset.local_path)
-            if not asset.local_path or not asset_path.exists():
-                continue
-            # 参考图在当前阶段只允许做“弱指导”，不在这里额外叠加业务逻辑，
-            # 避免 provider 层变成隐式 prompt builder。
-            parts.append(
-                {
-                    "inlineData": {
-                        "mimeType": asset.mime_type or self._guess_mime_type(asset_path),
-                        "data": base64.b64encode(asset_path.read_bytes()).decode("utf-8"),
-                    }
-                }
-            )
+        if reference_assets:
+            parts.append({"text": "以下是产品参考图，只能用于保持包装结构、材质、颜色与标签一致，不得提取其中可见文字。"})
+            self._append_inline_assets(parts, reference_assets)
+        if background_style_assets:
+            parts.append({"text": "以下是背景风格参考图，只能用于学习背景氛围、色调与场景语言，不得替换产品包装，也不得提取其中可见文字。"})
+            self._append_inline_assets(parts, background_style_assets)
         return {
             "contents": [{"role": "user", "parts": parts}],
             "generationConfig": {
@@ -290,12 +278,25 @@ class RunApiGemini31ImageProvider(BaseImageProvider):
             },
         }
 
-    def _extract_image_bytes(self, response_json: dict[str, object]) -> bytes:
-        """从 Gemini 3.1 响应里提取 inlineData 图片。
+    def _append_inline_assets(self, parts: list[dict[str, object]], assets: list[Asset]) -> None:
+        """把参考图追加到请求 parts。"""
 
-        这里显式只认图片字节，不接受 provider 返回“半成功”状态。
-        这样可以保证任务目录里只落真实可用图片。
-        """
+        for asset in assets:
+            asset_path = Path(asset.local_path)
+            if not asset.local_path or not asset_path.exists():
+                continue
+            parts.append(
+                {
+                    "inlineData": {
+                        "mimeType": asset.mime_type or self._guess_mime_type(asset_path),
+                        "data": base64.b64encode(asset_path.read_bytes()).decode("utf-8"),
+                    }
+                }
+            )
+
+    def _extract_image_bytes(self, response_json: dict[str, object]) -> bytes:
+        """从 Gemini 3.1 响应里提取 inlineData 图片。"""
+
         for candidate in response_json.get("candidates", []):
             content = candidate.get("content", {})
             for part in content.get("parts", []):
@@ -311,6 +312,7 @@ class RunApiGemini31ImageProvider(BaseImageProvider):
 
     def _download_generated_file(self, file_uri: str) -> bytes:
         """下载 RunAPI 返回的图片文件地址，并显式禁用环境代理。"""
+
         logger.info("检测到 Gemini 3.1 fileUri 返回，开始下载图片文件，url=%s", file_uri)
         try:
             with requests.Session() as session:
@@ -339,6 +341,7 @@ class RunApiGemini31ImageProvider(BaseImageProvider):
 
     def _write_generated_image(self, *, index: int, shot_id: str, image_bytes: bytes, output_dir: Path) -> GeneratedImage:
         """把返回图片字节写入输出目录，并提取实际像素尺寸。"""
+
         output_path = output_dir / f"{index:02d}_{shot_id}.png"
         output_path.write_bytes(image_bytes)
         with Image.open(BytesIO(image_bytes)) as image:
@@ -352,13 +355,8 @@ class RunApiGemini31ImageProvider(BaseImageProvider):
         )
 
     def _prepare_reference_assets(self, reference_assets: list[Asset] | None) -> list[Asset]:
-        """统一裁剪到最多两张参考图，并过滤掉无本地路径资产。
+        """统一裁剪到最多两张产品参考图。"""
 
-        为什么限制 2 张：
-        - 当前业务固定是包装白底图 + 内部细节图
-        - 超过 2 张会明显增加请求体体积和不确定性
-        - 现阶段优先保证稳定性，不做更复杂的多图混合策略
-        """
         prepared: list[Asset] = []
         for asset in reference_assets or []:
             if not asset.local_path:
@@ -368,8 +366,21 @@ class RunApiGemini31ImageProvider(BaseImageProvider):
                 break
         return prepared
 
+    def _prepare_background_style_assets(self, background_style_assets: list[Asset] | None) -> list[Asset]:
+        """统一裁剪到最多两张背景风格参考图。"""
+
+        prepared: list[Asset] = []
+        for asset in background_style_assets or []:
+            if not asset.local_path:
+                continue
+            prepared.append(asset)
+            if len(prepared) >= 2:
+                break
+        return prepared
+
     def _guess_mime_type(self, path: Path) -> str:
         """根据文件后缀推断最小可用 mime type。"""
+
         suffix = path.suffix.lower()
         if suffix in {".jpg", ".jpeg"}:
             return "image/jpeg"
