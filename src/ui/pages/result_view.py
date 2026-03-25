@@ -1,4 +1,13 @@
-"""结果展示页。"""
+"""结果展示页。
+
+文件位置：
+- `src/ui/pages/result_view.py`
+
+职责：
+- 展示当前已生成的图片结果
+- 在 `render_images` 尚未完成时展示增量结果
+- 提供最终结果包下载入口
+"""
 
 from __future__ import annotations
 
@@ -9,13 +18,9 @@ from src.ui.components.preview_grid import render_preview_grid
 
 
 def render_result_view(task_state: dict | None) -> None:
-    """展示当前已生成的最终图片结果。
+    """展示当前已生成的最终图片结果。"""
 
-    当 `render_images` 还在执行时，这里也会展示已经完成的那部分图片，
-    让用户不必等整批任务结束后才看到结果。
-    """
-
-    st.subheader("最终结果")
+    st.subheader("生成结果")
     if not task_state:
         render_preview_grid([])
         return
@@ -31,7 +36,7 @@ def render_result_view(task_state: dict | None) -> None:
         return
 
     if current_step == "render_images" and shot_total:
-        st.caption(f"已生成 {len(image_paths)}/{shot_total} 张，剩余图片仍在生成中。")
+        st.caption(f"已生成 {len(image_paths)}/{shot_total} 张，系统正在继续补齐整套图片。")
 
     render_preview_grid(image_paths)
     render_nonce = _next_download_render_nonce()
@@ -63,7 +68,7 @@ def _resolve_total_count(task_state: dict[str, object]) -> int:
 
 
 def _next_download_render_nonce() -> int:
-    """为下载组件生成本次渲染唯一前缀，避免增量刷新时 key 冲突。"""
+    """为下载组件生成本次渲染前缀，避免增量刷新时 key 冲突。"""
 
     state_key = "_result_download_render_nonce"
     current = int(st.session_state.get(state_key, 0)) + 1

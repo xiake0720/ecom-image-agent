@@ -1,4 +1,13 @@
-"""首页与任务执行入口。"""
+"""首页与任务执行入口。
+
+文件位置：
+- `src/ui/pages/home.py`
+
+职责：
+- 组织极简 UI：首页文案、上传区、基础参数区、进度区、结果区
+- 把用户高层输入组装成 `Task`
+- 启动固定 v2 主工作流
+"""
 
 from __future__ import annotations
 
@@ -31,19 +40,24 @@ def render_home_page() -> None:
     st.set_page_config(page_title="ecom-image-agent", layout="wide")
     ensure_ui_state()
 
-    st.title("电商图生成")
-    st.caption("上传产品图与背景风格参考图，系统会按固定 v2 主链生成适合天猫的 8 张电商图。")
+    st.title("整套电商产品图生成器")
+    st.caption(
+        "上传产品外包装白底图，选择整体风格方向，可选补充产品参考图和背景风格参考图。"
+        "系统会自动规划并生成一套 8 张天猫风格产品图。"
+    )
 
     uploads = render_upload_panel()
     form_data = render_task_form()
 
-    st.subheader("执行")
+    st.subheader("开始生成")
+    st.caption("流程：上传图 -> 选择整体风格 -> 自动生成整套图")
+
     progress_placeholder = st.empty()
     status_placeholder = st.empty()
     result_placeholder = st.empty()
     _render_progress(progress_placeholder, status_placeholder, st.session_state.get("task_state"))
 
-    start_clicked = st.button("开始生成", type="primary", width="stretch")
+    start_clicked = st.button("生成整套产品图", type="primary", width="stretch")
     if start_clicked:
         _submit_task(
             form_data=form_data,
@@ -101,7 +115,7 @@ def _run_task(*, form_data: dict[str, object], uploads: dict[str, object], on_pr
     product_references = list(uploads.get("product_references") or [])
     background_style_references = list(uploads.get("background_style_references") or [])
     if white_bg is None:
-        raise WorkflowExecutionError("素材缺失，请上传外包装白底图后重试。", logs=[])
+        raise WorkflowExecutionError("素材缺失，请先上传外包装白底图。", logs=[])
 
     settings = get_settings()
     initialize_logging(settings)
@@ -114,20 +128,14 @@ def _run_task(*, form_data: dict[str, object], uploads: dict[str, object], on_pr
         brand_name=str(form_data["brand_name"]),
         product_name=str(form_data["product_name"]),
         category=DEFAULT_CATEGORY,
-        platform=str(form_data["platform"]),
+        platform="tmall",
         shot_count=int(form_data["shot_count"]),
         aspect_ratio=str(form_data["aspect_ratio"]),
         image_size=str(form_data["image_size"]),
         status=TaskStatus.RUNNING,
         task_dir=str(task_dirs["task"]),
-        copy_mode=str(form_data["copy_mode"]),
-        title_text=str(form_data["title_text"]),
-        subtitle_text=str(form_data["subtitle_text"]),
-        selling_points=list(form_data["selling_points"]),
         style_type=str(form_data["style_type"]),
-        style_preferences=str(form_data["style_preferences"]),
-        custom_elements=list(form_data["custom_elements"]),
-        avoid_elements=list(form_data["avoid_elements"]),
+        style_notes=str(form_data["style_notes"]),
     )
     try:
         with log_context(task_id=task_id):
@@ -172,7 +180,7 @@ def _render_progress(progress_placeholder, status_placeholder, task_state: dict 
 
     if not task_state:
         progress_placeholder.progress(0, text="等待开始")
-        status_placeholder.caption("点击“开始生成”后会显示当前步骤。")
+        status_placeholder.caption("点击“生成整套产品图”后会显示当前步骤。")
         return
 
     progress_percent = int(task_state.get("progress_percent", 0))

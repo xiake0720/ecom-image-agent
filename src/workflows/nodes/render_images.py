@@ -80,7 +80,10 @@ def render_images(state: WorkflowState, deps: WorkflowDependencies) -> dict:
         text_render_reports[shot.shot_id] = report
         fallback_count += 1 if used_fallback else 0
         logs.append(
-            f"[render_images] shot_id={shot.shot_id} role={shot.shot_role} copy_source={shot.copy_source} overlay_fallback={str(used_fallback).lower()} final_path={generated_image.image_path}"
+            "[render_images] "
+            f"shot_id={shot.shot_id} role={shot.shot_role} copy_strategy={shot.copy_strategy} "
+            f"should_render_text={str(shot.should_render_text).lower()} "
+            f"copy_source={shot.copy_source} overlay_fallback={str(used_fallback).lower()} final_path={generated_image.image_path}"
         )
         _publish_partial_render_result(
             base_state=state,
@@ -175,6 +178,9 @@ def _render_single_shot(
             "font_source": render_report.font_source,
             "fallback_used": render_report.fallback_used,
             "fallback_reason": fallback_reason or "overlay_text_render",
+            "copy_strategy": shot.copy_strategy,
+            "text_density": shot.text_density,
+            "should_render_text": shot.should_render_text,
             "copy_source": shot.copy_source,
             "selling_points_for_render": shot.selling_points_for_render,
             "title_box": _box_to_payload(render_report.title_box),
@@ -190,6 +196,9 @@ def _render_single_shot(
         "font_source": "",
         "fallback_used": False,
         "fallback_reason": "",
+        "copy_strategy": shot.copy_strategy,
+        "text_density": shot.text_density,
+        "should_render_text": shot.should_render_text,
         "copy_source": shot.copy_source,
         "selling_points_for_render": shot.selling_points_for_render,
         "title_box": None,
@@ -214,12 +223,13 @@ def _assemble_final_render_prompt(shot: PromptShot) -> str:
         "最终执行约束：广告文案只允许使用下列主标题、副标题、卖点，严禁转写、复用、概括任何参考图可见文字。",
         "最终执行约束：产品参考图只用于保持包装结构、材质、颜色与标签一致。",
         "最终执行约束：背景风格参考图只用于学习背景氛围、色调与场景语言，不得替换产品包装。",
+        f"最终执行约束：copy_strategy={shot.copy_strategy}，text_density={shot.text_density}，should_render_text={str(shot.should_render_text).lower()}。",
     ]
-    if shot.title_copy:
+    if shot.should_render_text and shot.title_copy:
         lines.append(f"主标题：{shot.title_copy}")
-    if shot.subtitle_copy:
+    if shot.should_render_text and shot.subtitle_copy:
         lines.append(f"副标题：{shot.subtitle_copy}")
-    if shot.selling_points_for_render:
+    if shot.should_render_text and shot.selling_points_for_render:
         lines.append(f"卖点：{'；'.join(shot.selling_points_for_render)}")
     if shot.layout_hint:
         lines.append(f"文字区域：{shot.layout_hint}")
@@ -227,6 +237,8 @@ def _assemble_final_render_prompt(shot: PromptShot) -> str:
         lines.append(f"文字层级：{shot.typography_hint}")
     if shot.subject_occupancy_ratio:
         lines.append(f"主体占比目标：约 {int(shot.subject_occupancy_ratio * 100)}%，不要让商品过小。")
+    if not shot.should_render_text or shot.copy_strategy == "none":
+        lines.append("本图优先不要出现广告大字；如果模型倾向加字，也必须压到极轻程度。")
     return "\n".join(lines).strip()
 
 

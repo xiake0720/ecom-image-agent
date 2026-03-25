@@ -64,5 +64,7 @@ def test_director_v2_mock_mode_builds_eight_shot_plan(tmp_path: Path) -> None:
     assert len(result["director_output"].shots) == 8
     assert result["director_output"].shots[0].shot_role == "hero"
     assert result["director_output"].shots[0].subject_occupancy_ratio == 0.66
+    assert result["director_output"].shots[0].copy_strategy == "strong"
+    assert result["director_output"].shots[2].should_render_text is False
     assert result["director_output"].shots[-1].shot_role == "process_or_quality"
     assert (tmp_path / "artifacts" / task.task_id / "director_output.json").exists()

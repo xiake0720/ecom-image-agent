@@ -27,28 +27,31 @@
 - 基础：
   - `brand_name`
   - `product_name`
-  - `platform`
+  - `style_type`
+  - `style_notes`
+- 高级设置：
   - `shot_count`
   - `aspect_ratio`
   - `image_size`
-- 图内文案控制：
-  - `copy_mode`
-  - `title_text`
-  - `subtitle_text`
-  - `selling_points`
-- 风格控制：
-  - `style_type`
-  - `style_preferences`
-  - `custom_elements`
-  - `avoid_elements`
+
+### UI 不再暴露的字段
+- `title_text`
+- `subtitle_text`
+- `selling_points`
+- `copy_mode`
+- `style_preferences`
+- `custom_elements`
+- `avoid_elements`
+- 任何逐张图文案输入
 
 ### 上传素材分类
 - `white_bg`
   - 外包装白底图，作为产品保真主参考。
 - `product_references`
-  - 可选，用于展开图、细节图、内部结构图。
+  - 可选，用于展开图、细节图、内部结构图、材质图。
 - `background_style_references`
-  - 可选，只用于学习背景氛围、色调和场景语言。
+  - 可选，只用于学习背景氛围、光线、色调、场景语言和材质语言。
+  - 不允许提取广告文案。
 
 ## 节点职责
 
@@ -62,15 +65,23 @@
   - `BACKGROUND_STYLE`
 
 ### `director_v2`
-- 基于任务信息和参考图生成 8 张图的导演规划。
+- 基于任务高层意图和参考图生成整套图导演规划。
 - 融合：
-  - 用户文案模式
-  - 风格类型
-  - 风格偏好
-  - 自定义元素
-  - 避免元素
-  - 用户卖点
-- 明确产品参考图与背景风格参考图的不同用途。
+  - `style_type`
+  - `style_notes`
+  - 产品参考图
+  - 背景风格参考图
+- 自动决定每张图的：
+  - 图位目标
+  - 卖点方向
+  - `copy_strategy`
+  - `text_density`
+  - `should_render_text`
+  - `layout_hint`
+  - `typography_hint`
+- 明确整套图策略：
+  - `series_strategy`
+  - `background_style_strategy`
 - 对 `hero` 写入主体比例硬规则：
   - `subject_occupancy_ratio=0.66`
   - `product_scale_guideline` 要求产品主体约占画面 `2/3`
@@ -80,6 +91,9 @@
 - 把导演规划收口为逐图可执行 prompt。
 - 输出：
   - `render_prompt`
+  - `copy_strategy`
+  - `text_density`
+  - `should_render_text`
   - `title_copy`
   - `subtitle_copy`
   - `selling_points_for_render`
@@ -87,10 +101,16 @@
   - `typography_hint`
   - `copy_source`
   - `subject_occupancy_ratio`
-- 文案优先级：
-  - 用户输入优先
-  - 用户未输入时才自动生成
-  - `manual` 模式不自动补空字段
+- 文案规则：
+  - 不再接收用户逐条输入文案
+  - 可适度利用 `brand_name / product_name`
+  - 其余由系统自动生成
+  - 默认不是每张图都带字
+- 角色级策略：
+  - `hero`：强文案
+  - `packaging_feature / process_or_quality`：适量文案
+  - `gift_scene`：轻量文案
+  - `dry_leaf_detail / tea_soup / brewed_leaf_detail / lifestyle`：少字或无字
 - 落盘 `prompt_plan_v2.json`。
 
 ### `render_images`
@@ -98,7 +118,8 @@
 - 最终 prompt 组装时再次补强：
   - 禁止参考图文案泄漏
   - 产品参考图与背景风格参考图分流
-  - 显式下发标题、副标题、卖点、版式提示、字体层级、主体比例
+  - 显式下发 `copy_strategy / text_density / should_render_text`
+  - `hero` 继续强调主体 2/3
 - 单张直出失败时，在节点内部执行 overlay fallback。
 - overlay fallback 仍属于新流程内部行为，不回退为独立旧节点。
 - 每完成一张图，都会通过 workflow 进度回调回传局部结果。
@@ -118,10 +139,22 @@
 - 根据 QC 更新任务状态。
 - 导出最终图片 ZIP 和完整任务包 ZIP。
 
+## 自动文案策略
+- 当前产品定位是“整套电商产品图生成器”，不是“手工配置每张图文案的编辑器”。
+- 生成逻辑遵循：
+  - `hero`
+    - 可带主标题 + 短副标题
+    - 产品主体约占画面 `2/3`
+  - `packaging_feature / process_or_quality / gift_scene`
+    - 可带适量文案
+  - `dry_leaf_detail / tea_soup / brewed_leaf_detail / lifestyle`
+    - 优先少字或无字
+- 文案不来自用户逐条填写，也不来自参考图可见文字。
+
 ## 参考图文案保护
 - 当前主链禁止把参考图可见文字转成广告标题、副标题、卖点、背景大字、宣传语。
 - 参考图文字只允许作为包装自身标签一致性的一部分被保留。
-- 若用户没有输入标题、副标题、卖点，只能由当前新流程自动生成，不允许从参考图文字中提炼。
+- 背景风格参考图中的文字内容一律无效。
 
 ## Hero 构图规则
 - 只有 `hero` 图执行主体 `2/3` 占比硬规则。
@@ -145,6 +178,9 @@
   - `overlay_applied`
   - `fallback_used`
   - `fallback_reason`
+  - `copy_strategy`
+  - `text_density`
+  - `should_render_text`
   - `copy_source`
   - `selling_points_for_render`
   - `selling_points_boxes`

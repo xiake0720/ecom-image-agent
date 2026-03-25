@@ -5,7 +5,7 @@
 
 核心职责：
 - 定义 `prompt_refine_v2` 节点输出的数据结构
-- 承载每张图最终可交给图片模型执行的 prompt、文案和版式提示
+- 承载每张图最终可交给图片模型执行的 prompt、文案策略和版式提示
 """
 
 from __future__ import annotations
@@ -36,12 +36,15 @@ class PromptShot(BaseModel):
     shot_id: str
     shot_role: str
     render_prompt: str
-    title_copy: str = Field(description="建议控制在 4-8 字，用户手动输入时按原文保留。")
-    subtitle_copy: str = Field(description="建议控制在 8-15 字，用户手动输入时按原文保留。")
-    selling_points_for_render: list[str] = Field(default_factory=list, description="最终需要融入画面的卖点文案。")
-    layout_hint: str = Field(description="描述文字区域、留白策略与层级顺序。")
+    copy_strategy: str = Field(default="light", description="strong / light / none")
+    text_density: str = Field(default="medium", description="heavy / medium / low / none")
+    should_render_text: bool = Field(default=True, description="是否适合在图中出现广告文字。")
+    title_copy: str = Field(default="", description="系统自动生成的标题，建议 4-8 字。")
+    subtitle_copy: str = Field(default="", description="系统自动生成的副标题，建议 8-15 字。")
+    selling_points_for_render: list[str] = Field(default_factory=list, description="最终需要融入画面的卖点短语。")
+    layout_hint: str = Field(default="", description="描述文字区域、留白策略与层级顺序。")
     typography_hint: str = Field(default="", description="描述标题、副标题、卖点的字号层级与风格。")
-    copy_source: str = Field(default="auto", description="标记当前图位文案来自用户输入还是自动生成。")
+    copy_source: str = Field(default="system_auto", description="标记当前图位文案来源。")
     subject_occupancy_ratio: float | None = Field(default=None, description="主体预期占画面比例，hero 默认约 0.66。")
     aspect_ratio: str = "1:1"
     image_size: str = "2K"

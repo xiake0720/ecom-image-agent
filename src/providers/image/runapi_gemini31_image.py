@@ -159,11 +159,14 @@ class RunApiGemini31ImageProvider(BaseImageProvider):
         """把 v2 shot 结构压成实际发给图片模型的文本描述。"""
 
         lines = [shot.render_prompt]
-        if shot.title_copy:
+        lines.append(
+            f"图内文字策略：copy_strategy={shot.copy_strategy}, text_density={shot.text_density}, should_render_text={str(shot.should_render_text).lower()}"
+        )
+        if shot.should_render_text and shot.title_copy:
             lines.append(f"主标题：{shot.title_copy}")
-        if shot.subtitle_copy:
+        if shot.should_render_text and shot.subtitle_copy:
             lines.append(f"副标题：{shot.subtitle_copy}")
-        if shot.selling_points_for_render:
+        if shot.should_render_text and shot.selling_points_for_render:
             lines.append(f"卖点：{'；'.join(shot.selling_points_for_render)}")
         if shot.layout_hint:
             lines.append(f"版式提示：{shot.layout_hint}")
@@ -171,6 +174,8 @@ class RunApiGemini31ImageProvider(BaseImageProvider):
             lines.append(f"文字层级：{shot.typography_hint}")
         if shot.subject_occupancy_ratio:
             lines.append(f"主体占比：约 {int(shot.subject_occupancy_ratio * 100)}%")
+        if not shot.should_render_text or shot.copy_strategy == "none":
+            lines.append("本图不应主动生成广告大字，重点保留画面质感和产品细节。")
         lines.append("广告文案只允许使用上述标题、副标题、卖点，严禁转写、复用、概括任何参考图可见文字。")
         return "\n".join(lines).strip()
 
