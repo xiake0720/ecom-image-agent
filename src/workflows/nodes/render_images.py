@@ -1,1289 +1,359 @@
-"""图片渲染节点。
+"""v2 图片生成节点。
 
 文件位置：
 - `src/workflows/nodes/render_images.py`
 
-核心职责：
-<<<<<<< HEAD
-- 保留现有 v1 `image_prompt_plan` 渲染逻辑
-- 为 v2 `prompt_plan_v2` 增加直出图内文案的图片生成分支
-- 统一记录参考图选择、模型路由、生成模式和 overlay fallback 标记
-
-节点边界：
-- v1 仍然交给旧的 `ImagePromptPlan` 分支
-- v2 优先直接图内带字；当单张直出失败时，可回退为无字底图并标记后续 overlay fallback
-=======
-- 根据 preview / final 决定输出目录。
-- 选择渲染参考图，并复用统一的 reference selector 规则。
-- 判断当前走 `t2i` 还是 `image_edit`。
-- 在 `image_edit` 模式下优先基于三层结构化 contract 组装最终执行 prompt。
-- 调用图片 provider 生成图片。
-
-节点前后关系：
-- 上游节点：`build_prompts`
-- 下游节点：`overlay_text`
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
+职责：
+- 消费 `prompt_plan_v2`
+- 调用图片 provider 生成图片
+- 在节点内部完成 overlay fallback，不再保留独立旧节点
+- 明确区分产品参考图与背景风格参考图
 """
 
 from __future__ import annotations
 
-<<<<<<< HEAD
-import logging
-=======
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
 from pathlib import Path
+import shutil
+
+from PIL import Image
 
 from src.core.config import get_settings
-from src.core.paths import get_task_generated_dir, get_task_generated_preview_dir
-<<<<<<< HEAD
-from src.domain.generation_result import GenerationResult
+from src.core.paths import get_task_final_dir, get_task_generated_dir
+from src.domain.generation_result import GeneratedImage, GenerationResult
 from src.domain.image_prompt_plan import ImagePrompt, ImagePromptPlan
 from src.domain.prompt_plan_v2 import PromptPlanV2, PromptShot
-from src.services.assets.reference_selector import ReferenceSelection, select_reference_bundle
-from src.workflows.state import WorkflowDependencies, WorkflowState, format_connected_contract_logs
-
-logger = logging.getLogger(__name__)
-
-
-def render_images(state: WorkflowState, deps: WorkflowDependencies) -> dict:
-    """执行图片生成，并根据 v1/v2 工作流选择不同渲染分支。
-
-    这个节点当前是 v1/v2 共用节点：
-    - v1 继续读 `image_prompt_plan`
-    - v2 改读 `prompt_plan_v2`
-
-    之所以不拆成两个节点，是为了尽量复用：
-    - 参考图选择
-    - 结果落盘
-    - debug 字段
-    - finalize/QC 的下游契约
-    """
-    task = state["task"]
-    workflow_version = _resolve_workflow_version(state)
-    render_mode = _resolve_render_mode(state)
-    render_variant = "preview" if render_mode == "preview" else "final"
-=======
-from src.domain.image_prompt_plan import ImagePrompt, ImagePromptPlan
-from src.services.assets.reference_selector import ReferenceSelection, select_reference_bundle
-from src.workflows.state import WorkflowDependencies, WorkflowState, format_connected_contract_logs
+from src.services.assets.reference_selector import select_reference_bundle
+from src.workflows.state import (
+    WorkflowDependencies,
+    WorkflowState,
+    build_render_progress_task,
+    format_connected_contract_logs,
+)
 
 
 def render_images(state: WorkflowState, deps: WorkflowDependencies) -> dict:
-    """执行图片生成并返回 `GenerationResult`。
+    """执行 v2 图片生成，并在内部处理 overlay fallback。"""
 
-    参数：
-    - state：当前 workflow state，要求至少包含任务对象、兼容 prompt plan，必要时包含结构化 contract。
-    - deps：依赖容器，主要使用图片 provider。
-
-    返回：
-    - dict：写回生成结果、渲染模式、参考图调试信息和日志。
-
-    关键副作用：
-    - 调用图片 provider，触发真实图片生成。
-    - 在任务目录中写出预览图或生成图。
-    - 追加渲染阶段调试日志，明确说明本次是 contract mode 还是 legacy fallback。
-    """
     task = state["task"]
-    render_mode = _resolve_render_mode(state)
-    render_variant = "preview" if render_mode == "preview" else "final"
-    prompt_plan = _resolve_render_prompt_plan(state, render_mode)
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-    output_dir = (
-        Path(get_task_generated_preview_dir(task.task_id))
-        if render_variant == "preview"
-        else Path(get_task_generated_dir(task.task_id))
-    )
-<<<<<<< HEAD
-=======
+    prompt_plan = state.get("prompt_plan_v2")
+    if prompt_plan is None or not prompt_plan.shots:
+        raise RuntimeError("render_images requires prompt_plan_v2")
 
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-    selection = _select_render_assets(state, render_mode=render_mode)
-    reference_assets = selection.selected_assets
+    settings = get_settings()
+    generated_dir = Path(get_task_generated_dir(task.task_id))
+    final_dir = Path(get_task_final_dir(task.task_id))
+    generated_dir.mkdir(parents=True, exist_ok=True)
+    final_dir.mkdir(parents=True, exist_ok=True)
+
+    selection = select_reference_bundle(state.get("assets", []), max_images=2, max_background_style_images=2)
     generation_context = _resolve_generation_context(
         provider=deps.image_generation_provider,
-        fallback_model_id=deps.image_model_selection.model_id if deps.image_model_selection else "-",
-        reference_assets=reference_assets,
-<<<<<<< HEAD
-        workflow_version=workflow_version,
+        fallback_model_id=deps.image_model_selection.model_id if deps.image_model_selection else settings.runapi_image_model,
+        reference_assets=selection.product_reference_assets,
+        background_style_assets=selection.background_style_assets,
     )
-    render_generation_mode = str(generation_context["generation_mode"])
-    render_reference_asset_ids = list(generation_context["reference_asset_ids"])
-=======
-    )
-    render_generation_mode = str(generation_context["generation_mode"])
-    render_reference_asset_ids = list(generation_context["reference_asset_ids"])
-
-    # image_edit 现在优先吃三层 contract；如果缺任何关键输入，才退回旧 prompt。
-    execution_plan, prompt_debug_rows = _build_execution_prompt_plan(
-        prompt_plan=prompt_plan,
-        shot_prompt_specs=state.get("shot_prompt_specs"),
-        product_lock=state.get("product_lock") or state.get("product_analysis"),
-        style_architecture=state.get("style_architecture"),
-        generation_mode=render_generation_mode,
-    )
-
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
     logs = [
         *state.get("logs", []),
         *format_connected_contract_logs(state, node_name="render_images"),
-        (
-            "[render_images] start "
-<<<<<<< HEAD
-            f"workflow_version={workflow_version} "
-            f"render_mode={render_mode} "
-            f"render_variant={render_variant} "
-            f"render_generation_mode={render_generation_mode} "
-=======
-            f"render_mode={render_mode} "
-            f"render_variant={render_variant} "
-            f"render_generation_mode={render_generation_mode} "
-            f"prompts={len(prompt_plan.prompts)} "
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-            f"provider={deps.image_provider_name or '-'} "
-            f"model={generation_context['model_id']} "
-            f"reference_asset_ids={render_reference_asset_ids or []}"
-        ),
-        (
-            "[render] "
-            f"mode={render_mode} "
-            f"variant={render_variant} "
-            f"generation_mode={render_generation_mode} "
-            f"refs={render_reference_asset_ids or []} "
-            f"provider={deps.image_provider_name or '-'} "
-            f"model={generation_context['model_id']}"
-        ),
-        (
-            "[render_images] reference_selection "
-            f"selected_main_asset_id={selection.selected_main_asset_id or '-'} "
-            f"selected_detail_asset_id={selection.selected_detail_asset_id or '-'} "
-            f"selected_reference_asset_ids={selection.selected_asset_ids or []}"
-        ),
-        f"[render_images] selection_reason={selection.selection_reason}",
-<<<<<<< HEAD
+        f"[render_images] start shot_count={len(prompt_plan.shots)} model={generation_context['model_id']}",
+        f"[render_images] product_reference_asset_ids={generation_context['reference_asset_ids']}",
+        f"[render_images] background_style_asset_ids={generation_context['background_style_asset_ids']}",
+        f"[render_images] overlay_fallback_enabled={str(settings.enable_overlay_fallback).lower()}",
     ]
 
-    if workflow_version == "v2" and state.get("prompt_plan_v2") is not None:
-        # v2 走逐张渲染分支，原因是单张图直出失败时要保留整组其他图片，
-        # 只对失败图进入 overlay fallback。
-        result, render_logs, overlay_fallback_candidates = _render_v2_images(
-            state=state,
+    final_images: list[GeneratedImage] = []
+    text_render_reports: dict[str, dict[str, object]] = {}
+    fallback_count = 0
+    total_shots = len(prompt_plan.shots)
+    for index, shot in enumerate(prompt_plan.shots, start=1):
+        generated_image, report, used_fallback = _render_single_shot(
+            index=index,
+            shot=shot,
+            generated_dir=generated_dir,
+            final_dir=final_dir,
+            reference_assets=selection.product_reference_assets,
+            background_style_assets=selection.background_style_assets,
             deps=deps,
-            render_mode=render_mode,
-            output_dir=output_dir,
-            reference_assets=reference_assets,
+            overlay_fallback_enabled=settings.enable_overlay_fallback,
         )
-        logs.extend(render_logs)
-        logs.extend(
-            [
-                (
-                    "[render_images] completed "
-                    f"workflow_version=v2 "
-                    f"render_generation_mode={render_generation_mode} "
-                    f"count={len(result.images)} "
-                    f"needs_overlay_fallback={str(bool(overlay_fallback_candidates)).lower()}"
-                ),
-                f"[render_images] output_dir={output_dir}",
-            ]
-        )
-        updates = {
-            "workflow_version": workflow_version,
-            "generation_result": result,
-            "generation_result_v2": result,
-            "render_variant": render_variant,
-            "render_mode": render_mode,
-            "render_generation_mode": render_generation_mode,
-            "render_reference_asset_ids": render_reference_asset_ids,
-            "render_image_provider_impl": deps.image_provider_name or "-",
-            "render_image_model_id": generation_context["model_id"],
-            "render_selected_main_asset_id": selection.selected_main_asset_id,
-            "render_selected_detail_asset_id": selection.selected_detail_asset_id,
-            "render_reference_selection_reason": selection.selection_reason,
-            "needs_overlay_fallback": bool(overlay_fallback_candidates),
-            "overlay_fallback_candidates": overlay_fallback_candidates,
-            "logs": logs,
-        }
-        if render_variant == "preview":
-            updates["preview_generation_result"] = result
-        return updates
-
-    prompt_plan = _resolve_render_prompt_plan_v1(state, render_mode)
-    execution_plan, prompt_debug_rows = _build_execution_prompt_plan_v1(
-        prompt_plan=prompt_plan,
-        shot_prompt_specs=state.get("shot_prompt_specs"),
-        product_lock=state.get("product_lock") or state.get("product_analysis"),
-        style_architecture=state.get("style_architecture"),
-        generation_mode=render_generation_mode,
-    )
-    logs.append(
-=======
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-        (
-            "[render_images] contract_readiness "
-            f"product_lock_connected={str(bool(state.get('product_lock') or state.get('product_analysis'))).lower()} "
-            f"style_architecture_connected={str(bool(state.get('style_architecture'))).lower()} "
-            f"shot_prompt_specs_available_for_render={str(bool(state.get('shot_prompt_specs'))).lower()}"
-<<<<<<< HEAD
-        )
-    )
-=======
-        ),
-    ]
-
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-    for prompt_row in prompt_debug_rows:
+        final_images.append(generated_image)
+        text_render_reports[shot.shot_id] = report
+        fallback_count += 1 if used_fallback else 0
         logs.append(
-            (
-                "[render_images] prompt_contract "
-                f"shot_id={prompt_row['shot_id']} "
-                f"shot_type={prompt_row['shot_type']} "
-                f"generation_mode={prompt_row['generation_mode']} "
-                f"execution_source={prompt_row['execution_source']} "
-                f"has_product_lock={str(prompt_row['has_product_lock']).lower()} "
-                f"has_style_architecture={str(prompt_row['has_style_architecture']).lower()} "
-                f"has_shot_prompt_spec={str(prompt_row['has_shot_prompt_spec']).lower()} "
-                f"reference_asset_ids={render_reference_asset_ids or []} "
-                f"text_safe_zone={prompt_row['text_safe_zone']} "
-<<<<<<< HEAD
-                f"keep_subject_rules={prompt_row['keep_subject_rules']} "
-                f"editable_regions={prompt_row['editable_regions']}"
-=======
-                f"must_preserve_visuals={prompt_row['must_preserve_visuals']} "
-                f"must_preserve_texts={prompt_row['must_preserve_texts']} "
-                f"text_anchor_source={prompt_row['text_anchor_source']} "
-                f"text_anchor_status={prompt_row['text_anchor_status']} "
-                f"must_not_change={prompt_row['must_not_change']} "
-                f"keep_subject_rules={prompt_row['keep_subject_rules']} "
-                f"primary_subject={prompt_row['primary_subject']} "
-                f"secondary_subject={prompt_row['secondary_subject']} "
-                f"allowed_scene_change_level={prompt_row['allowed_scene_change_level']} "
-                f"forbidden_regression_pattern={prompt_row['forbidden_regression_pattern']} "
-                f"editable_regions={prompt_row['editable_regions']} "
-                f"editable_regions_final={prompt_row['editable_regions_final']}"
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-            )
+            "[render_images] "
+            f"shot_id={shot.shot_id} role={shot.shot_role} copy_strategy={shot.copy_strategy} "
+            f"should_render_text={str(shot.should_render_text).lower()} "
+            f"copy_source={shot.copy_source} overlay_fallback={str(used_fallback).lower()} final_path={generated_image.image_path}"
         )
-        logs.append(
-            (
-                "[render_images] execution_prompt "
-                f"shot_id={prompt_row['shot_id']} "
-                f"shot_type={prompt_row['shot_type']} "
-                f"generation_mode={prompt_row['generation_mode']} "
-                f"execution_source={prompt_row['execution_source']} "
-                f"reference_asset_ids={render_reference_asset_ids or []} "
-                f"prompt_summary={prompt_row['prompt_summary']}"
-            )
+        _publish_partial_render_result(
+            base_state=state,
+            deps=deps,
+            task=task,
+            images=final_images,
+            text_render_reports=text_render_reports,
+            logs=logs,
+            completed_count=index,
+            total_count=total_shots,
         )
 
-    result = deps.image_generation_provider.generate_images(
-        execution_plan,
-        output_dir=output_dir,
-        reference_assets=reference_assets,
-    )
-    output_names = ", ".join(Path(image.image_path).name for image in result.images)
-    logs.extend(
-        [
-            (
-                "[render_images] completed "
-<<<<<<< HEAD
-                f"workflow_version={workflow_version} "
-=======
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-                f"render_generation_mode={render_generation_mode} "
-                f"count={len(result.images)} "
-                f"files={output_names or '-'}"
-            ),
-<<<<<<< HEAD
-=======
-            (
-                "[render] "
-                f"completed variant={render_variant} "
-                f"generation_mode={render_generation_mode} "
-                f"refs={render_reference_asset_ids or []} "
-                f"output_dir={output_dir}"
-            ),
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-            f"[render_images] output_dir={output_dir}",
-        ]
-    )
+    if not final_images:
+        raise RuntimeError("generation returned no images")
+
+    generation_result = GenerationResult(images=final_images)
+    deps.storage.save_json_artifact(task.task_id, "final_text_regions.json", {"shots": list(text_render_reports.values())})
     return {
-<<<<<<< HEAD
-        "workflow_version": workflow_version,
-=======
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-        "generation_result": result,
-        "render_variant": render_variant,
-        "render_mode": render_mode,
-        "render_generation_mode": render_generation_mode,
-        "render_reference_asset_ids": render_reference_asset_ids,
-        "render_image_provider_impl": deps.image_provider_name or "-",
-        "render_image_model_id": generation_context["model_id"],
-        "render_selected_main_asset_id": selection.selected_main_asset_id,
-        "render_selected_detail_asset_id": selection.selected_detail_asset_id,
-        "render_reference_selection_reason": selection.selection_reason,
-<<<<<<< HEAD
-        "needs_overlay_fallback": False,
-        "overlay_fallback_candidates": [],
-=======
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-        "logs": logs,
+        "generation_result": generation_result,
+        "generation_result_v2": generation_result,
+        "text_render_reports": text_render_reports,
+        "logs": [
+            *logs,
+            f"[render_images] completed count={len(final_images)} fallback_count={fallback_count}",
+        ],
     }
 
 
-<<<<<<< HEAD
-def _render_v2_images(
+def _render_single_shot(
     *,
-    state: WorkflowState,
-    deps: WorkflowDependencies,
-    render_mode: str,
-    output_dir: Path,
+    index: int,
+    shot: PromptShot,
+    generated_dir: Path,
+    final_dir: Path,
     reference_assets: list,
-) -> tuple[GenerationResult, list[str], list[dict[str, object]]]:
-    """执行 v2 prompt_plan_v2 渲染，并记录单张 overlay fallback 候选。
+    background_style_assets: list,
+    deps: WorkflowDependencies,
+    overlay_fallback_enabled: bool,
+) -> tuple[GeneratedImage, dict[str, object], bool]:
+    """执行单张图生成，并在失败时回退到 Pillow 贴字。"""
 
-    返回值说明：
-    - `GenerationResult`：本轮实际拿到的图片
-    - `logs`：供结果页和排查使用
-    - `overlay_fallback_candidates`：后续 `overlay_text` / `run_qc` 继续消费
-    """
-    prompt_plan = _resolve_render_prompt_plan_v2(state, render_mode)
     provider = deps.image_generation_provider
-    overlay_fallback_enabled = _resolve_overlay_fallback_enabled(state)
-    if not hasattr(provider, "generate_images_v2"):
-        # provider 还没实现 v2 接口时，允许先压成旧 plan 跑通链路。
-        # 这样可以保证“先跑通，再逐步替换 provider”。
-        adapted_plan = _build_v2_compatibility_prompt_plan(prompt_plan)
-        result = provider.generate_images(
-            adapted_plan,
-            output_dir=output_dir,
-            reference_assets=reference_assets,
-        )
-        return (
-            result,
-            [
-                "[render_images] v2 compatibility mode: provider has no generate_images_v2, fallback to ImagePromptPlan adapter",
-            ],
-            [],
-        )
+    execution_shot = _build_execution_shot(shot)
+    raw_result: GenerationResult | None = None
+    raw_image: GeneratedImage | None = None
+    used_fallback = False
+    fallback_reason = ""
 
-    logs = [
-        f"[render_images] v2_prompt_count={len(prompt_plan.shots)}",
-        f"[render_images] overlay_fallback_enabled={str(overlay_fallback_enabled).lower()}",
-    ]
-    images = []
-    overlay_fallback_candidates: list[dict[str, object]] = []
-    for shot in prompt_plan.shots:
+    if hasattr(provider, "generate_images_v2"):
         try:
-            # 逐张渲染是为了把失败粒度控制到单张图，避免整套重跑。
-            shot_result = provider.generate_images_v2(
-                PromptPlanV2(shots=[shot]),
-                output_dir=output_dir,
+            raw_result = provider.generate_images_v2(
+                PromptPlanV2(shots=[execution_shot]),
+                output_dir=generated_dir,
                 reference_assets=reference_assets,
+                background_style_assets=background_style_assets,
             )
-            if not shot_result.images:
-                raise RuntimeError(f"provider returned no image for {shot.shot_id}")
-            generated_image = shot_result.images[0]
-            images.append(generated_image)
-            logs.append(
-                (
-                    f"[render_images] v2 shot_id={shot.shot_id} role={shot.shot_role} "
-                    "direct_text_result=success overlay_fallback=false"
-                )
-            )
-        except Exception as exc:
+            raw_image = _first_image(raw_result, shot.shot_id)
+        except Exception:
+            fallback_reason = "v2_generation_failed"
             if not overlay_fallback_enabled:
                 raise
-            # 第一次失败后，不直接终止，而是退化成“无字底图”再跑一次。
-            # 这张图后续会在 overlay_text 中补字。
-            fallback_shot = _build_overlay_fallback_shot(shot)
-            fallback_result = provider.generate_images_v2(
-                PromptPlanV2(shots=[fallback_shot]),
-                output_dir=output_dir,
-                reference_assets=reference_assets,
-            )
-            if not fallback_result.images:
-                raise RuntimeError(
-                    f"direct text render failed for {shot.shot_id}, and overlay fallback base image generation also returned no image"
-                ) from exc
-            generated_image = fallback_result.images[0]
-            images.append(generated_image)
-            overlay_fallback_candidates.append(
-                {
-                    "shot_id": shot.shot_id,
-                    "shot_role": shot.shot_role,
-                    "generated_image_path": generated_image.image_path,
-                    "title_copy": shot.title_copy,
-                    "subtitle_copy": shot.subtitle_copy,
-                    "layout_hint": shot.layout_hint,
-                    "reason": f"direct_text_generation_failed: {exc}",
-                    "fallback_stage": "render_images",
-                }
-            )
-            logs.append(
-                (
-                    f"[render_images] v2 shot_id={shot.shot_id} role={shot.shot_role} "
-                    "direct_text_result=failed overlay_fallback=true "
-                    f"reason={exc}"
-                )
-            )
-    return GenerationResult(images=images), logs, overlay_fallback_candidates
+    else:
+        fallback_reason = "provider_without_v2"
+    if raw_image is None:
+        used_fallback = True
+        raw_result = provider.generate_images(
+            _build_compatibility_plan(execution_shot),
+            output_dir=generated_dir,
+            reference_assets=reference_assets,
+            background_style_assets=background_style_assets,
+        )
+        raw_image = _first_image(raw_result, shot.shot_id)
+
+    if raw_image is None:
+        raise RuntimeError(f"image generation returned no image for {shot.shot_id}")
+
+    if used_fallback:
+        final_path = final_dir / Path(raw_image.image_path).name
+        render_report = deps.text_renderer.render_overlay(
+            shot_id=shot.shot_id,
+            image_path=raw_image.image_path,
+            output_path=str(final_path),
+            title=shot.title_copy,
+            subtitle=shot.subtitle_copy,
+            selling_points=shot.selling_points_for_render,
+            layout_hint=shot.layout_hint,
+        )
+        final_image = _build_final_image(shot_id=shot.shot_id, final_path=final_path)
+        report = {
+            "shot_id": shot.shot_id,
+            "overlay_applied": True,
+            "font_source": render_report.font_source,
+            "fallback_used": render_report.fallback_used,
+            "fallback_reason": fallback_reason or "overlay_text_render",
+            "copy_strategy": shot.copy_strategy,
+            "text_density": shot.text_density,
+            "should_render_text": shot.should_render_text,
+            "copy_source": shot.copy_source,
+            "selling_points_for_render": shot.selling_points_for_render,
+            "title_box": _box_to_payload(render_report.title_box),
+            "subtitle_box": _box_to_payload(render_report.subtitle_box),
+            "selling_points_boxes": [_box_to_payload(box) for box in render_report.selling_points_boxes],
+        }
+        return final_image, report, True
+
+    final_image = _copy_generated_to_final(raw_image, final_dir)
+    report = {
+        "shot_id": shot.shot_id,
+        "overlay_applied": False,
+        "font_source": "",
+        "fallback_used": False,
+        "fallback_reason": "",
+        "copy_strategy": shot.copy_strategy,
+        "text_density": shot.text_density,
+        "should_render_text": shot.should_render_text,
+        "copy_source": shot.copy_source,
+        "selling_points_for_render": shot.selling_points_for_render,
+        "title_box": None,
+        "subtitle_box": None,
+        "selling_points_boxes": [],
+    }
+    return final_image, report, False
 
 
-def _resolve_workflow_version(state: WorkflowState) -> str:
-    """优先使用 state 中的工作流版本，缺失时根据已有 contract 推断，再回退到全局设置。"""
-    explicit_value = str(state.get("workflow_version") or "").strip().lower()
-    if explicit_value in {"v1", "v2"}:
-        return explicit_value
-    # 旧测试和旧链路通常不会显式传 workflow_version，这里优先根据现有
-    # contract 字段做推断，避免 settings 默认值改成 v2 后误伤 v1 渲染。
-    if state.get("prompt_plan_v2") is not None or state.get("director_output") is not None:
-        return "v2"
-    if state.get("image_prompt_plan") is not None:
-        return "v1"
-    return str(get_settings().workflow_version or "v1").strip().lower()
+def _build_execution_shot(shot: PromptShot) -> PromptShot:
+    """在渲染层补齐最终 prompt 装配，确保硬约束一定下发。"""
+
+    assembled_prompt = _assemble_final_render_prompt(shot)
+    return shot.model_copy(update={"render_prompt": assembled_prompt})
 
 
-=======
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-def _resolve_render_mode(state: WorkflowState) -> str:
-    """解析当前运行是 preview、final 还是 full_auto。"""
-    explicit_value = str(state.get("render_mode") or "").strip().lower()
-    if explicit_value in {"preview", "final", "full_auto"}:
-        return explicit_value
-    return get_settings().resolve_render_mode()
+def _assemble_final_render_prompt(shot: PromptShot) -> str:
+    """把 render 层硬约束、图内文案和参考图边界收口成最终 prompt。"""
 
-
-<<<<<<< HEAD
-def _resolve_render_prompt_plan_v1(state: WorkflowState, render_mode: str) -> ImagePromptPlan:
-=======
-def _resolve_render_prompt_plan(state: WorkflowState, render_mode: str) -> ImagePromptPlan:
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-    """preview 阶段只截取前几张图并调整输出尺寸。"""
-    base_plan = state["image_prompt_plan"]
-    if render_mode != "preview":
-        return base_plan
-    settings = get_settings()
-    preview_count = max(1, min(settings.preview_shot_count, len(base_plan.prompts)))
-    preview_prompts = [
-        prompt.model_copy(update={"output_size": settings.preview_output_size})
-        for prompt in base_plan.prompts[:preview_count]
+    lines = [
+        shot.render_prompt,
+        "最终执行约束：广告文案只允许使用下列主标题、副标题、卖点，严禁转写、复用、概括任何参考图可见文字。",
+        "最终执行约束：产品参考图只用于保持包装结构、材质、颜色与标签一致。",
+        "最终执行约束：背景风格参考图只用于学习背景氛围、色调与场景语言，不得替换产品包装。",
+        f"最终执行约束：copy_strategy={shot.copy_strategy}，text_density={shot.text_density}，should_render_text={str(shot.should_render_text).lower()}。",
     ]
-    return ImagePromptPlan(generation_mode=base_plan.generation_mode, prompts=preview_prompts)
+    if shot.should_render_text and shot.title_copy:
+        lines.append(f"主标题：{shot.title_copy}")
+    if shot.should_render_text and shot.subtitle_copy:
+        lines.append(f"副标题：{shot.subtitle_copy}")
+    if shot.should_render_text and shot.selling_points_for_render:
+        lines.append(f"卖点：{'；'.join(shot.selling_points_for_render)}")
+    if shot.layout_hint:
+        lines.append(f"文字区域：{shot.layout_hint}")
+    if shot.typography_hint:
+        lines.append(f"文字层级：{shot.typography_hint}")
+    if shot.subject_occupancy_ratio:
+        lines.append(f"主体占比目标：约 {int(shot.subject_occupancy_ratio * 100)}%，不要让商品过小。")
+    if not shot.should_render_text or shot.copy_strategy == "none":
+        lines.append("本图优先不要出现广告大字；如果模型倾向加字，也必须压到极轻程度。")
+    return "\n".join(lines).strip()
 
 
-<<<<<<< HEAD
-def _resolve_render_prompt_plan_v2(state: WorkflowState, render_mode: str) -> PromptPlanV2:
-    """preview 阶段只截取 v2 prompt plan 的前几张图。"""
-    base_plan = state["prompt_plan_v2"]
-    if render_mode != "preview":
-        return base_plan
-    settings = get_settings()
-    preview_count = max(1, min(settings.preview_shot_count, len(base_plan.shots)))
-    return PromptPlanV2(shots=[shot.model_copy(deep=True) for shot in base_plan.shots[:preview_count]])
+def _publish_partial_render_result(
+    *,
+    base_state: WorkflowState,
+    deps: WorkflowDependencies,
+    task,
+    images: list[GeneratedImage],
+    text_render_reports: dict[str, dict[str, object]],
+    logs: list[str],
+    completed_count: int,
+    total_count: int,
+) -> None:
+    """在 `render_images` 节点内部按张上报已完成结果。"""
 
+    if deps.progress_callback is None:
+        return
 
-=======
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-def _resolve_render_max_reference_images(state: WorkflowState, *, render_mode: str) -> int:
-    """preview 和 final 默认参考图张数不同。"""
-    explicit_value = state.get("render_max_reference_images")
-    if explicit_value is not None:
-        return max(1, int(explicit_value))
-    if render_mode == "preview":
-        return 1
-    return 2
-
-
-def _select_render_assets(state: WorkflowState, *, render_mode: str) -> ReferenceSelection:
-    """渲染阶段复用统一参考图选择器，但数量按 preview/final 区分。"""
-    return select_reference_bundle(
-        state.get("assets", []),
-        max_images=_resolve_render_max_reference_images(state, render_mode=render_mode),
+    progress_task = build_render_progress_task(task, completed_count=completed_count, total_count=total_count)
+    generation_result = GenerationResult(images=list(images))
+    deps.progress_callback(
+        {
+            **base_state,
+            "task": progress_task,
+            "generation_result": generation_result,
+            "generation_result_v2": generation_result,
+            "text_render_reports": dict(text_render_reports),
+            "logs": list(logs),
+            "current_step": progress_task.current_step,
+            "current_step_label": progress_task.current_step_label,
+            "progress_percent": progress_task.progress_percent,
+            "error_message": "",
+        }
     )
 
 
-<<<<<<< HEAD
-def _resolve_generation_context(*, provider, fallback_model_id: str, reference_assets: list, workflow_version: str) -> dict[str, object]:
-=======
-def _resolve_generation_context(*, provider, fallback_model_id: str, reference_assets: list) -> dict[str, object]:
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-    """从 provider 适配层读取实际 generation mode 和模型信息。"""
-    resolver = getattr(provider, "resolve_generation_context", None)
-    if callable(resolver):
-        context = resolver(reference_assets=reference_assets)
+def _build_compatibility_plan(shot: PromptShot) -> ImagePromptPlan:
+    """把 v2 shot 映射成兼容型 ImagePromptPlan。"""
+
+    width, height = get_settings().resolve_output_dimensions(aspect_ratio=shot.aspect_ratio, image_size=shot.image_size)
+    prompt = ImagePrompt(
+        shot_id=shot.shot_id,
+        shot_type=shot.shot_role,
+        prompt=shot.render_prompt,
+        generation_mode="t2i",
+        output_size=f"{width}x{height}",
+        text_safe_zone=shot.layout_hint,
+    )
+    return ImagePromptPlan(generation_mode="t2i", prompts=[prompt])
+
+
+def _resolve_generation_context(
+    *,
+    provider,
+    fallback_model_id: str,
+    reference_assets: list,
+    background_style_assets: list,
+) -> dict[str, object]:
+    """提取图片 provider 的最小执行上下文。"""
+
+    if hasattr(provider, "resolve_generation_context"):
+        context = provider.resolve_generation_context(
+            reference_assets=reference_assets,
+            background_style_assets=background_style_assets,
+        )
         return {
-            "generation_mode": context.generation_mode,
-            "model_id": context.model_id,
-            "reference_asset_ids": context.reference_asset_ids,
+            "generation_mode": getattr(context, "generation_mode", "t2i"),
+            "model_id": getattr(context, "model_id", fallback_model_id),
+            "reference_asset_ids": list(getattr(context, "reference_asset_ids", [])),
+            "background_style_asset_ids": list(getattr(context, "background_style_asset_ids", [])),
         }
-<<<<<<< HEAD
-    fallback_generation_mode = "t2i" if workflow_version == "v2" else ("image_edit" if reference_assets else "t2i")
     return {
-        "generation_mode": fallback_generation_mode,
-=======
-    return {
-        "generation_mode": "image_edit" if reference_assets else "t2i",
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
+        "generation_mode": "t2i",
         "model_id": fallback_model_id,
         "reference_asset_ids": [asset.asset_id for asset in reference_assets],
+        "background_style_asset_ids": [asset.asset_id for asset in background_style_assets],
     }
 
 
-<<<<<<< HEAD
-def _resolve_overlay_fallback_enabled(state: WorkflowState) -> bool:
-    """优先使用任务运行时开关，缺失时回退到全局设置。"""
-    explicit_value = state.get("enable_overlay_fallback")
-    if explicit_value is not None:
-        return bool(explicit_value)
-    return bool(get_settings().enable_overlay_fallback)
+def _first_image(result: GenerationResult | None, shot_id: str) -> GeneratedImage | None:
+    """返回生成结果中的第一张图。"""
+
+    if result is None or not result.images:
+        return None
+    image = result.images[0]
+    return image if image.shot_id == shot_id else image.model_copy(update={"shot_id": shot_id})
 
 
-def _build_overlay_fallback_shot(shot: PromptShot) -> PromptShot:
-    """把直出失败的 shot 降级为无字底图，为后续 overlay_text 预留清晰留白。
+def _copy_generated_to_final(image: GeneratedImage, final_dir: Path) -> GeneratedImage:
+    """把生成图复制到 `final` 目录，统一最终结果出口。"""
 
-    这里不会改变图位角色和版式意图，只会移除标题/副标题的直接生成要求，
-    从而让图片模型先产出一个干净底图。
-    """
-    return shot.model_copy(
-        update={
-            "render_prompt": "\n".join(
-                [
-                    shot.render_prompt,
-                    "不要在图像中直接生成任何文字、字体或版式。",
-                    "仅生成无字底图，并为后续后贴字预留清晰留白区域。",
-                    f"保留版式意图：{shot.layout_hint}",
-                ]
-            ).strip(),
-            "title_copy": "",
-            "subtitle_copy": "",
-            "layout_hint": shot.layout_hint,
-        }
+    final_path = final_dir / Path(image.image_path).name
+    shutil.copyfile(image.image_path, final_path)
+    return _build_final_image(shot_id=image.shot_id, final_path=final_path)
+
+
+def _build_final_image(*, shot_id: str, final_path: Path) -> GeneratedImage:
+    """从 final 文件构建最终输出对象。"""
+
+    with Image.open(final_path) as payload:
+        width, height = payload.size
+    return GeneratedImage(
+        shot_id=shot_id,
+        image_path=str(final_path),
+        preview_path=str(final_path),
+        width=width,
+        height=height,
+        status="finalized",
     )
 
 
-def _build_v2_compatibility_prompt_plan(prompt_plan: PromptPlanV2) -> ImagePromptPlan:
-    """当图片 provider 尚未实现 v2 接口时，把 v2 plan 压成兼容的旧 prompt plan。"""
-    prompts = [
-        ImagePrompt(
-            shot_id=shot.shot_id,
-            shot_type=shot.shot_role,
-            generation_mode="t2i",
-            prompt="\n".join(
-                [
-                    shot.render_prompt,
-                    f"主标题：{shot.title_copy}",
-                    f"副标题：{shot.subtitle_copy}",
-                    f"版式提示：{shot.layout_hint}",
-                ]
-            ).strip(),
-            output_size="2048x2048",
-        )
-        for shot in prompt_plan.shots
-    ]
-    return ImagePromptPlan(generation_mode="t2i", prompts=prompts)
+def _box_to_payload(box: tuple[int, int, int, int] | None) -> dict[str, int] | None:
+    """把矩形框转换成可落盘结构。"""
 
-
-def _build_execution_prompt_plan_v1(
-=======
-def _build_execution_prompt_plan(
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-    *,
-    prompt_plan: ImagePromptPlan,
-    shot_prompt_specs,
-    product_lock,
-    style_architecture,
-    generation_mode: str,
-) -> tuple[ImagePromptPlan, list[dict[str, object]]]:
-<<<<<<< HEAD
-    """把 v1 结构化 contract 组装成最终执行 prompt。"""
-=======
-    """把结构化 contract 组装成最终执行 prompt。
-
-    设计原则：
-    - `t2i` 继续兼容旧 prompt plan。
-    - `image_edit` 时优先按三层 contract 组装执行 prompt。
-    - 如果缺少 `product_lock / style_architecture / shot_prompt_spec` 任何一项，就回退到旧 prompt。
-    """
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-    spec_map = {
-        spec.shot_id: spec
-        for spec in getattr(shot_prompt_specs, "specs", [])
-    }
-    prompts: list[ImagePrompt] = []
-    debug_rows: list[dict[str, object]] = []
-
-    for prompt in prompt_plan.prompts:
-        spec = spec_map.get(prompt.shot_id)
-<<<<<<< HEAD
-        clean_keep_subject_rules = _resolve_clean_keep_subject_rules(
-=======
-        identity_rule_groups = _resolve_identity_rule_groups(
-            product_lock=product_lock,
-            spec=spec,
-        )
-        clean_keep_subject_rules = _flatten_identity_rule_groups(identity_rule_groups)
-        if not clean_keep_subject_rules:
-            clean_keep_subject_rules = _coerce_rule_strings(getattr(prompt, "keep_subject_rules", []) or [])
-        clean_editable_regions = _resolve_final_editable_regions(
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-            prompt=prompt,
-            product_lock=product_lock,
-            spec=spec,
-        )
-<<<<<<< HEAD
-        clean_editable_regions = _resolve_clean_editable_regions(
-            prompt=prompt,
-            product_lock=product_lock,
-            spec=spec,
-=======
-        shot_summary = _build_shot_edit_summary(
-            prompt=prompt,
-            spec=spec,
-            editable_regions_final=clean_editable_regions,
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-        )
-        prompt_text, execution_source = _resolve_prompt_text_for_generation(
-            prompt=prompt,
-            spec=spec,
-            product_lock=product_lock,
-            style_architecture=style_architecture,
-            generation_mode=generation_mode,
-<<<<<<< HEAD
-=======
-            identity_rule_groups=identity_rule_groups,
-            editable_regions_final=clean_editable_regions,
-            shot_summary=shot_summary,
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-        )
-        updated_prompt = _build_updated_prompt(
-            prompt=prompt,
-            prompt_text=prompt_text,
-            generation_mode=generation_mode,
-            spec=spec,
-        )
-        prompts.append(updated_prompt)
-        debug_rows.append(
-            {
-                "shot_id": prompt.shot_id,
-                "shot_type": prompt.shot_type,
-                "generation_mode": generation_mode,
-                "execution_source": execution_source,
-                "has_product_lock": product_lock is not None,
-                "has_style_architecture": style_architecture is not None,
-                "has_shot_prompt_spec": spec is not None,
-                "text_safe_zone": _resolve_text_safe_zone(prompt=prompt, spec=spec),
-                "keep_subject_rules": clean_keep_subject_rules,
-<<<<<<< HEAD
-                "editable_regions": clean_editable_regions,
-=======
-                "must_preserve_visuals": identity_rule_groups["must_preserve_visuals"],
-                "must_preserve_texts": identity_rule_groups["must_preserve_texts"],
-                "text_anchor_source": str(getattr(product_lock, "text_anchor_source", "") or "none"),
-                "text_anchor_status": str(getattr(product_lock, "text_anchor_status", "") or "unreadable"),
-                "must_not_change": identity_rule_groups["must_not_change"],
-                "editable_regions": clean_editable_regions,
-                "editable_regions_final": clean_editable_regions,
-                "primary_subject": shot_summary["primary_subject"],
-                "secondary_subject": shot_summary["secondary_subject"],
-                "allowed_scene_change_level": shot_summary["allowed_scene_change_level"],
-                "forbidden_regression_pattern": shot_summary["forbidden_regression_pattern"],
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-                "prompt_summary": _summarize_prompt_text(prompt_text),
-            }
-        )
-
-    return prompt_plan.model_copy(update={"generation_mode": generation_mode, "prompts": prompts}), debug_rows
-
-
-def _resolve_prompt_text_for_generation(
-    *,
-    prompt: ImagePrompt,
-    spec,
-    product_lock,
-    style_architecture,
-    generation_mode: str,
-<<<<<<< HEAD
-=======
-    identity_rule_groups: dict[str, list[str]],
-    editable_regions_final: list[str],
-    shot_summary: dict[str, object],
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-) -> tuple[str, str]:
-    """决定当前 shot 最终使用 contract mode 还是 legacy fallback。"""
-    if generation_mode != "image_edit":
-        return prompt.prompt, "legacy_t2i_prompt"
-    if product_lock is None or style_architecture is None or spec is None:
-        return _resolve_legacy_image_edit_prompt(prompt), "legacy_prompt_fallback"
-    return (
-        _assemble_image_edit_contract_prompt(
-            product_lock=product_lock,
-            style_architecture=style_architecture,
-            spec=spec,
-            text_safe_zone=prompt.text_safe_zone or prompt.text_space_hint,
-<<<<<<< HEAD
-=======
-            identity_rule_groups=identity_rule_groups,
-            editable_regions_final=editable_regions_final,
-            shot_summary=shot_summary,
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-        ),
-        "image_edit_contract_mode",
-    )
-
-
-def _build_updated_prompt(*, prompt: ImagePrompt, prompt_text: str, generation_mode: str, spec) -> ImagePrompt:
-    """把解析后的执行 prompt 写回兼容 prompt 对象。"""
-    negative_prompt = prompt.negative_prompt
-    if spec is not None and getattr(spec, "negative_prompt", None):
-        negative_prompt = list(spec.negative_prompt)
-    return prompt.model_copy(
-        update={
-            "generation_mode": generation_mode,
-            "prompt": prompt_text if generation_mode == "t2i" else prompt.prompt,
-            "edit_instruction": prompt_text if generation_mode == "image_edit" else prompt.edit_instruction,
-            "negative_prompt": negative_prompt,
-        }
-    )
-
-
-def _resolve_legacy_image_edit_prompt(prompt: ImagePrompt) -> str:
-<<<<<<< HEAD
-    """缺少结构化 contract 时，回退到旧 image_edit prompt。"""
-=======
-    """缺少结构化 contract 时，回退到旧的 image_edit prompt。"""
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-    if prompt.edit_instruction:
-        return prompt.edit_instruction
-    return prompt.prompt
-
-
-def _resolve_text_safe_zone(*, prompt: ImagePrompt, spec) -> str:
-    """统一解析日志和执行 prompt 使用的文字安全区。"""
-    return (
-        prompt.text_safe_zone
-        or prompt.text_space_hint
-        or (spec.layout_constraints.preferred_text_safe_zone if spec is not None else "")
-    )
-
-
-<<<<<<< HEAD
-def _assemble_image_edit_contract_prompt(*, product_lock, style_architecture, spec, text_safe_zone: str) -> str:
-    """按三层 contract 组装 image_edit 执行 prompt。"""
-=======
-def _assemble_image_edit_contract_prompt(
-    *,
-    product_lock,
-    style_architecture,
-    spec,
-    text_safe_zone: str,
-    identity_rule_groups: dict[str, list[str]],
-    editable_regions_final: list[str],
-    shot_summary: dict[str, object],
-) -> str:
-    """按更适合 image_edit 的顺序组装执行 prompt，先强调分镜差异，再落商品锁定。"""
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-    return "\n".join(
-        [
-            "Edit mode: reference-image commercial generation.",
-            "",
-<<<<<<< HEAD
-            "[Product Identity Lock]",
-            "Keep original product identity unchanged.",
-            *_build_product_lock_lines(product_lock, spec),
-=======
-            "[Task Type And Current Shot Objective]",
-            "Task type: image_edit commercial product generation.",
-            f"Current shot type: {spec.shot_type}.",
-            f"Current shot goal: {spec.goal}.",
-            f"Allowed scene change level: {shot_summary['allowed_scene_change_level']}.",
-            "",
-            "[Shot Differentiation Rules]",
-            *shot_summary["differentiation_lines"],
-            "",
-            "[Subject Hierarchy]",
-            f"Primary subject: {shot_summary['primary_subject']}.",
-            f"Secondary subject: {shot_summary['secondary_subject']}.",
-            *shot_summary["subject_hierarchy_lines"],
-            "",
-            "[Allowed Editable Regions]",
-            f"Editable regions final: {'; '.join(editable_regions_final)}.",
-            f"Editable region strategy: {spec.render_constraints.editable_region_strategy}.",
-            "Only change scene, crop, props, lighting, or non-identity elements inside the allowed editable regions.",
-            "",
-            "[Product Identity Lock]",
-            "Keep original product identity unchanged while making only the shot-specific scene changes above.",
-            *_build_product_lock_lines(identity_rule_groups),
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-            "",
-            "[Global Style Architecture]",
-            f"Style theme: {style_architecture.style_theme}.",
-            *_format_named_lines("Color strategy", style_architecture.color_strategy),
-            *_format_named_lines("Lighting strategy", style_architecture.lighting_strategy),
-            *_format_named_lines("Lens strategy", style_architecture.lens_strategy),
-            *_format_named_lines("Prop system", style_architecture.prop_system),
-            *_format_named_lines("Background strategy", style_architecture.background_strategy),
-            *_format_named_lines("Text strategy", style_architecture.text_strategy),
-            "",
-<<<<<<< HEAD
-            "[Current Shot Direction]",
-            f"Shot goal: {spec.goal}.",
-            f"Subject direction: {spec.subject_prompt}.",
-            f"Package appearance direction: {spec.package_appearance_prompt}.",
-            f"Composition direction: {spec.composition_prompt}.",
-            f"Background direction: {spec.background_prompt}.",
-            f"Lighting direction: {spec.lighting_prompt}.",
-            f"Style direction: {spec.style_prompt}.",
-            f"Quality direction: {spec.quality_prompt}.",
-            "",
-            "[Layout And Text Safe Zone]",
-            *_build_layout_lines(spec, text_safe_zone),
-            "",
-            "[Render Constraints]",
-            *_build_render_constraint_lines(spec),
-            "",
-=======
-            "[Layout And Text Safe Zone]",
-            *_build_layout_lines(spec, text_safe_zone),
-            "",
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-            "[Negative Rules]",
-            *_build_negative_lines(style_architecture, spec),
-        ]
-    ).strip()
-
-
-<<<<<<< HEAD
-def _build_product_lock_lines(product_lock, spec) -> list[str]:
-    """把 product lock 转成稳定的编辑约束段落。"""
-    lines: list[str] = []
-    locked_elements = _coerce_rule_strings(getattr(product_lock, "locked_elements", []) or [])
-    if locked_elements:
-        lines.append(f"Preserve locked elements: {'; '.join(locked_elements)}.")
-    must_preserve_texts = _coerce_rule_strings(getattr(product_lock, "must_preserve_texts", []) or [])
-    if must_preserve_texts:
-        lines.append(f"Preserve brand and package texts exactly: {'; '.join(must_preserve_texts)}.")
-    if getattr(product_lock, "package_type", ""):
-        lines.append(f"Preserve package structure and proportions: {product_lock.package_type}.")
-    if getattr(product_lock, "label_structure", ""):
-        lines.append(f"Preserve label layout and placement: {product_lock.label_structure}.")
-    if getattr(product_lock, "primary_color", ""):
-        lines.append(f"Preserve main product color identity: {product_lock.primary_color}.")
-    if getattr(product_lock, "material", ""):
-        lines.append(f"Preserve visible material impression: {product_lock.material}.")
-    editable_elements = _coerce_rule_strings(getattr(product_lock, "editable_elements", []) or [])
-    if editable_elements:
-        lines.append(f"Only allow scene-side edits on: {'; '.join(editable_elements)}.")
-    if spec is not None and getattr(spec, "product_lock", None) is not None:
-        must_preserve = _coerce_rule_strings(spec.product_lock.must_preserve)
-        if must_preserve:
-            lines.append(f"Must preserve from shot spec: {'; '.join(must_preserve)}.")
-        spec_must_preserve_texts = _coerce_rule_strings(spec.product_lock.must_preserve_texts)
-        if spec_must_preserve_texts:
-            lines.append(f"Must preserve texts from shot spec: {'; '.join(spec_must_preserve_texts)}.")
-        spec_editable_regions = _coerce_rule_strings(spec.product_lock.editable_regions)
-        if spec_editable_regions:
-            lines.append(f"Editable regions from shot spec: {'; '.join(spec_editable_regions)}.")
-        must_not_change = _coerce_rule_strings(spec.product_lock.must_not_change)
-        if must_not_change:
-            lines.append(f"Must not change: {'; '.join(must_not_change)}.")
-    return lines or ["Preserve package structure, brand text, label hierarchy, and dominant product color."]
-
-
-def _resolve_clean_keep_subject_rules(*, prompt: ImagePrompt, product_lock, spec) -> list[str]:
-    """统一生成调试日志里的主体锁定规则。"""
-    if spec is not None and getattr(spec, "product_lock", None) is not None:
-        return _coerce_rule_strings(
-            [
-                *list(spec.product_lock.must_preserve or []),
-                *[f"must preserve texts: {item}" for item in spec.product_lock.must_preserve_texts],
-                *[f"must not change: {item}" for item in spec.product_lock.must_not_change],
-            ]
-        )
-    prompt_rules = _coerce_rule_strings(getattr(prompt, "keep_subject_rules", []) or [])
-    if prompt_rules:
-        return prompt_rules
-    return _coerce_rule_strings(getattr(product_lock, "locked_elements", []) or [])
-
-
-def _resolve_clean_editable_regions(*, prompt: ImagePrompt, product_lock, spec) -> list[str]:
-    """统一生成调试日志里的可编辑区域。"""
-    if spec is not None and getattr(spec, "product_lock", None) is not None:
-        return _coerce_rule_strings(spec.product_lock.editable_regions)
-    prompt_regions = _coerce_rule_strings(getattr(prompt, "editable_regions", []) or [])
-    if prompt_regions:
-        return prompt_regions
-    return _coerce_rule_strings(getattr(product_lock, "editable_elements", []) or [])
-
-
-def _coerce_rule_strings(values) -> list[str]:
-    """把规则列表清洗成干净字符串。"""
-=======
-def _build_product_lock_lines(identity_rule_groups: dict[str, list[str]]) -> list[str]:
-    """把商品锁定整理成三组稳定规则，避免重复堆叠导致 shot differentiation 被淹没。"""
-    lines: list[str] = []
-    if identity_rule_groups["must_preserve_visuals"]:
-        lines.append(f"Must preserve visuals: {'; '.join(identity_rule_groups['must_preserve_visuals'])}.")
-    if identity_rule_groups["must_preserve_texts"]:
-        lines.append(f"Must preserve texts: {'; '.join(identity_rule_groups['must_preserve_texts'])}.")
-    if identity_rule_groups["must_not_change"]:
-        lines.append(f"Must not change: {'; '.join(identity_rule_groups['must_not_change'])}.")
-    return lines or ["Must preserve visuals: package structure; label hierarchy; dominant product color."]
-
-
-def _resolve_identity_rule_groups(*, product_lock, spec) -> dict[str, list[str]]:
-    """把商品锁定拆成视觉、文本和禁止变化三组，供 prompt 与日志共用。"""
-    product_visuals = _coerce_rule_strings(getattr(product_lock, "locked_elements", []) or [])
-    visual_identity = getattr(product_lock, "visual_identity", None)
-    if visual_identity is not None:
-        product_visuals = _merge_unique_strings(product_visuals, _coerce_rule_strings(getattr(visual_identity, "must_preserve", []) or []))
-    visual_overrides = _coerce_rule_strings(spec.product_lock.must_preserve) if spec is not None and getattr(spec, "product_lock", None) is not None else []
-    preserve_texts = _merge_unique_strings(
-        _coerce_rule_strings(getattr(product_lock, "must_preserve_texts", []) or []),
-        _coerce_rule_strings(spec.product_lock.must_preserve_texts) if spec is not None and getattr(spec, "product_lock", None) is not None else [],
-    )
-    must_not_change = _coerce_rule_strings(spec.product_lock.must_not_change) if spec is not None and getattr(spec, "product_lock", None) is not None else []
-    if not must_not_change:
-        must_not_change = _coerce_rule_strings(
-            [
-                getattr(product_lock, "package_type", ""),
-                getattr(product_lock, "label_structure", ""),
-                getattr(product_lock, "primary_color", ""),
-                getattr(product_lock, "material", ""),
-            ]
-        )
-    return {
-        "must_preserve_visuals": _merge_unique_strings(product_visuals, visual_overrides),
-        "must_preserve_texts": preserve_texts,
-        "must_not_change": must_not_change,
-    }
-
-
-def _flatten_identity_rule_groups(identity_rule_groups: dict[str, list[str]]) -> list[str]:
-    """兼容旧 keep_subject_rules 字段，但内部已经改成三组清晰规则来源。"""
-    return _merge_unique_strings(
-        identity_rule_groups["must_preserve_visuals"],
-        [f"must preserve texts: {item}" for item in identity_rule_groups["must_preserve_texts"]],
-        [f"must not change: {item}" for item in identity_rule_groups["must_not_change"]],
-    )
-
-
-def _resolve_final_editable_regions(*, prompt: ImagePrompt, product_lock, spec) -> list[str]:
-    """统一生成最终 editable_regions，保证 image_edit 日志和执行 prompt 都不再频繁为空。"""
-    shot_type = getattr(spec, "shot_type", "") or prompt.shot_type
-    spec_regions = _coerce_rule_strings(spec.product_lock.editable_regions) if spec is not None and getattr(spec, "product_lock", None) is not None else []
-    return _merge_unique_strings(
-        _editable_region_defaults_for_shot_type(shot_type),
-        [_normalize_editable_region_name(item) for item in spec_regions],
-        [_normalize_editable_region_name(item) for item in _coerce_rule_strings(getattr(prompt, "editable_regions", []) or [])],
-        [_normalize_editable_region_name(item) for item in _coerce_rule_strings(getattr(product_lock, "editable_elements", []) or [])],
-    )
-
-
-def _build_shot_edit_summary(*, prompt: ImagePrompt, spec, editable_regions_final: list[str]) -> dict[str, object]:
-    """抽取当前 shot 的执行摘要，供最终 prompt 前置强调分镜变化。"""
-    if spec is None:
-        return {
-            "primary_subject": prompt.shot_type or "uploaded product reference",
-            "secondary_subject": "supporting scene only",
-            "allowed_scene_change_level": "fallback_from_legacy_prompt",
-            "forbidden_regression_pattern": "generic hero packshot",
-            "differentiation_lines": ["Fallback to legacy prompt for this shot."],
-            "subject_hierarchy_lines": [f"Scene edits may appear in: {'; '.join(editable_regions_final)}."],
-        }
-    primary_subject, secondary_subject, reference_anchor_line, subject_rule_lines = _parse_subject_prompt(spec.subject_prompt)
-    differentiation_lines = [
-        f"This shot must not regress into: {_resolve_forbidden_regression_pattern(spec, prompt.shot_type)}.",
-        f"Reference image priority: {spec.render_constraints.reference_image_priority}.",
-        f"Consistency strength: {spec.render_constraints.consistency_strength}.",
-        f"Product lock level: {spec.render_constraints.product_lock_level}.",
-        *[f"- {line}" for line in subject_rule_lines],
-        f"- Composition direction: {_clean_prompt_fragment(spec.composition_prompt)}.",
-        f"- Background direction: {_clean_prompt_fragment(spec.background_prompt)}.",
-        f"- Lighting direction: {_clean_prompt_fragment(spec.lighting_prompt)}.",
-        f"- Quality direction: {_clean_prompt_fragment(spec.quality_prompt)}.",
-    ]
-    subject_hierarchy_lines: list[str] = []
-    if reference_anchor_line:
-        subject_hierarchy_lines.append(f"Reference anchor: {reference_anchor_line}.")
-    subject_hierarchy_lines.append(f"Scene edits may appear in: {'; '.join(editable_regions_final)}.")
-    return {
-        "primary_subject": primary_subject or "uploaded product reference",
-        "secondary_subject": secondary_subject or "supporting scene only",
-        "allowed_scene_change_level": _resolve_allowed_scene_change_level(spec),
-        "forbidden_regression_pattern": _resolve_forbidden_regression_pattern(spec, prompt.shot_type),
-        "differentiation_lines": differentiation_lines,
-        "subject_hierarchy_lines": subject_hierarchy_lines,
-    }
-
-
-def _coerce_rule_strings(values) -> list[str]:
-    """把规则列表清洗成干净字符串，避免把 tuple、dict items 或对象直接串进 prompt/log。"""
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-    cleaned: list[str] = []
-    if isinstance(values, str):
-        values = [values]
-    for value in values or []:
-        if isinstance(value, tuple) and len(value) == 2:
-            key, raw = value
-            if isinstance(raw, (list, tuple, set)):
-                for item in raw:
-                    normalized = f"{key}: {str(item).strip()}".strip()
-                    if normalized and normalized not in cleaned:
-                        cleaned.append(normalized)
-                continue
-            value = f"{key}: {raw}"
-        elif isinstance(value, dict):
-            for key, raw in value.items():
-                normalized = f"{key}: {str(raw).strip()}".strip()
-                if normalized and normalized not in cleaned:
-                    cleaned.append(normalized)
-            continue
-
-        normalized = str(value).strip()
-        if not normalized:
-            continue
-        if normalized.startswith("(") and normalized.endswith(")"):
-<<<<<<< HEAD
-=======
-            # 这类字符串通常来自错误地把 tuple 直接做了 str()，对调试和 prompt 都是噪声。
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-            normalized = normalized.strip("()")
-        if normalized not in cleaned:
-            cleaned.append(normalized)
-    return cleaned
-
-
-<<<<<<< HEAD
-def _clean_prompt_fragment(value) -> str:
-    """清洗单个 prompt 片段，尽量把 tuple repr 转回可读文本。"""
-=======
-def _editable_region_defaults_for_shot_type(shot_type: str) -> list[str]:
-    """按 shot_type 提供最小可编辑区域兜底，保证 image_edit 有足够变化空间。"""
-    mapping = {
-        "hero_brand": ["background", "props", "lighting", "crop"],
-        "carry_action": ["hand_pose", "background", "props", "lighting", "crop"],
-        "open_box_structure": ["package_structure", "background", "props", "lighting", "crop"],
-        "package_detail": ["crop", "lighting", "detail_emphasis", "background"],
-        "label_or_material_detail": ["crop", "detail_emphasis", "lighting", "background"],
-        "package_with_leaf_hint": ["foreground_leaf_subject", "background", "props", "lighting", "crop"],
-        "dry_leaf_detail": ["foreground_leaf_subject", "background", "props", "lighting", "depth_of_field"],
-        "tea_soup_experience": ["tea_soup_subject", "vessel", "background", "props", "lighting"],
-        "lifestyle_or_brewing_context": ["props", "background", "scene_context", "depth_of_field", "lighting"],
-        "package_in_brewing_context": ["props", "background", "scene_context", "depth_of_field", "lighting"],
-    }
-    return list(mapping.get(shot_type, ["background", "props", "lighting", "crop"]))
-
-
-def _normalize_editable_region_name(value: str) -> str:
-    """把上游不同命名收敛成 render 阶段更稳定的区域标签。"""
-    normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
-    aliases = {
-        "surface_styling": "props",
-        "prop_accents": "props",
-        "micro_props": "props",
-        "shadow_shape": "lighting",
-        "surface_highlights": "detail_emphasis",
-        "crop_window": "crop",
-        "foreground_leaves": "foreground_leaf_subject",
-        "breathing_space_around_leaves": "depth_of_field",
-        "background_anchor_placement": "background",
-        "tea_vessel": "vessel",
-        "tea_liquid": "tea_soup_subject",
-        "background_package_anchor": "background",
-        "brewing_props": "props",
-        "vessel_placement": "vessel",
-        "background_context": "scene_context",
-        "inner_tray_visibility": "package_structure",
-        "lid_angle": "package_structure",
-    }
-    return aliases.get(normalized, normalized)
-
-
-def _parse_subject_prompt(subject_prompt: str) -> tuple[str, str, str, list[str]]:
-    """从结构化 subject_prompt 里提取主次主体和剩余执行规则。"""
-    primary_subject = ""
-    secondary_subject = ""
-    reference_anchor_line = ""
-    rule_lines: list[str] = []
-    for raw in str(subject_prompt or "").split("."):
-        line = raw.strip()
-        if not line:
-            continue
-        lower = line.lower()
-        if lower.startswith("primary subject:"):
-            primary_subject = line.split(":", maxsplit=1)[1].strip()
-            continue
-        if lower.startswith("secondary subject:"):
-            secondary_subject = line.split(":", maxsplit=1)[1].strip()
-            continue
-        if lower.startswith("use the uploaded"):
-            reference_anchor_line = line
-            continue
-        rule_lines.append(line)
-    return primary_subject, secondary_subject, reference_anchor_line, rule_lines
-
-
-def _resolve_allowed_scene_change_level(spec) -> str:
-    """把 product_lock_level 转成更直观的 scene change 摘要。"""
-    if spec is None:
-        return "fallback_from_legacy_prompt"
-    mapping = {
-        "strong_product_lock": "low_scene_change_locked_product",
-        "medium_product_lock": "moderate_scene_change_keep_package_readable",
-        "anchor_only_product_lock": "high_scene_change_package_as_brand_anchor",
-    }
-    return mapping.get(spec.render_constraints.product_lock_level, "moderate_scene_change_keep_package_readable")
-
-
-def _resolve_forbidden_regression_pattern(spec, shot_type: str) -> str:
-    """输出每个 shot 不应退化回去的典型错误形态。"""
-    current_shot_type = getattr(spec, "shot_type", "") or shot_type
-    mapping = {
-        "hero_brand": "detail crop or prop-led auxiliary scene",
-        "carry_action": "isolated hero packshot without carry gesture",
-        "open_box_structure": "closed package hero frame",
-        "package_detail": "full front-facing hero packshot",
-        "label_or_material_detail": "full package hero view",
-        "package_with_leaf_hint": "isolated studio packshot with no leaf cue",
-        "dry_leaf_detail": "package-only composition or hero packshot",
-        "tea_soup_experience": "package-only composition without visible brewed tea",
-        "lifestyle_or_brewing_context": "isolated studio packshot with token props only",
-        "package_in_brewing_context": "isolated packshot with decorative props only",
-    }
-    return mapping.get(current_shot_type, "generic hero packshot")
-
-
-def _merge_unique_strings(*groups: list[str]) -> list[str]:
-    """保持原始顺序合并去重，避免日志和 prompt 反复输出同义内容。"""
-    merged: list[str] = []
-    seen: set[str] = set()
-    for group in groups:
-        for item in group:
-            text = str(item or "").strip()
-            if not text or text in seen:
-                continue
-            seen.add(text)
-            merged.append(text)
-    return merged
-
-
-def _clean_prompt_fragment(value) -> str:
-    """清洗单个 prompt 片段，尽量把 tuple repr / pydantic repr 转回可读文本。"""
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-    if value is None:
-        return ""
-    if isinstance(value, tuple) and len(value) == 2:
-        return f"{value[0]}: {value[1]}"
-    text = str(value).strip()
-    if not text:
-        return ""
-    replacements = {
-        "('preferred_text_safe_zone', ": "preferred_text_safe_zone: ",
-        '("preferred_text_safe_zone", ': "preferred_text_safe_zone: ",
-        "('avoid_overlap_with_subject', ": "avoid_overlap_with_subject: ",
-        '("avoid_overlap_with_subject", ': "avoid_overlap_with_subject: ",
-        "('max_text_layers', ": "max_text_layers: ",
-        '("max_text_layers", ': "max_text_layers: ",
-        "('subject_placement_hint', ": "subject_placement_hint: ",
-        '("subject_placement_hint", ': "subject_placement_hint: ",
-        "title_role='": "title_role=",
-        "subtitle_role='": "subtitle_role=",
-        "bullet_role='": "bullet_role=",
-        "cta_role='": "cta_role=",
-        "')": "",
-        '")': "",
-        "', '": "; ",
-        '", "': "; ",
-    }
-    for source, target in replacements.items():
-        text = text.replace(source, target)
-    text = text.replace("'", "").replace('"', "")
-<<<<<<< HEAD
-    return " ".join(text.split())
-=======
-    text = " ".join(text.split())
-    return text
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-
-
-def _format_named_lines(title: str, values: list[str]) -> list[str]:
-    """把 strategy 列表变成稳定的分行结构。"""
-    if not values:
-        return [f"{title}: none."]
-    return [f"{title}: {value}." for value in values]
-
-
-def _build_layout_lines(spec, text_safe_zone: str) -> list[str]:
-    """把布局约束转成给图模型的留白指令。"""
-    resolved_text_safe_zone = _clean_prompt_fragment(
-        text_safe_zone or spec.layout_constraints.preferred_text_safe_zone or "top_right"
-    )
-    lines = [
-        f"Leave clean visual space for copy at: {resolved_text_safe_zone}.",
-        f"Avoid overlap with subject: {str(spec.layout_constraints.avoid_overlap_with_subject).lower()}.",
-        f"Max text layers reserved: {spec.layout_constraints.max_text_layers}.",
-    ]
-    if spec.layout_constraints.subject_placement_hint:
-        lines.append(f"Subject placement hint: {_clean_prompt_fragment(spec.layout_constraints.subject_placement_hint)}.")
-    copy_intent_summary = _build_copy_intent_summary(spec)
-    if copy_intent_summary:
-        lines.append(f"Copy intent: {copy_intent_summary}.")
-    return lines
-
-
-def _build_render_constraint_lines(spec) -> list[str]:
-<<<<<<< HEAD
-    """把 render constraints 转成稳定段落。"""
-    return [
-        f"Generation mode target: {spec.render_constraints.generation_mode}.",
-        f"Reference image priority: {spec.render_constraints.reference_image_priority}.",
-        f"Consistency strength: {spec.render_constraints.consistency_strength}.",
-        f"Allow human presence: {str(spec.render_constraints.allow_human_presence).lower()}.",
-        f"Allow hand only: {str(spec.render_constraints.allow_hand_only).lower()}.",
-    ]
-
-
-def _build_copy_intent_summary(spec) -> str:
-    """把 copy_intent 清洗成稳定摘要。"""
-=======
-    """把 render constraints 转成稳定段落，保留 shot 分层约束。"""
-    lines = [
-        f"Generation mode target: {spec.render_constraints.generation_mode}.",
-        f"Reference image priority: {spec.render_constraints.reference_image_priority}.",
-        f"Consistency strength: {spec.render_constraints.consistency_strength}.",
-        f"Product lock level: {spec.render_constraints.product_lock_level}.",
-        f"Editable region strategy: {spec.render_constraints.editable_region_strategy}.",
-        f"Allow human presence: {str(spec.render_constraints.allow_human_presence).lower()}.",
-        f"Allow hand only: {str(spec.render_constraints.allow_hand_only).lower()}.",
-    ]
-    return lines
-
-
-def _build_copy_intent_summary(spec) -> str:
-    """把 copy_intent 清洗成稳定摘要，避免把 pydantic repr 直接写进 prompt。"""
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
-    parts = [
-        f"title_role={_clean_prompt_fragment(spec.copy_intent.title_role)}" if spec.copy_intent.title_role else "",
-        f"subtitle_role={_clean_prompt_fragment(spec.copy_intent.subtitle_role)}" if spec.copy_intent.subtitle_role else "",
-        f"bullet_role={_clean_prompt_fragment(spec.copy_intent.bullet_role)}" if spec.copy_intent.bullet_role else "",
-        f"cta_role={_clean_prompt_fragment(spec.copy_intent.cta_role)}" if spec.copy_intent.cta_role else "",
-    ]
-    return "; ".join(part for part in parts if part)
-
-
-def _build_negative_lines(style_architecture, spec) -> list[str]:
-    """合并组级和单张级 negative 约束。"""
-    negatives = [
-        *list(getattr(style_architecture, "global_negative_rules", []) or []),
-        *list(getattr(spec, "negative_prompt", []) or []),
-    ]
-    if not negatives:
-        return ["Avoid redesigning the package, label, or product identity."]
-    return [f"- {item}" for item in negatives]
-
-
-def _summarize_prompt_text(prompt: str, limit: int = 220) -> str:
-    """截断日志中的 prompt 摘要，避免日志过长。"""
-    normalized = " ".join(str(prompt).split())
-    if len(normalized) <= limit:
-        return normalized
-    return f"{normalized[:limit]}..."
+    if box is None:
+        return None
+    return {"x": box[0], "y": box[1], "width": box[2], "height": box[3]}

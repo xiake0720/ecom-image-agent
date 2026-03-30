@@ -5,23 +5,29 @@
 
 核心职责：
 - 定义 `prompt_refine_v2` 节点输出的数据结构
-- 承载每张图最终可交给图片模型执行的 prompt、文案和版式提示
-
-主要调用方：
-- 后续 `src/workflows/nodes/prompt_refine_v2.py`
-
-主要依赖方：
-- 后续 `render_images` 的 v2 分支
-- 结果页与调试链路
-
-关键输入/输出：
-- 输入来自 v2 prompt 精修节点
-- 后续预期落盘为 `prompt_plan_v2.json`
+- 承载每张图最终可交给图片模型执行的 prompt、文案策略和版式提示
 """
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+def _normalize_string_list(value: object) -> object:
+    """兼容模型把列表字段写成字符串的情况。"""
+
+    if value is None:
+        return []
+    if isinstance(value, str):
+        normalized = value.replace("\r", "\n")
+        chunks: list[str] = []
+        for part in normalized.replace("，", ",").split("\n"):
+            for inner in part.split(","):
+                item = inner.strip()
+                if item:
+                    chunks.append(item)
+        return chunks
+    return value
 
 
 class PromptShot(BaseModel):
@@ -30,11 +36,25 @@ class PromptShot(BaseModel):
     shot_id: str
     shot_role: str
     render_prompt: str
-    title_copy: str = Field(description="建议控制在 4-8 字，实际弹性约束由业务层负责。")
-    subtitle_copy: str = Field(description="建议控制在 8-15 字，实际弹性约束由业务层负责。")
-    layout_hint: str = Field(description="描述文案大致区域与留白策略，供图片模型和 overlay fallback 共同使用。")
+    copy_strategy: str = Field(default="light", description="strong / light / none")
+    text_density: str = Field(default="medium", description="heavy / medium / low / none")
+    should_render_text: bool = Field(default=True, description="是否适合在图中出现广告文字。")
+    title_copy: str = Field(default="", description="系统自动生成的标题，建议 4-8 字。")
+    subtitle_copy: str = Field(default="", description="系统自动生成的副标题，建议 8-15 字。")
+    selling_points_for_render: list[str] = Field(default_factory=list, description="最终需要融入画面的卖点短语。")
+    layout_hint: str = Field(default="", description="描述文字区域、留白策略与层级顺序。")
+    typography_hint: str = Field(default="", description="描述标题、副标题、卖点的字号层级与风格。")
+    copy_source: str = Field(default="system_auto", description="标记当前图位文案来源。")
+    subject_occupancy_ratio: float | None = Field(default=None, description="主体预期占画面比例，hero 默认约 0.66。")
     aspect_ratio: str = "1:1"
     image_size: str = "2K"
+
+    @field_validator("selling_points_for_render", mode="before")
+    @classmethod
+    def _normalize_list_fields(cls, value: object) -> object:
+        """兼容模型输出字符串或列表两种写法。"""
+
+        return _normalize_string_list(value)
 
 
 class PromptPlanV2(BaseModel):

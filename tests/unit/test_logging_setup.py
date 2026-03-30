@@ -1,5 +1,3 @@
-"""日志初始化与任务文件日志测试。"""
-
 from __future__ import annotations
 
 import logging
@@ -16,7 +14,6 @@ from src.core.logging import (
 
 
 def test_task_file_log_handler_writes_utf8_log(tmp_path: Path) -> None:
-    """任务级文件日志应能写入 UTF-8 中文日志，并携带 task/node 上下文。"""
     settings = Settings(log_level="INFO", enable_file_log=True)
     initialize_logging(settings)
     logger = logging.getLogger("tests.unit.logging")

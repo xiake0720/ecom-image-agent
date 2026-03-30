@@ -3,27 +3,18 @@
 文件位置：
 - `src/workflows/nodes/prompt_refine_v2.py`
 
-核心职责：
-- 读取 `director_output`，为每张图生成最终可执行的生图 prompt
-- 同时生成图内主标题、副标题和版式提示，落盘为 `prompt_plan_v2.json`
-- 在不依赖旧 `copy_plan / layout_plan / image_prompt_plan` 的前提下，给 v2 三步链路提供稳定输入
-
-节点边界：
-- 当前不改旧的 `generate_copy / generate_layout / shot_prompt_refiner / build_prompts`
-- 当前不接入主 graph，由后续 PR 统一接线
+职责：
+- 把导演规划收口为可执行的逐图 prompt
+- 自动决定每张图的文案强弱、标题副标题和版式提示
+- 明确禁止参考图文案泄漏，并区分产品参考图与背景风格参考图
 """
 
 from __future__ import annotations
 
-import logging
-
 from src.core.config import get_settings
 from src.domain.director_output import DirectorOutput, DirectorShot
-from src.domain.product_analysis import ProductAnalysis
 from src.domain.prompt_plan_v2 import PromptPlanV2, PromptShot
-from src.services.analysis.product_analyzer import build_mock_product_analysis
-from src.services.prompting.context_builder import build_plan_shots_context, infer_category_family
-from src.services.prompting.policy_loader import describe_policy_source, load_shot_type_policy
+from src.domain.task import Task
 from src.workflows.nodes.cache_utils import (
     build_node_cache_key,
     hash_state_payload,
@@ -34,76 +25,50 @@ from src.workflows.nodes.cache_utils import (
 from src.workflows.nodes.prompt_utils import describe_prompt_source, dump_pretty, load_prompt_text
 from src.workflows.state import WorkflowDependencies, WorkflowState, format_connected_contract_logs
 
-logger = logging.getLogger(__name__)
-
-
-PROMPT_REFINE_V2_TITLE_MIN = 4
-PROMPT_REFINE_V2_TITLE_MAX = 8
-PROMPT_REFINE_V2_SUBTITLE_MIN = 8
-PROMPT_REFINE_V2_SUBTITLE_MAX = 15
-
-DIRECTOR_ROLE_POLICY_ALIASES: dict[str, str] = {
-    "hero": "hero",
-    "packaging_feature": "feature_detail",
-    "dry_leaf_detail": "dry_leaf_detail",
-    "tea_soup": "tea_soup",
-    "brewed_leaf_detail": "brewed_leaf_detail",
-    "gift_scene": "lifestyle",
-    "lifestyle": "lifestyle",
-    "process_or_quality": "feature_detail",
+TITLE_FALLBACKS: dict[str, str] = {
+    "hero": "东方茶礼",
+    "packaging_feature": "包装见质",
+    "dry_leaf_detail": "",
+    "tea_soup": "",
+    "brewed_leaf_detail": "",
+    "gift_scene": "礼赠有面",
+    "lifestyle": "",
+    "process_or_quality": "品质把关",
 }
 
-ROLE_COPY_GUIDANCE: dict[str, str] = {
-    "hero": "文案更偏品牌感、高级感和第一视觉转化。",
-    "gift_scene": "文案更偏礼赠场景、高级感和品牌气质。",
-    "lifestyle": "文案更偏生活方式、品牌感和长期陪伴感。",
-    "packaging_feature": "文案更偏卖点转化，突出包装细节和结构价值。",
-    "process_or_quality": "文案更偏卖点转化，强调工艺、品质和可信度。",
+SUBTITLE_FALLBACKS: dict[str, str] = {
+    "hero": "包装主体清晰高级耐看",
+    "packaging_feature": "结构与材质细节更清楚",
+    "dry_leaf_detail": "",
+    "tea_soup": "",
+    "brewed_leaf_detail": "",
+    "gift_scene": "礼赠氛围高级得体",
+    "lifestyle": "",
+    "process_or_quality": "品质表达清晰可信",
 }
 
 
 def prompt_refine_v2(state: WorkflowState, deps: WorkflowDependencies) -> dict:
-    """基于导演规划生成 v2 最终生图计划。
+    """基于导演规划生成 v2 最终 prompt 计划。"""
 
-    上游：
-    - `director_v2`
-    - 可选 `product_analysis`
-
-    下游：
-    - `render_images` 的 v2 分支
-    - `overlay_text` 的 fallback 分支
-
-    为什么这个节点要合并旧链路职责：
-    - v2 不再拆成 copy/layout/prompt 多个节点
-    - 图片模型需要一次看到“最终 prompt + 标题 + 副标题 + 版式提示”
-    - 但仍要保留结构化输出，方便 QC 和调试
-    """
     task = state["task"]
     director_output = state.get("director_output")
     if director_output is None:
-        raise RuntimeError("prompt_refine_v2 requires `director_output` in workflow state.")
+        raise RuntimeError("prompt_refine_v2 requires director_output")
 
     settings = get_settings()
-    product_analysis = _resolve_product_context(state)
-    planning_context = build_plan_shots_context(task=task, product_analysis=product_analysis)
-    category_family = infer_category_family(product_analysis)
     fallback_plan = _build_fallback_prompt_plan(
+        task=task,
         director_output=director_output,
-        product_analysis=product_analysis,
-        planning_context=planning_context,
+        aspect_ratio=task.aspect_ratio or settings.default_image_aspect_ratio,
+        image_size=task.image_size or settings.default_image_size,
     )
     logs = [
         *state.get("logs", []),
-        (
-            "[prompt_refine_v2] start "
-            f"platform={director_output.platform or settings.default_platform} "
-            f"shot_count={len(director_output.shots)} "
-            f"mode={deps.text_provider_mode}"
-        ),
-        f"[prompt_refine_v2] category_family={category_family}",
+        f"[prompt_refine_v2] start shot_count={len(director_output.shots)}",
         f"[prompt_refine_v2] template_source={describe_prompt_source('prompt_refine_v2.md')}",
-        f"[prompt_refine_v2] default_aspect_ratio={settings.default_image_aspect_ratio}",
-        f"[prompt_refine_v2] default_image_size={settings.default_image_size}",
+        f"[prompt_refine_v2] style_type={task.style_type}",
+        f"[prompt_refine_v2] style_notes={task.style_notes or '-'}",
         *format_connected_contract_logs(state, node_name="prompt_refine_v2"),
     ]
 
@@ -113,377 +78,405 @@ def prompt_refine_v2(state: WorkflowState, deps: WorkflowDependencies) -> dict:
         state=state,
         deps=deps,
         prompt_filename="prompt_refine_v2.md" if deps.text_provider_mode == "real" else None,
-        prompt_version="mock-prompt-plan-v2" if deps.text_provider_mode != "real" else None,
+        prompt_version="mock-prompt-refine-v2" if deps.text_provider_mode != "real" else None,
         provider_name=provider_name,
         model_id=provider_model_id,
         extra_payload={
             "director_output_hash": hash_state_payload(director_output),
-            "product_analysis_hash": hash_state_payload(product_analysis),
-            "planning_context_hash": hash_state_payload(planning_context),
+            "style_type": task.style_type,
+            "style_notes": task.style_notes,
         },
     )
     if should_use_cache(state):
-        cached_plan = deps.storage.load_cached_json_artifact("prompt_refine_v2", cache_key, PromptPlanV2)
-        if cached_plan is not None:
-            # 缓存命中后仍然做一次 normalize，避免旧缓存缺字段或字段越界，
-            # 影响后续 render/QC。
-            normalized_cached_plan = _normalize_prompt_plan(
-                prompt_plan=cached_plan,
-                fallback_plan=fallback_plan,
-            )
-            deps.storage.save_json_artifact(task.task_id, "prompt_plan_v2.json", normalized_cached_plan)
-            logs.extend(
-                [
-                    f"[prompt_refine_v2] cache hit key={cache_key}",
-                    f"[cache] node=prompt_refine_v2 status=hit key={cache_key}",
-                    "[prompt_refine_v2] restored cached prompt_plan_v2.json",
-                    *_build_prompt_plan_logs(normalized_cached_plan),
-                ]
-            )
-            return {"prompt_plan_v2": normalized_cached_plan, "logs": logs}
-        logs.extend(
-            [
-                f"[prompt_refine_v2] cache miss key={cache_key}",
-                f"[cache] node=prompt_refine_v2 status=miss key={cache_key}",
-            ]
-        )
+        cached = deps.storage.load_cached_json_artifact("prompt_refine_v2", cache_key, PromptPlanV2)
+        if cached is not None:
+            deps.storage.save_json_artifact(task.task_id, "prompt_plan_v2.json", cached)
+            return {
+                "prompt_plan_v2": cached,
+                "logs": [*logs, f"[cache] node=prompt_refine_v2 status=hit key={cache_key}", "[prompt_refine_v2] saved prompt_plan_v2.json"],
+            }
+        logs.append(f"[cache] node=prompt_refine_v2 status=miss key={cache_key}")
     elif is_force_rerun(state):
-        logs.extend(
-            [
-                "[prompt_refine_v2] ignore cache requested",
-                "[cache] node=prompt_refine_v2 status=ignored key=-",
-            ]
-        )
+        logs.append("[cache] node=prompt_refine_v2 status=ignored key=-")
 
     if deps.text_provider_mode == "real":
-        if not hasattr(deps.planning_provider, "generate_structured"):
-            raise RuntimeError("prompt_refine_v2 requires a planning provider with `generate_structured()`.")
-        # real 模式下仍然把 fallback plan 一并传给模型，目的是给模型一个
-        # 稳定的参考下限，降低完全跑偏的概率。
-        prompt = _build_prompt_refine_prompt(
-            director_output=director_output,
-            product_analysis=product_analysis,
-            planning_context=planning_context,
-            fallback_plan=fallback_plan,
-        )
+        prompt = _build_prompt(task=task, director_output=director_output, fallback_plan=fallback_plan)
         prompt_plan = deps.planning_provider.generate_structured(
             prompt,
             PromptPlanV2,
             system_prompt=load_prompt_text("prompt_refine_v2.md"),
         )
+        prompt_plan = _normalize_prompt_plan(prompt_plan, fallback_plan, task=task)
     else:
         prompt_plan = fallback_plan
 
-    normalized_plan = _normalize_prompt_plan(
-        prompt_plan=prompt_plan,
-        fallback_plan=fallback_plan,
-    )
-    deps.storage.save_json_artifact(task.task_id, "prompt_plan_v2.json", normalized_plan)
+    deps.storage.save_json_artifact(task.task_id, "prompt_plan_v2.json", prompt_plan)
     if state.get("cache_enabled"):
-        deps.storage.save_cached_json_artifact("prompt_refine_v2", cache_key, normalized_plan, metadata=cache_context)
-    logs.extend(_build_prompt_plan_logs(normalized_plan))
+        deps.storage.save_cached_json_artifact("prompt_refine_v2", cache_key, prompt_plan, metadata=cache_context)
+    logs.extend(_build_prompt_logs(prompt_plan))
     logs.append("[prompt_refine_v2] saved prompt_plan_v2.json")
-    return {"prompt_plan_v2": normalized_plan, "logs": logs}
+    return {"prompt_plan_v2": prompt_plan, "logs": logs}
 
 
-def _resolve_product_context(state: WorkflowState) -> ProductAnalysis:
-    """优先复用已有商品分析；没有时退回到轻量 mock 上下文。"""
-    product_analysis = state.get("product_analysis")
-    if product_analysis is not None:
-        return product_analysis
-    task = state["task"]
-    return build_mock_product_analysis(state.get("assets", []), task.product_name)
+def _build_prompt(*, task: Task, director_output: DirectorOutput, fallback_plan: PromptPlanV2) -> str:
+    """构建 v2 prompt 计划节点提示词。"""
 
-
-def _build_prompt_refine_prompt(
-    *,
-    director_output: DirectorOutput,
-    product_analysis: ProductAnalysis,
-    planning_context: dict[str, object],
-    fallback_plan: PromptPlanV2,
-) -> str:
-    """构建 prompt_refine_v2 的结构化提示词输入。"""
-    prompt_context = {
-        "director_output": director_output,
-        "product_analysis": product_analysis,
-        "planning_context": planning_context,
-        "copy_constraints": {
-            "title_length_recommendation": f"{PROMPT_REFINE_V2_TITLE_MIN}-{PROMPT_REFINE_V2_TITLE_MAX} chars",
-            "subtitle_length_recommendation": f"{PROMPT_REFINE_V2_SUBTITLE_MIN}-{PROMPT_REFINE_V2_SUBTITLE_MAX} chars",
-            "direct_text_on_image": True,
-            "overlay_fallback_enabled": True,
+    context = {
+        "user_high_level_intent": {
+            "brand_name": task.brand_name,
+            "product_name": task.product_name,
+            "style_type": task.style_type,
+            "style_notes": task.style_notes,
         },
-        "fallback_reference_plan": fallback_plan,
-        "required_render_prompt_constraints": [
-            "产品包装结构不要变",
-            "标签和品牌识别不要乱改",
-            "画面风格与整套图统一",
-            "符合天猫茶叶电商审美",
-            "文案融入画面，不要做简陋文本框",
-            "优先保留产品主体，不允许文案压住关键产品区",
-        ],
+        "director_output": director_output,
+        "fallback_plan": fallback_plan,
     }
     return (
-        "请基于导演规划输出最终可执行的 v2 生图计划。\n"
-        "你必须只输出一个符合 PromptPlanV2 schema 的 JSON，不要输出解释文字。\n"
-        "每张图都必须保留原有 shot_id 和 shot_role，并输出 render_prompt、title_copy、subtitle_copy、layout_hint、aspect_ratio、image_size。\n"
-        "render_prompt 必须是直接给图片模型执行的描述，且必须包含产品锁定、品牌识别、整套风格统一、天猫茶叶电商审美、图内融字和主产品不被文案遮挡这些约束。\n"
-        "title_copy 建议控制在 4-8 字，subtitle_copy 建议控制在 8-15 字，但如果为了语义完整略有浮动也要优先保证可读和转化。\n"
-        "layout_hint 必须说清楚文案的大致区域，例如左上留白、顶部留白、右下弱化横条、不要遮挡主包装等。\n"
-        "hero / gift_scene / lifestyle 更偏品牌感、高级感；packaging_feature / process_or_quality 更偏卖点转化。\n\n"
-        f"prompt_refine_v2_context:\n{dump_pretty(prompt_context)}"
+        "请基于导演规划生成最终可执行的 PromptPlanV2。\n"
+        "用户没有提供逐张图标题、副标题、卖点，文案必须由系统内部自动决定。\n"
+        "必须保持 shot_id 与 shot_role 不变。\n"
+        "必须根据 shot_role 自动决定哪些图 strong 文案，哪些图 light 文案，哪些图 none。\n"
+        "hero 图可带主标题和短副标题；packaging_feature / process_or_quality / gift_scene 可带适量文案；"
+        "dry_leaf_detail / tea_soup / brewed_leaf_detail / lifestyle 默认少字或无字。\n"
+        "允许适度使用 brand_name / product_name 作为文案锚点，但不得抄参考图可见文字，也不得把包装标签文字当广告文案。\n"
+        "render_prompt 必须可直接交给图片模型执行，并明确保护包装主体、品牌识别与文字留白。\n"
+        "hero 图必须明确主体视觉面积约占画面 60%-70%，约等于 2/3。\n"
+        "背景风格参考图只用于学习背景氛围、色调、场景语言和材质语言，不得替换产品包装，不得提供广告文字。\n\n"
+        f"prompt_refine_context:\n{dump_pretty(context)}"
     )
 
 
 def _build_fallback_prompt_plan(
     *,
+    task: Task,
     director_output: DirectorOutput,
-    product_analysis: ProductAnalysis,
-    planning_context: dict[str, object],
+    aspect_ratio: str,
+    image_size: str,
 ) -> PromptPlanV2:
-    """基于导演规划和轻量规则构造稳定的 v2 兜底 prompt 计划。
+    """构建稳定可用的 v2 prompt 兜底计划。"""
 
-    这个兜底计划既服务于：
-    - mock 模式下的直接输出
-    - real 模式下的 normalize/fallback 参考
-
-    这样即使模型没有完全遵守 schema 或文案长度建议，链路仍然可跑通。
-    """
-    settings = get_settings()
-    platform_policy = planning_context.get("platform_policy", {}) if isinstance(planning_context, dict) else {}
-    style_anchor_summary = str(planning_context.get("group_style_anchor_summary", "") or "").strip()
-    platform_direction = str(platform_policy.get("aesthetic_direction", "") or director_output.platform).strip()
-    shots = [
-        _build_fallback_prompt_shot(
-            director_shot=director_shot,
-            director_output=director_output,
-            product_analysis=product_analysis,
-            style_anchor_summary=style_anchor_summary,
-            platform_direction=platform_direction,
-            default_aspect_ratio=settings.default_image_aspect_ratio,
-            default_image_size=settings.default_image_size,
+    shots: list[PromptShot] = []
+    for shot in director_output.shots:
+        copy_bundle = _resolve_copy_bundle(task=task, shot=shot, candidate=None)
+        layout_hint = _resolve_layout_hint(shot, copy_bundle["should_render_text"])
+        typography_hint = _resolve_typography_hint(shot, copy_bundle["should_render_text"])
+        subject_occupancy_ratio = shot.subject_occupancy_ratio if shot.subject_occupancy_ratio is not None else (0.66 if shot.shot_role == "hero" else None)
+        shots.append(
+            PromptShot(
+                shot_id=shot.shot_id,
+                shot_role=shot.shot_role,
+                render_prompt=_build_render_prompt(
+                    task=task,
+                    visual_style=director_output.visual_style,
+                    series_strategy=director_output.series_strategy,
+                    background_style_strategy=director_output.background_style_strategy,
+                    shot=shot,
+                    copy_bundle=copy_bundle,
+                    layout_hint=layout_hint,
+                    typography_hint=typography_hint,
+                ),
+                copy_strategy=copy_bundle["copy_strategy"],
+                text_density=copy_bundle["text_density"],
+                should_render_text=copy_bundle["should_render_text"],
+                title_copy=copy_bundle["title_copy"],
+                subtitle_copy=copy_bundle["subtitle_copy"],
+                selling_points_for_render=copy_bundle["selling_points_for_render"],
+                layout_hint=layout_hint,
+                typography_hint=typography_hint,
+                copy_source=copy_bundle["copy_source"],
+                subject_occupancy_ratio=subject_occupancy_ratio,
+                aspect_ratio=aspect_ratio,
+                image_size=image_size,
+            )
         )
-        for director_shot in director_output.shots
-    ]
     return PromptPlanV2(shots=shots)
 
 
-def _build_fallback_prompt_shot(
+def _build_render_prompt(
     *,
-    director_shot: DirectorShot,
-    director_output: DirectorOutput,
-    product_analysis: ProductAnalysis,
-    style_anchor_summary: str,
-    platform_direction: str,
-    default_aspect_ratio: str,
-    default_image_size: str,
-) -> PromptShot:
-    """按固定角色模板为单张图构造最终生图提示。"""
-    role_defaults = _build_role_defaults(director_shot.shot_role)
-    package_type = product_analysis.package_type or "茶叶包装"
-    package_color = product_analysis.primary_color or "原始主色"
-    brand_texts = "、".join(product_analysis.must_preserve_texts[:3]) if product_analysis.must_preserve_texts else "现有品牌识别"
-    locked_elements = "、".join(product_analysis.locked_elements[:4]) if product_analysis.locked_elements else "包装结构与主标签"
-    must_preserve = "、".join(product_analysis.visual_identity.must_preserve[:4]) if product_analysis.visual_identity.must_preserve else "主包装轮廓"
-    compliance_summary = "；".join(director_shot.compliance_notes[:3]) if director_shot.compliance_notes else "不要夸大功能，不要改变包装识别。"
-    copy_strategy = ROLE_COPY_GUIDANCE.get(
-        director_shot.shot_role,
-        "文案需要在转化表达和高级感之间保持平衡。",
-    )
-    policy_summary = _build_role_policy_summary(director_shot.shot_role)
-    render_prompt = "\n".join(
-        [
-            f"为天猫茶叶电商生成一张 {director_shot.shot_role} 图位图片。",
-            f"画面目标：{director_shot.objective}",
-            f"目标人群：{director_shot.audience}",
-            f"关键卖点：{'、'.join(director_shot.selling_points)}",
-            f"场景方向：{director_shot.scene}",
-            f"构图方向：{director_shot.composition}",
-            f"视觉焦点：{director_shot.visual_focus}",
-            f"整体风格：{director_output.visual_style}",
-            f"平台审美：{platform_direction or director_output.platform}",
-            f"风格锚点：{style_anchor_summary or '整套图统一的高级茶叶商业视觉'}",
-            f"角色策略：{copy_strategy}",
-            f"参考 policy：{policy_summary['intent'] or '突出商业转化和结构清晰度'}",
-            f"文本留白建议：{role_defaults['layout_hint']}",
-            (
-                "产品锁定：保持产品包装结构不要变，保持标签和品牌识别不要乱改，"
-                f"保留包装类型={package_type}、主色={package_color}、必须保留文本={brand_texts}、"
-                f"锁定元素={locked_elements}、视觉识别={must_preserve}。"
-            ),
-            "整套图风格必须统一，画面符合天猫茶叶电商审美，质感高级、克制、转化导向明确。",
-            "文案直接融入画面，不要做简陋文本框，不要贴廉价海报块，不要让文案压住关键产品区。",
-            f"合规提醒：{compliance_summary}",
-        ]
-    )
-    return PromptShot(
-        shot_id=director_shot.shot_id,
-        shot_role=director_shot.shot_role,
-        render_prompt=_ensure_required_render_constraints(render_prompt),
-        title_copy=role_defaults["title_copy"],
-        subtitle_copy=role_defaults["subtitle_copy"],
-        layout_hint=role_defaults["layout_hint"],
-        aspect_ratio=default_aspect_ratio,
-        image_size=default_image_size,
-    )
+    task: Task,
+    visual_style: str,
+    series_strategy: str,
+    background_style_strategy: str,
+    shot: DirectorShot,
+    copy_bundle: dict[str, object],
+    layout_hint: str,
+    typography_hint: str,
+) -> str:
+    """拼装单张图的执行 prompt。"""
+
+    product_label = _product_label(task)
+    lines = [
+        f"为 {product_label} 生成一张 {shot.shot_role} 电商图。",
+        f"目标：{shot.objective}",
+        f"受众：{shot.audience}",
+        f"卖点方向：{'、'.join(shot.selling_point_direction)}",
+        f"场景：{shot.scene}",
+        f"构图：{shot.composition}",
+        f"视觉焦点：{shot.visual_focus}",
+        f"文案目标：{shot.copy_goal}",
+        f"文案策略：{copy_bundle['copy_strategy']}",
+        f"文字密度：{copy_bundle['text_density']}",
+        f"主体比例要求：{shot.product_scale_guideline}",
+        f"整组风格：{visual_style}",
+        f"整套策略：{series_strategy}",
+        f"背景风格策略：{background_style_strategy}",
+        f"该图位背景参考策略：{shot.style_reference_policy}",
+        f"版式提示：{layout_hint}",
+        f"文字层级：{typography_hint}",
+        "必须保留商品包装主体、品牌识别、颜色、材质与标签层级，不要夸大功效，不要让道具压过商品。",
+        "严禁转写、复用、概括任何参考图可见文字，也不得把包装标签文字当作广告文案。",
+        "产品参考图只用于保持产品主体真实一致；背景风格参考图只用于背景氛围，不得替换产品主体。",
+    ]
+    if task.style_notes:
+        lines.append(f"风格补充说明：{task.style_notes}")
+    if copy_bundle["should_render_text"]:
+        lines.append("本图允许适度广告文字，但文字必须直接融入画面，不要做简陋文本框，不要遮挡关键产品区。")
+    else:
+        lines.append("本图优先不出现广告大字，必要时也只允许极轻的文字提示，重点呈现画面质感和产品细节。")
+    return "\n".join(lines)
 
 
-def _build_role_defaults(shot_role: str) -> dict[str, str]:
-    """为不同图位角色提供标题、副标题和版式兜底模板。"""
-    defaults: dict[str, dict[str, str]] = {
-        "hero": {
-            "title_copy": "东方茶礼",
-            "subtitle_copy": "礼盒质感一眼高级",
-            "layout_hint": "顶部或右上留白融字，文案贴合背景，不遮挡主包装正面和品牌名。",
-        },
-        "packaging_feature": {
-            "title_copy": "细节见真",
-            "subtitle_copy": "包装结构细节清晰可见",
-            "layout_hint": "右上或左上小面积留白融字，靠近细节区但不要压住标签关键识别。",
-        },
-        "dry_leaf_detail": {
-            "title_copy": "条索清晰",
-            "subtitle_copy": "干茶形态细节更直观",
-            "layout_hint": "在纯净背景区轻融文字，不要压在茶叶纹理最密集区域。",
-        },
-        "tea_soup": {
-            "title_copy": "汤色透亮",
-            "subtitle_copy": "冲泡观感清透有质感",
-            "layout_hint": "上方留白或侧边轻量融字，避开杯盏主体和汤色高光区。",
-        },
-        "brewed_leaf_detail": {
-            "title_copy": "叶底鲜活",
-            "subtitle_copy": "叶底细节真实可辨识",
-            "layout_hint": "顶部留白或角落融字，避免遮挡叶底展开层次。",
-        },
-        "gift_scene": {
-            "title_copy": "礼赠有面",
-            "subtitle_copy": "送礼场景更显高级体面",
-            "layout_hint": "左上或顶部留白融字，礼赠氛围弱辅助，商品主包装仍是中心。",
-        },
-        "lifestyle": {
-            "title_copy": "日常雅饮",
-            "subtitle_copy": "轻松融入日常饮茶时刻",
-            "layout_hint": "在桌面留白区融字，文字跟随场景节奏，不遮挡商品主体和器具焦点。",
-        },
-        "process_or_quality": {
-            "title_copy": "工艺把关",
-            "subtitle_copy": "品质卖点表达更可信",
-            "layout_hint": "顶部或侧边稳定留白融字，可轻弱化底部横条，但不要盖住主包装。",
-        },
-    }
-    return defaults.get(shot_role, defaults["packaging_feature"]).copy()
+def _normalize_prompt_plan(candidate: PromptPlanV2, fallback_plan: PromptPlanV2, *, task: Task) -> PromptPlanV2:
+    """对齐 shot_id，补齐缺失字段，并强制按图位执行自动文案策略。"""
 
-
-def _build_role_policy_summary(shot_role: str) -> dict[str, object]:
-    """把既有 shot type policy 压缩为 prompt_refine_v2 可消费的摘要。"""
-    policy_name = DIRECTOR_ROLE_POLICY_ALIASES.get(shot_role, "feature_detail")
-    policy = load_shot_type_policy(policy_name)
-    return {
-        "policy_name": policy_name,
-        "policy_source": describe_policy_source("shot_types", policy_name),
-        "intent": policy.get("intent", ""),
-        "text_space_guidance": policy.get("text_space_guidance", ""),
-    }
-
-
-def _normalize_prompt_plan(*, prompt_plan: PromptPlanV2, fallback_plan: PromptPlanV2) -> PromptPlanV2:
-    """把模型输出补齐成稳定可执行的 v2 prompt 计划。
-
-    归一化策略：
-    - 优先按 `shot_id` 对齐，避免图位顺序漂移
-    - 若 `shot_id` 缺失，再按 `shot_role` 兜底
-    - 文案长度超出建议范围时，回退到规则兜底文案
-    - `render_prompt` 永远强制补齐 v2 必需的产品锁定约束
-    """
-    shot_by_id = {shot.shot_id: shot for shot in prompt_plan.shots}
-    shot_by_role = {shot.shot_role: shot for shot in prompt_plan.shots}
-    normalized_shots: list[PromptShot] = []
-    for fallback_shot in fallback_plan.shots:
-        candidate = shot_by_id.get(fallback_shot.shot_id) or shot_by_role.get(fallback_shot.shot_role)
-        if candidate is None:
-            normalized_shots.append(fallback_shot)
-            continue
-        normalized_shots.append(
+    shot_by_id = {shot.shot_id: shot for shot in candidate.shots}
+    normalized: list[PromptShot] = []
+    for fallback in fallback_plan.shots:
+        current = shot_by_id.get(fallback.shot_id)
+        copy_bundle = _resolve_copy_bundle(task=task, shot=None, candidate=current, fallback=fallback)
+        normalized.append(
             PromptShot(
-                shot_id=fallback_shot.shot_id,
-                shot_role=fallback_shot.shot_role,
-                render_prompt=_ensure_required_render_constraints(
-                    _pick_text(candidate.render_prompt, fallback_shot.render_prompt)
-                ),
-                title_copy=_normalize_copy_text(
-                    candidate.title_copy,
-                    fallback_shot.title_copy,
-                    min_length=PROMPT_REFINE_V2_TITLE_MIN,
-                    max_length=PROMPT_REFINE_V2_TITLE_MAX,
-                ),
-                subtitle_copy=_normalize_copy_text(
-                    candidate.subtitle_copy,
-                    fallback_shot.subtitle_copy,
-                    min_length=PROMPT_REFINE_V2_SUBTITLE_MIN,
-                    max_length=PROMPT_REFINE_V2_SUBTITLE_MAX,
-                ),
-                layout_hint=_pick_text(candidate.layout_hint, fallback_shot.layout_hint),
-                aspect_ratio=_pick_text(candidate.aspect_ratio, fallback_shot.aspect_ratio),
-                image_size=_pick_text(candidate.image_size, fallback_shot.image_size),
+                shot_id=fallback.shot_id,
+                shot_role=fallback.shot_role,
+                render_prompt=_pick_text(current.render_prompt if current else "", fallback.render_prompt),
+                copy_strategy=copy_bundle["copy_strategy"],
+                text_density=copy_bundle["text_density"],
+                should_render_text=copy_bundle["should_render_text"],
+                title_copy=copy_bundle["title_copy"],
+                subtitle_copy=copy_bundle["subtitle_copy"],
+                selling_points_for_render=copy_bundle["selling_points_for_render"],
+                layout_hint=_pick_text(current.layout_hint if current else "", fallback.layout_hint),
+                typography_hint=_pick_text(current.typography_hint if current else "", fallback.typography_hint),
+                copy_source=copy_bundle["copy_source"],
+                subject_occupancy_ratio=(current.subject_occupancy_ratio if current else None) or fallback.subject_occupancy_ratio,
+                aspect_ratio=_pick_text(current.aspect_ratio if current else "", fallback.aspect_ratio),
+                image_size=_pick_text(current.image_size if current else "", fallback.image_size),
             )
         )
-    return PromptPlanV2(shots=normalized_shots)
+    return PromptPlanV2(shots=normalized)
 
 
-def _build_prompt_plan_logs(prompt_plan: PromptPlanV2) -> list[str]:
-    """输出每张图的关键生图计划摘要，便于后续排查 render/QC 问题。"""
+def _build_prompt_logs(prompt_plan: PromptPlanV2) -> list[str]:
+    """输出 prompt 计划摘要日志。"""
+
     logs = [f"[prompt_refine_v2] shot_count={len(prompt_plan.shots)}"]
     for shot in prompt_plan.shots:
         logs.append(
-            (
-                f"[prompt_refine_v2] shot={shot.shot_id} role={shot.shot_role} "
-                f"title={shot.title_copy!r} subtitle={shot.subtitle_copy!r} "
-                f"title_len={_visible_length(shot.title_copy)} subtitle_len={_visible_length(shot.subtitle_copy)} "
-                f"aspect_ratio={shot.aspect_ratio} image_size={shot.image_size}"
-            )
+            "[prompt_refine_v2] "
+            f"shot={shot.shot_id} role={shot.shot_role} copy_strategy={shot.copy_strategy} "
+            f"should_render_text={str(shot.should_render_text).lower()} copy_source={shot.copy_source} "
+            f"title={shot.title_copy or '-'} subtitle={shot.subtitle_copy or '-'} selling_points={shot.selling_points_for_render}"
         )
     return logs
 
 
-def _normalize_copy_text(candidate: str, fallback: str, *, min_length: int, max_length: int) -> str:
-    """对标题和副标题做软约束归一化，超出推荐范围时优先回退到兜底文案。"""
-    normalized = _pick_text(candidate, fallback)
-    length = _visible_length(normalized)
-    if min_length <= length <= max_length:
-        return normalized
+def _resolve_copy_bundle(
+    *,
+    task: Task,
+    shot: DirectorShot | None,
+    candidate: PromptShot | None,
+    fallback: PromptShot | None = None,
+) -> dict[str, object]:
+    """统一处理系统自动文案策略。"""
+
+    shot_role = shot.shot_role if shot is not None else (fallback.shot_role if fallback is not None else "")
+    role_policy = _resolve_role_policy(shot_role)
+
+    # 导演层已将细节图/茶汤图设为弱文案或无文案，这里必须继续收口，避免模型回摆。
+    if not role_policy["should_render_text"]:
+        return {
+            "copy_strategy": "none",
+            "text_density": "none",
+            "should_render_text": False,
+            "title_copy": "",
+            "subtitle_copy": "",
+            "selling_points_for_render": [],
+            "copy_source": "system_auto",
+        }
+
+    title_candidate = candidate.title_copy if candidate is not None else ""
+    subtitle_candidate = candidate.subtitle_copy if candidate is not None else ""
+    selling_points_candidate = candidate.selling_points_for_render if candidate is not None else []
+
+    title_fallback = _build_fallback_title(task=task, shot_role=shot_role)
+    subtitle_fallback = _build_fallback_subtitle(task=task, shot_role=shot_role)
+    title_copy = _normalize_auto_title(title_candidate, title_fallback)
+    subtitle_copy = _normalize_auto_subtitle(subtitle_candidate, subtitle_fallback)
+    selling_points_for_render = _normalize_selling_points(
+        candidate_points=selling_points_candidate,
+        fallback_points=(shot.selling_point_direction if shot is not None else fallback.selling_points_for_render if fallback else []),
+        shot_role=shot_role,
+    )
+
+    copy_source = "system_brand_anchor" if _uses_brand_anchor(task, title_copy, subtitle_copy) else "system_auto"
+    return {
+        "copy_strategy": _normalize_copy_strategy(candidate.copy_strategy if candidate is not None else "", role_policy["copy_strategy"]),
+        "text_density": _normalize_text_density(candidate.text_density if candidate is not None else "", role_policy["text_density"]),
+        "should_render_text": True,
+        "title_copy": title_copy,
+        "subtitle_copy": subtitle_copy,
+        "selling_points_for_render": selling_points_for_render,
+        "copy_source": copy_source,
+    }
+
+
+def _resolve_layout_hint(shot: DirectorShot, should_render_text: bool) -> str:
+    """返回各 shot 的默认文字区域与层级提示。"""
+
+    if shot.shot_role == "hero":
+        return "产品主体约占画面 2/3，标题副标题放左上或右上，卖点弱化纵向排列，不遮挡主包装"
+    if not should_render_text:
+        return "尽量保持干净留白，不设置大面积文案区，不遮挡产品或细节主体"
+    if shot.shot_role in {"gift_scene", "lifestyle"}:
+        return "顶部或侧边保留简洁文字区，信息轻量，不打断场景氛围"
+    return shot.layout_hint or "顶部或右侧预留信息区，不遮挡关键产品区"
+
+
+def _resolve_typography_hint(shot: DirectorShot, should_render_text: bool) -> str:
+    """返回各 shot 的默认字体层级提示。"""
+
+    if shot.typography_hint and should_render_text:
+        return shot.typography_hint
+    if not should_render_text:
+        return "优先无字；若必须带字，仅允许极轻提示，不可喧宾夺主。"
+    if shot.shot_role == "hero":
+        return "主标题最大且最醒目，副标题次之，卖点最弱；整体干净克制。"
+    return "标题和卖点保持商业级清晰，可读但不喧宾夺主。"
+
+
+def _resolve_role_policy(shot_role: str) -> dict[str, object]:
+    """按图位返回自动文案策略。"""
+
+    if shot_role == "hero":
+        return {"copy_strategy": "strong", "text_density": "medium", "should_render_text": True}
+    if shot_role in {"packaging_feature", "process_or_quality"}:
+        return {"copy_strategy": "strong", "text_density": "medium", "should_render_text": True}
+    if shot_role == "gift_scene":
+        return {"copy_strategy": "light", "text_density": "low", "should_render_text": True}
+    return {"copy_strategy": "none", "text_density": "none", "should_render_text": False}
+
+
+def _build_fallback_title(*, task: Task, shot_role: str) -> str:
+    """生成系统兜底标题。"""
+
+    if shot_role == "hero":
+        product_token = _pick_product_token(task)
+        return _trim_text(product_token or TITLE_FALLBACKS[shot_role], min_len=3, max_len=8, fallback=TITLE_FALLBACKS[shot_role])
+    return TITLE_FALLBACKS.get(shot_role, "")
+
+
+def _build_fallback_subtitle(*, task: Task, shot_role: str) -> str:
+    """生成系统兜底副标题。"""
+
+    if shot_role == "hero":
+        subject = "".join(part for part in [task.product_name or "", "包装主体清晰高级"] if part)
+        return _trim_text(subject, min_len=8, max_len=15, fallback=SUBTITLE_FALLBACKS[shot_role])
+    if shot_role == "gift_scene" and task.brand_name:
+        subject = f"{task.brand_name}礼赠场景高级得体"
+        return _trim_text(subject, min_len=8, max_len=15, fallback=SUBTITLE_FALLBACKS[shot_role])
+    return SUBTITLE_FALLBACKS.get(shot_role, "")
+
+
+def _normalize_auto_title(candidate: str, fallback: str) -> str:
+    """把自动生成主标题约束到 4-8 字附近。"""
+
+    text = "".join(str(candidate or "").split())
+    if 4 <= len(text) <= 8:
+        return text
     return fallback
 
 
-def _pick_text(candidate: str, fallback: str) -> str:
-    """优先使用模型输出，缺失时回退到兜底值。"""
-    normalized = " ".join(str(candidate or "").split())
-    if normalized:
-        return normalized
-    return " ".join(str(fallback or "").split())
+def _normalize_auto_subtitle(candidate: str, fallback: str) -> str:
+    """把自动生成副标题约束到 8-15 字附近。"""
+
+    text = "".join(str(candidate or "").split())
+    if 8 <= len(text) <= 15:
+        return text
+    return fallback
 
 
-def _visible_length(text: str) -> int:
-    """估算文案有效长度，忽略空白字符。"""
-    return len("".join(str(text or "").split()))
+def _normalize_selling_points(*, candidate_points: list[str], fallback_points: list[str], shot_role: str) -> list[str]:
+    """把卖点短语收敛为适合图内表达的长度。"""
 
+    if shot_role not in {"hero", "packaging_feature", "gift_scene", "process_or_quality"}:
+        return []
 
-def _ensure_required_render_constraints(render_prompt: str) -> str:
-    """确保最终 render prompt 一定带上 v2 必需的产品锁定和图内文字约束。
-
-    这里不依赖模型“自觉遵守”，而是在程序层做最后一道补丁。
-    目的不是追求 prompt 优雅，而是优先保证执行稳定性。
-    """
-    required_lines = [
-        "产品包装结构不要变。",
-        "标签和品牌识别不要乱改。",
-        "整套图风格必须统一。",
-        "画面要符合天猫茶叶电商审美。",
-        "文案融入画面，不要做简陋文本框。",
-        "优先保留产品主体，不允许文案压住关键产品区。",
-    ]
-    normalized = str(render_prompt or "").strip()
-    for line in required_lines:
-        if line.rstrip("。") not in normalized:
-            normalized = f"{normalized}\n{line}".strip()
+    source = [str(item).strip() for item in candidate_points or fallback_points or [] if str(item).strip()]
+    normalized: list[str] = []
+    for item in source[:2]:
+        compact = item.replace(" ", "")
+        if len(compact) <= 8:
+            normalized.append(compact)
+        else:
+            normalized.append(compact[:8])
     return normalized
+
+
+def _normalize_copy_strategy(candidate: str, fallback: str) -> str:
+    """把文案策略限制在预期集合内。"""
+
+    value = str(candidate or "").strip().lower()
+    if value in {"strong", "light", "none"}:
+        return value
+    return fallback
+
+
+def _normalize_text_density(candidate: str, fallback: str) -> str:
+    """把文字密度限制在预期集合内。"""
+
+    value = str(candidate or "").strip().lower()
+    if value in {"heavy", "medium", "low", "none"}:
+        return value
+    return fallback
+
+
+def _product_label(task: Task) -> str:
+    """生成 prompt 中的商品名称。"""
+
+    return " ".join(part for part in [task.brand_name, task.product_name] if part).strip() or "当前商品"
+
+
+def _pick_product_token(task: Task) -> str:
+    """为 hero 标题挑选短的商品锚点。"""
+
+    for token in (task.product_name, task.brand_name):
+        compact = "".join(str(token or "").split())
+        if 3 <= len(compact) <= 8:
+            return compact
+    return ""
+
+
+def _trim_text(text: str, *, min_len: int, max_len: int, fallback: str) -> str:
+    """把文本收敛到期望长度区间。"""
+
+    compact = "".join(str(text or "").split())
+    if min_len <= len(compact) <= max_len:
+        return compact
+    if len(compact) > max_len:
+        return compact[:max_len]
+    return fallback
+
+
+def _uses_brand_anchor(task: Task, title_copy: str, subtitle_copy: str) -> bool:
+    """判断自动文案是否借助了品牌/商品名锚点。"""
+
+    anchor_parts = [part for part in [task.brand_name, task.product_name] if part]
+    combined = f"{title_copy}{subtitle_copy}"
+    return any(part and part in combined for part in anchor_parts)
+
+
+def _pick_text(candidate: str, fallback: str) -> str:
+    """优先返回非空文本。"""
+
+    return str(candidate or "").strip() or str(fallback or "").strip()

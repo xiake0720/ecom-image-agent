@@ -1,8 +1,8 @@
+"""UI 与任务表单使用的固定常量。"""
+
 from __future__ import annotations
 
-PLATFORM_OPTIONS = ["taobao", "tmall", "jd", "douyin", "xiaohongshu"]
-OUTPUT_SIZE_OPTIONS = ["1440x1440", "1440x1920"]
-DEFAULT_COPY_TONE = "专业自然"
+PLATFORM_OPTIONS = ["tmall"]
+ASPECT_RATIO_OPTIONS = ["1:1"]
+IMAGE_SIZE_OPTIONS = ["2K"]
 DEFAULT_CATEGORY = "tea"
-DEFAULT_SHOT_COUNT = 3
-

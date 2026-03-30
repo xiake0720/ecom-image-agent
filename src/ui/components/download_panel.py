@@ -1,3 +1,5 @@
+"""下载面板组件。"""
+
 from __future__ import annotations
 
 from hashlib import sha1
@@ -9,12 +11,14 @@ import streamlit as st
 def render_download_panel(
     image_paths: list[str],
     zip_path: str | None,
-    zip_label: str = "下载全部 ZIP",
+    zip_label: str = "下载结果 ZIP",
     *,
     bundle_zip_path: str | None = None,
     bundle_zip_label: str = "下载完整任务包 ZIP",
     panel_key_prefix: str = "default",
 ) -> None:
+    """渲染图片与 ZIP 下载按钮。"""
+
     for image_path in image_paths:
         path = Path(image_path)
         if not path.exists():
@@ -26,6 +30,7 @@ def render_download_panel(
             mime="image/png",
             key=build_download_widget_key(panel_key_prefix, path),
         )
+
     zip_col1, zip_col2 = st.columns(2)
     if zip_path:
         archive = Path(zip_path)
@@ -52,5 +57,7 @@ def render_download_panel(
 
 
 def build_download_widget_key(panel_key_prefix: str, path: Path) -> str:
+    """生成稳定的下载组件 key。"""
+
     path_hash = sha1(str(path).encode("utf-8")).hexdigest()[:10]
     return f"download-{panel_key_prefix}-{path.name}-{path_hash}"
