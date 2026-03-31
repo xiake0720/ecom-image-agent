@@ -1,0 +1,19 @@
+{
+  "name": "tmall_premium_default",
+  "version": "1.0.0",
+  "platform": "tmall",
+  "style": "premium",
+  "description": "天猫品牌感模板，强调层次和品质叙事。",
+  "modules": [
+    {"id": "top_banner", "name": "顶部卖点横幅", "layout": "banner"},
+    {"id": "hero", "name": "产品主视觉", "layout": "hero"},
+    {"id": "core_selling_points", "name": "核心卖点", "layout": "grid-3"},
+    {"id": "tea_showcase", "name": "茶汤茶干叶底包装", "layout": "gallery-4"},
+    {"id": "specs", "name": "规格参数", "layout": "table"},
+    {"id": "scenes", "name": "适饮场景", "layout": "cards"},
+    {"id": "brew_guide", "name": "冲泡建议", "layout": "steps"},
+    {"id": "audience", "name": "人群推荐", "layout": "chips"},
+    {"id": "quality", "name": "品质背书", "layout": "proof"},
+    {"id": "delivery", "name": "售后发货", "layout": "notice"}
+  ]
+}
