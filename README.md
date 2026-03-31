@@ -292,4 +292,4 @@ ECOM_IMAGE_AGENT_RUNAPI_IMAGE_MODEL=gemini-2.5-flash-image
 - rembg 仍未接入真实运行时
 - 当前没有多模型 fallback
 - 当前没有数据库、鉴权、消息队列、云部署和前后端分离
->>>>>>> e13a90721840a4fdd5e08d65fcd4e41b9f8a738c
+
