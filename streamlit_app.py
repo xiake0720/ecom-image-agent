@@ -1,59 +1,21 @@
-"""Streamlit 应用入口。
+"""历史 Streamlit 入口（已降级为调试脚本）。
 
-文件位置：
-- 仓库根目录 `streamlit_app.py`
-
-核心职责：
-- 作为整个项目唯一的 UI 启动入口
-- 初始化配置与日志
-- 将页面控制权交给 `src.ui.pages.home.render_home_page()`
-
-主要调用方：
-- `python -m streamlit run streamlit_app.py`
-
-主要依赖：
-- `src.core.config` 读取运行配置
-- `src.core.logging` 初始化日志
-- `src.ui.pages.home` 渲染首页并触发 workflow
-
-关键输入/输出：
-- 输入是 Streamlit 当前会话状态
-- 输出是页面渲染副作用，不直接返回业务对象
+为什么保留：
+- 兼容旧的本地演示方式，便于回归比对；
+- 但正式入口已迁移为 `backend/main.py` + `frontend/`。
 """
 
 from __future__ import annotations
 
-import logging
-
 import streamlit as st
-
-from src.core.config import get_settings
-from src.core.logging import initialize_logging, log_application_startup
-from src.ui.pages.home import render_home_page
-from src.workflows.graph import reload_runtime
-
-logger = logging.getLogger(__name__)
 
 
 def main() -> None:
-    """启动首页渲染。
+    """显示迁移提示，避免误用旧入口。"""
 
-    调用链位置：
-    - 由 Streamlit 直接执行
-    - 入口极薄，不承载业务逻辑
-
-    关键副作用：
-    - 根据页面标记决定是否重载 runtime
-    - 初始化日志
-    - 渲染首页
-    """
-    if st.session_state.pop("_ecom_reload_runtime", False):
-        reload_runtime()
-    settings = get_settings()
-    initialize_logging(settings)
-    log_application_startup(settings)
-    logger.info("开始渲染 Streamlit 首页")
-    render_home_page()
+    st.set_page_config(page_title="ecom-image-agent（迁移提示）", layout="centered")
+    st.title("该项目已迁移为 FastAPI + React")
+    st.info("请使用 `uvicorn backend.main:app --reload` 启动后端，并在 frontend 目录启动 React 前端。")
 
 
 if __name__ == "__main__":
