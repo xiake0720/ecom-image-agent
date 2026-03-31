@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     enable_node_cache: bool = True
     enable_file_log: bool = True
     log_level: str = "INFO"
-    provider_timeout_seconds: int = 120
+    provider_timeout_seconds: int = 600
 
     default_platform: str = "tmall"
     default_shot_count: int = 8

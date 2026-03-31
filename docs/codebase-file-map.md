@@ -41,6 +41,8 @@
   - render fallback 兼容型 prompt contract
 
 ## Providers
+- `src/core/config.py`
+  - 项目运行时配置入口，负责 provider 默认超时、默认模型与目录等全局设置
 - `src/providers/router.py`
   - v2 主链 provider 绑定
 - `src/providers/llm/runapi_openai_text.py`

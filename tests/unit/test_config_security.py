@@ -6,12 +6,14 @@ from src.core import config as config_module
 def test_settings_defaults_match_v2_production_baseline(monkeypatch) -> None:
     monkeypatch.delenv("ECOM_IMAGE_AGENT_RUNAPI_IMAGE_MODEL", raising=False)
     monkeypatch.delenv("ECOM_IMAGE_AGENT_RUNAPI_TEXT_MODEL", raising=False)
+    monkeypatch.delenv("ECOM_IMAGE_AGENT_PROVIDER_TIMEOUT_SECONDS", raising=False)
     settings = config_module.Settings()
 
     assert settings.default_platform == "tmall"
     assert settings.default_shot_count == 8
     assert settings.default_image_aspect_ratio == "1:1"
     assert settings.default_image_size == "2K"
+    assert settings.provider_timeout_seconds == 600
     assert settings.runapi_text_model == "gpt-5-nano"
     assert settings.runapi_image_model == "gemini-3.1-flash-image-preview"
     assert settings.enable_overlay_fallback is True
