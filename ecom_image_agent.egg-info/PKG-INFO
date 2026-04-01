@@ -1,7 +1,7 @@
 Metadata-Version: 2.4
 Name: ecom-image-agent
 Version: 0.2.0
-Summary: Local Streamlit e-commerce image generation tool for tea products.
+Summary: FastAPI + React e-commerce image generation workspace.
 Requires-Python: <3.12,>=3.11
 Description-Content-Type: text/markdown
 Requires-Dist: streamlit>=1.44.0
@@ -9,245 +9,66 @@ Requires-Dist: langgraph>=0.3.18
 Requires-Dist: pydantic>=2.8.0
 Requires-Dist: pydantic-settings>=2.4.0
 Requires-Dist: pillow>=10.4.0
+Requires-Dist: PyYAML>=6.0.2
 Requires-Dist: python-dotenv>=1.0.1
 Requires-Dist: requests>=2.32.0
+Requires-Dist: fastapi>=0.115.0
+Requires-Dist: uvicorn>=0.30.0
+Requires-Dist: python-multipart>=0.0.9
 Provides-Extra: dev
 Requires-Dist: pytest>=8.3.0; extra == "dev"
 Requires-Dist: pytest-cov>=6.0.0; extra == "dev"
 
-# ecom-image-agent
+# ecom-image-agent（前后端分离版）
 
-这是一个面向茶叶品类的本地 Streamlit 电商图片生成工具。
+## 项目简介
+本项目已从 Streamlit 单体演示升级为“FastAPI 后端 + React 前端”的可持续迭代结构。
+当前目标是保证本地可运行、链路清晰、结构化落盘与可排查，不宣称生产可用。
 
-当前仓库处于第二阶段“真实 provider 接线阶段”，但仍然以本地可运行、结构化 JSON 落盘、链路清晰、便于检查与回放为优先目标，不应描述为生产可用系统。
-
-当前以真实代码为准可以确认的状态是：
-
-- 入口仍然只有 `streamlit_app.py`
-- 工作流仍然是 `Streamlit + LangGraph + 本地文件存储`
-- 文本 real provider 已有实现文件：`NVIDIATextProvider`
-- 图片 real provider 已有实现文件：`RunApiGeminiImageProvider`
-- 中文正式文案仍然统一通过 Pillow 后贴字
-- `generate_layout`、OCR、rembg 仍是规则或占位实现
-- `analyze_product` 的 vision real 分支在 workflow 中已留接口和模式开关，但当前仓库快照未看到 `src/providers/vision/` 实现文件
-
-第一阶段 Mock MVP 归档文档见：
-
-- `docs/milestones/phase-1-mock-mvp.md`
-
-## 当前仓库状态
-
-- 当前包版本：`0.2.0`
-- 当前入口：`streamlit_app.py`
-- 当前核心形态：Python 3.11、Streamlit 单体应用、LangGraph workflow、本地任务目录落盘
-
-## 程序运行链路简介
-
-程序通过下面的命令启动：
-
-```bash
-python -m streamlit run streamlit_app.py
-```
-
-启动后，`streamlit_app.py` 会进入 `src/ui/pages/home.py::render_home_page()`。页面负责收集上传图片和任务参数，点击“开始生成”后执行 `_run_task()`。
-
-`_run_task()` 会先创建 `task_id`，把上传素材写入 `outputs/tasks/{task_id}/inputs/`，并先落一版 `task.json`，然后调用 `src/workflows/graph.py::build_workflow().invoke(initial_state)` 执行 LangGraph。
-
-之所以使用 Streamlit，是因为当前阶段只需要一个本地单体 UI 来完成上传、表单输入、预览和下载，不需要拆分前后端。LangGraph 的作用是把 10 个固定节点按稳定顺序串起来，并统一状态传递、日志和异常边界。最终结果会写入 `outputs/tasks/{task_id}/`，页面再从该任务目录对应的返回状态中展示结果和下载按钮。
-
-## 当前已具备能力
-
-- 本地上传商品素材图
-- 本地创建任务目录
-- LangGraph 10 节点工作流
-- mock / real 文本 provider 切换
-- mock / real 图片 provider 切换
-- Pillow 中文后贴字
-- 结果预览
-- 单图下载
-- ZIP 下载
-
-## 当前系统模块说明
-
-- `src/ui`
-  - Streamlit 页面、上传组件、结果展示、下载按钮、页面状态管理
-- `src/workflows`
-  - `WorkflowState`、依赖注入、LangGraph 图构建、10 个节点实现
-- `src/providers`
-  - 文本 provider、图片 provider 及 mock / real 实现
-- `src/services`
-  - 本地存储、ZIP 导出、mock 规划逻辑、Pillow 渲染、QC、OCR/rembg 占位服务
-- `outputs/tasks`
-  - 每个任务的输入图片、中间 JSON、生成图片、最终图片、预览图和 ZIP 导出
-
-## 当前工作流节点
-
-固定顺序如下：
-
-1. `ingest_assets`
-2. `analyze_product`
-3. `plan_shots`
-4. `generate_copy`
-5. `generate_layout`
-6. `build_prompts`
-7. `render_images`
-8. `overlay_text`
-9. `run_qc`
-10. `finalize`
-
-## 当前 provider 说明
-
-文本侧：
-
-- `GeminiTextProvider`：当前代码里的 mock 文本 provider，本地返回伪造结构化数据
-- `NVIDIATextProvider`：当前真实文本 provider，通过 NVIDIA NIM 返回结构化 JSON
-
-图片侧：
-
-- `GeminiImageProvider`：当前代码里的 mock 图片 provider，本地生成占位图
-- `RunApiGeminiImageProvider`：当前真实图片 provider，通过 RunAPI 调用 Gemini Image Gen
-
-视觉分析侧：
-
-- `analyze_product` 节点保留了 `vision_provider_mode`
-- `graph.py` 和测试里引用了 `NVIDIAVisionProductAnalysisProvider`
-- 但当前仓库快照未看到 `src/providers/vision/` 实现文件，因此 README 不把它描述成“当前仓库内已完整可运行的 provider”
-
-## 当前任务目录结构
-
-每个任务落盘到：
-
+## 目录结构
 ```text
-outputs/tasks/{task_id}/
+backend/                 # FastAPI 后端（API、服务、模板、仓储）
+frontend/                # React + TypeScript 工作台
+backend/engine/          # 既有 LangGraph 工作流与生成引擎能力
+backend/legacy/          # 历史 Streamlit 调试入口
+outputs/tasks/           # 主图与详情任务产物目录
+storage/tasks/index.json # 任务索引（本地 JSON）
+docs/                    # 中文文档与 contract
 ```
 
-至少会包含：
-
-- `inputs/`
-- `task.json`
-- `product_analysis.json`
-- `shot_plan.json`
-- `copy_plan.json`
-- `layout_plan.json`
-- `image_prompt_plan.json`
-- `qc_report.json`
-- `generated/`
-- `final/`
-- `previews/`
-- `exports/`
-
-其中要注意两点：
-
-- `inputs/` 和第一次写入的 `task.json` 是在 UI 层 `_run_task()` 里完成的，不是 `ingest_assets` 节点完成的
-- `exports/{task_id}_images.zip` 当前只打包 `final/` 目录，不包含整套任务目录
-
-## 当前目录说明
-
-- `streamlit_app.py`：唯一 UI 入口
-- `src/core/`：配置、常量、路径工具
-- `src/domain/`：Pydantic schema
-- `src/providers/`：provider 接口与 mock / real 实现
-- `src/services/`：本地存储、规划、渲染、QC 与占位服务
-- `src/workflows/`：状态定义、LangGraph 图与节点
-- `src/ui/`：上传表单、结果页、下载组件
-- `src/prompts/`：运行时真正读取的 prompt 文件
-- `docs/`：架构、工作流、提示词、QA 规则与里程碑文档
-- `tests/`：schema、渲染与 provider mode 等测试
-
-## 当前运行方式
-
-安装：
-
+## 快速启动（最小可运行）
+### 1）安装 Python 依赖
 ```bash
-python -m venv .venv
-.venv\Scripts\activate
-python -m pip install -U pip
-python -m pip install -e .[dev]
+pip install -e .
+pip install fastapi uvicorn python-multipart
 ```
 
-启动：
-
+### 2）启动后端
 ```bash
-python -m streamlit run streamlit_app.py
+uvicorn backend.main:app --reload --port 8000
 ```
 
-## 环境变量
-
-基础配置：
-
-```env
-ECOM_IMAGE_AGENT_VISION_PROVIDER_MODE=mock
-ECOM_IMAGE_AGENT_TEXT_PROVIDER_MODE=mock
-ECOM_IMAGE_AGENT_IMAGE_PROVIDER_MODE=mock
-ECOM_IMAGE_AGENT_DEFAULT_FONT_PATH=assets/fonts/NotoSansSC-Regular.otf
-ECOM_IMAGE_AGENT_PROVIDER_TIMEOUT_SECONDS=120
+### 3）启动前端
+```bash
+cd frontend
+npm install
+npm run dev
 ```
 
-文本 real provider：
+默认前端访问 `http://127.0.0.1:5173`，后端 API 基址 `http://127.0.0.1:8000/api`。
 
-```env
-ECOM_IMAGE_AGENT_NVIDIA_API_KEY=
-ECOM_IMAGE_AGENT_NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
-ECOM_IMAGE_AGENT_NVIDIA_TEXT_MODEL=z-ai/glm5
-```
+## 配置方式
+通过环境变量（前缀 `ECOM_`）配置后端：
+- `ECOM_API_PREFIX`：API 前缀，默认 `/api`
+- `ECOM_STORAGE_ROOT`：任务索引和中间数据目录，默认 `storage`
+- `ECOM_OUTPUTS_ROOT`：任务输出目录，默认 `outputs/tasks`
+- `ECOM_TEMPLATE_ROOT`：模板目录，默认 `backend/templates`
 
-图片 real provider：
+## 主要能力
+- 主图生成：复用既有 LangGraph 工作流，API 化接入。
+- 详情页生成：模板驱动 + 数据驱动输出模块化 JSON。
+- 任务记录：统一落盘到 `storage/tasks/index.json`，支持列表与详情查询。
+- 模板管理：提供主图模板列表与详情页模板列表接口。
 
-```env
-ECOM_IMAGE_AGENT_RUNAPI_API_KEY=
-ECOM_IMAGE_AGENT_RUNAPI_IMAGE_BASE_URL=https://runapi.co
-ECOM_IMAGE_AGENT_RUNAPI_IMAGE_MODEL=gemini-2.5-flash-image
-```
-
-视觉分析相关配置位当前代码仍保留：
-
-```env
-ECOM_IMAGE_AGENT_NVIDIA_VISION_API_KEY=
-ECOM_IMAGE_AGENT_NVIDIA_VISION_BASE_URL=https://integrate.api.nvidia.com/v1
-ECOM_IMAGE_AGENT_NVIDIA_VISION_MODEL=qwen/qwen3.5-122b-a10b
-```
-
-说明：
-
-- provider mode 的依赖注入发生在 `src/workflows/graph.py::build_dependencies()`
-- `build_workflow()` 和 `get_settings()` 都有缓存；修改环境变量后，建议重启 Streamlit 进程再验证 provider 切换
-- 当前实现不做 silent fallback，缺 key 或接口失败时会显式报错
-
-## 调试与排查建议
-
-日志主要看两处：
-
-- 结果页“任务日志”面板
-- `task_state["logs"]` 中的 `streamlit_entry`、`langgraph_invoke` 和各节点日志
-
-排查任务时，优先看这些文件：
-
-- `task.json`
-- `product_analysis.json`
-- `shot_plan.json`
-- `copy_plan.json`
-- `layout_plan.json`
-- `image_prompt_plan.json`
-- `qc_report.json`
-
-如果问题出现在具体阶段，建议按下面顺序看：
-
-1. 看 `task.json` 和 `inputs/`，确认任务和素材是否先落盘成功。
-2. 看 `product_analysis.json`、`shot_plan.json`、`copy_plan.json`、`layout_plan.json`、`image_prompt_plan.json`，确认工作流中间结构化输出是否缺失或异常。
-3. 看 `generated/`、`final/`、`previews/`，确认图片生成、后贴字和预览是否完成。
-4. 看 `qc_report.json`，确认失败点在尺寸检查还是 OCR 占位检查。
-5. 看 `exports/`，确认 ZIP 是否生成。
-
-额外说明：
-
-- `_run_task()` 成功后还会额外在 `previews/` 下写 `text_render_base.png` 与 `text_render_test.png`，用于快速验证 Pillow 后贴字链路
-- 当前结果页实际展示的是 `final/*.png`，不是 `previews/*.png`
-
-## 当前限制
-
-- 当前不是生产可用系统
-- `generate_layout` 仍是规则布局
-- OCR 仍是占位实现，默认情况下 OCR 检查会直接通过
-- rembg 仍未接入真实运行时
-- 当前没有多模型 fallback
-- 当前没有数据库、鉴权、消息队列、云部署和前后端分离
+## Streamlit 状态说明
+`backend/legacy/streamlit_app.py` 保留为历史调试入口，不再是主入口；正式运行请使用 FastAPI + React。
