@@ -1,38 +1,68 @@
-﻿# 代码地图（当前）
+# 代码地图（面向新接手开发）
 
-## 主要入口
-- `backend/main.py`：FastAPI 主入口。
-- `frontend/src/main.tsx`：React 主入口，`/` 默认重定向到 `/main-images`。
-- `backend/legacy/streamlit_app.py`：历史 Streamlit 调试入口，当前不作为主 UI。
+## 1. 根目录关键入口
+- `AGENTS.md`：仓库执行规范（Codex/人工均需遵守）。
+- `README.md`：项目启动与总览文档。
+- `backend/main.py`：FastAPI 应用入口。
+- `frontend/src/main.tsx`：React 应用入口。
 
-## 后端关键文件
-- `backend/api/image.py`：主图提交接口，创建任务后立即返回 `task_id`，后台继续执行 workflow。
-- `backend/api/tasks.py`：任务列表、任务摘要、工作台 runtime 查询与任务文件访问接口。
-- `backend/engine/`：主图 LangGraph workflow、provider、渲染与存储能力。
-- `backend/services/main_image_service.py`：主图任务准备与后台执行服务。
-- `backend/services/task_queue_service.py`：进程内单 worker 主图队列，提供最小队列观测快照。
-- `backend/services/task_runtime_service.py`：从 `task.json`、`prompt_plan_v2.json` 和任务输出目录组装工作台运行时数据。
-- `backend/services/detail_page_service.py`：详情页结构化生成服务。
-- `backend/repositories/task_repository.py`：任务索引 JSON 持久化与运行时状态同步。
-- `backend/templates/detail_pages/*.json`：详情页模板资源。
+## 2. 后端目录说明
 
-## 前端关键文件
-- `frontend/src/pages/MainImagePage.tsx`：主图生成工作台页，负责真实任务提交、轮询 runtime、结果区展示和大图预览。
-- `frontend/src/pages/MainImagePage.css`：主图工作台布局样式，包含结果图区占位态和真实结果卡片样式。
-- `frontend/src/pages/TasksPage.tsx`：任务记录页，支持恢复任务到工作台和下载结果 ZIP。
-- `frontend/src/pages/TasksPage.css`：任务记录页样式。
-- `frontend/src/services/mainImageApi.ts`：主图任务提交 API 封装。
-- `frontend/src/services/taskApi.ts`：任务摘要和 runtime API 封装。
-- `frontend/src/types/api.ts`：前后端共享的前端 contract 类型。
-- `frontend/src/components/Layout.tsx`：路由壳层。
-- `frontend/src/pages/DetailPageGeneratorPage.tsx`：详情页生成页面。
-- `frontend/src/services/http.ts`：统一请求封装。
-- `frontend/src/hooks/useTasks.ts`：任务列表查询 hook。
+### 2.1 `backend/api/`
+- `health.py`：健康检查接口。
+- `image.py`：主图任务提交接口。
+- `detail.py`：详情页生成接口。
+- `tasks.py`：任务列表、任务详情、runtime、任务文件访问。
+- `templates.py`：模板列表与详情页预览接口。
+- `assets.py`：静态资产访问。
 
-## 设计与规范文档
-- `docs/api.md`：接口清单与运行时接口说明。
-- `docs/workflow.md`：工作流与主图工作台真实数据流说明。
-- `docs/contracts/task_runtime.md`：主图工作台 runtime 返回结构说明。
-- `docs/design/page-layout-rules.md`：主图工作台页面级布局规则。
-- `docs/design/component-rules.md`：上传卡片、结果卡片、预览弹层等组件规则。
-- `docs/design/anti-patterns.md`：禁止事项与常见反模式清单。
+### 2.2 `backend/services/`
+- `main_image_service.py`：主图任务创建、落盘、队列执行入口。
+- `task_queue_service.py`：进程内队列与 worker。
+- `task_runtime_service.py`：工作台 runtime 聚合。
+- `detail_page_service.py`：详情页模块化 JSON 生成。
+- `template_service.py`：模板读取服务。
+
+### 2.3 `backend/schemas/`
+- `task.py`：主图提交、任务摘要、runtime、详情页生成等 schema。
+
+### 2.4 `backend/repositories/`
+- `task_repository.py`：任务索引 `storage/tasks/index.json` 的读写与补全。
+
+### 2.5 `backend/engine/`
+- 主图生成引擎目录（workflow、provider、domain、渲染、存储）。
+- `workflows/graph.py` 为主图 workflow 编排入口。
+
+### 2.6 `backend/templates/`
+- `detail_pages/*.json`：详情页模板资源。
+
+## 3. 前端目录说明
+
+### 3.1 `frontend/src/pages/`
+- `MainImagePage.tsx`：当前核心页面（主图提交/轮询/结果展示）。
+- `TasksPage.tsx`：任务记录页。
+- `DetailPageGeneratorPage.tsx`：详情页生成页。
+- 其他页面：`DashboardPage`、`TemplatesPage`、`PreviewPage`、`SettingsPage`、`LoginPage`。
+
+### 3.2 `frontend/src/services/`
+- `http.ts`：统一 axios 实例与 URL 解析。
+- `mainImageApi.ts`：主图提交 API。
+- `taskApi.ts`：任务查询与 runtime 查询 API。
+
+### 3.3 `frontend/src/components/`
+- `Layout.tsx`：路由壳层布局（主图页可接管自身顶栏）。
+
+### 3.4 `frontend/src/types/`
+- `api.ts`：前端 API contract 类型。
+
+## 4. 数据与产物目录
+- `storage/tasks/index.json`：任务摘要索引。
+- `outputs/tasks/{task_id}/`：任务全量产物（输入、生成、导出、中间 JSON）。
+
+## 5. 文档目录建议阅读顺序
+1. `docs/architecture.md`
+2. `docs/workflow.md`
+3. `docs/api.md`
+4. `docs/frontend-workbench.md`
+5. `docs/storage.md`
+6. `docs/development-rules.md`
