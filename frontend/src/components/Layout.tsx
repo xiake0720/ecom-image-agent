@@ -1,11 +1,18 @@
-import { Link, Outlet } from "react-router-dom";
+import { Link, Outlet, useLocation } from "react-router-dom";
 
 /**
  * 工作台主布局。
  * 输入：路由子页面。
- * 输出：统一导航壳层，保持页面结构一致。
+ * 输出：统一导航壳层，主图工作台页面可按需接管自身顶部导航。
  */
 export function Layout() {
+  const location = useLocation();
+  const isMainImageWorkbench = location.pathname === "/main-images";
+
+  if (isMainImageWorkbench) {
+    return <Outlet />;
+  }
+
   return (
     <div style={{ fontFamily: "sans-serif", padding: 16 }}>
       <h1>电商图工作台</h1>
