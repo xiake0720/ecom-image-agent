@@ -2,7 +2,6 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout";
-import { DashboardPage } from "./pages/DashboardPage";
 import { DetailPageGeneratorPage } from "./pages/DetailPageGeneratorPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MainImagePage } from "./pages/MainImagePage";
@@ -13,7 +12,7 @@ import { TemplatesPage } from "./pages/TemplatesPage";
 
 /**
  * React 入口。
- * 为什么这样分层：通过路由聚合页面，业务组件独立维护，便于持续扩展。
+ * 路由策略：默认首页直接进入主图生成工作台，符合当前产品主路径。
  */
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
@@ -21,7 +20,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/" element={<Layout />}>
-          <Route index element={<DashboardPage />} />
+          <Route index element={<Navigate to="/main-images" replace />} />
           <Route path="main-images" element={<MainImagePage />} />
           <Route path="detail-pages" element={<DetailPageGeneratorPage />} />
           <Route path="templates" element={<TemplatesPage />} />
@@ -29,7 +28,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="preview" element={<PreviewPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to="/main-images" replace />} />
       </Routes>
     </BrowserRouter>
   </React.StrictMode>
