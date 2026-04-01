@@ -3,9 +3,11 @@
 ## 主要入口
 - `backend/main.py`：FastAPI 主入口（正式服务入口）。
 - `frontend/src/main.tsx`：React 主入口。
-- `streamlit_app.py`：历史调试入口（已降级）。
+- `backend/legacy/streamlit_app.py`：历史调试入口（已降级）。
 
 ## 后端关键文件
+- `backend/engine/`：既有 LangGraph 工作流、provider、渲染与存储引擎层。
+- `backend/legacy/ui/`：历史 Streamlit UI 页面与组件。
 - `backend/api/*.py`：接口路由
 - `backend/services/main_image_service.py`：主图生成服务（复用既有 workflow）
 - `backend/services/detail_page_service.py`：详情页结构化生成

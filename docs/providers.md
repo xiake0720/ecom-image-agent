@@ -1,7 +1,7 @@
 # Provider 与路由说明
 
 ## 主图生成
-主图仍复用 `src/providers/` 与 `src/workflows/` 的既有 provider 路由逻辑。
+主图仍复用 `backend/engine/providers/` 与 `backend/engine/workflows/` 的既有 provider 路由逻辑。
 FastAPI 仅做接口化封装，不改变 provider 选择策略。
 
 ## 详情页生成

@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from src.core.config import ResolvedModelSelection
-from src.domain.asset import Asset, AssetType
-from src.domain.director_output import DirectorOutput
-from src.domain.task import Task
-from src.workflows.nodes.director_v2 import director_v2
-from src.workflows.state import WorkflowDependencies
+from backend.engine.core.config import ResolvedModelSelection
+from backend.engine.domain.asset import Asset, AssetType
+from backend.engine.domain.director_output import DirectorOutput
+from backend.engine.domain.task import Task
+from backend.engine.workflows.nodes.director_v2 import director_v2
+from backend.engine.workflows.state import WorkflowDependencies
 
 
 class TmpStorageService:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from src.domain.asset import Asset, AssetType
-from src.services.assets.reference_selector import select_reference_bundle
+from backend.engine.domain.asset import Asset, AssetType
+from backend.engine.services.assets.reference_selector import select_reference_bundle
 
 
 def test_reference_selector_prefers_white_bg_then_detail() -> None:

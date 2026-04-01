@@ -8,7 +8,8 @@
 ```text
 backend/                 # FastAPI 后端（API、服务、模板、仓储）
 frontend/                # React + TypeScript 工作台
-src/                     # 既有工作流、provider、渲染与存储能力
+backend/engine/          # 既有 LangGraph 工作流与生成引擎能力
+backend/legacy/          # 历史 Streamlit 调试入口
 outputs/tasks/           # 主图与详情任务产物目录
 storage/tasks/index.json # 任务索引（本地 JSON）
 docs/                    # 中文文档与 contract
@@ -49,4 +50,4 @@ npm run dev
 - 模板管理：提供主图模板列表与详情页模板列表接口。
 
 ## Streamlit 状态说明
-`streamlit_app.py` 保留为历史调试入口，不再是主入口；正式运行请使用 FastAPI + React。
+`backend/legacy/streamlit_app.py` 保留为历史调试入口，不再是主入口；正式运行请使用 FastAPI + React。

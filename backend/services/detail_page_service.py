@@ -10,7 +10,7 @@ from backend.core.exceptions import AppException
 from backend.repositories.task_repository import TaskRepository
 from backend.schemas.task import DetailPageGenerateRequest, DetailPageGenerateResponse
 from backend.services.template_service import TemplateService
-from src.services.storage.local_storage import LocalStorageService
+from backend.engine.services.storage.local_storage import LocalStorageService
 
 
 class DetailPageService:

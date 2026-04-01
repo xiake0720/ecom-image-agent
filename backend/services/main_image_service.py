@@ -10,13 +10,13 @@ from fastapi import UploadFile
 
 from backend.repositories.task_repository import TaskRepository
 from backend.schemas.task import MainImageGeneratePayload, TaskSummary
-from src.core.config import get_settings
-from src.core.paths import ensure_task_dirs
-from src.domain.asset import AssetType
-from src.domain.task import Task, TaskStatus
-from src.services.storage.local_storage import LocalStorageService
-from src.workflows.graph import run_workflow
-from src.workflows.state import WorkflowState, format_workflow_log
+from backend.engine.core.config import get_settings
+from backend.engine.core.paths import ensure_task_dirs
+from backend.engine.domain.asset import AssetType
+from backend.engine.domain.task import Task, TaskStatus
+from backend.engine.services.storage.local_storage import LocalStorageService
+from backend.engine.workflows.graph import run_workflow
+from backend.engine.workflows.state import WorkflowState, format_workflow_log
 
 logger = logging.getLogger(__name__)
 

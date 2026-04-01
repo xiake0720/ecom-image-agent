@@ -1,7 +1,7 @@
 # Workflow 说明（当前）
 
 ## 主图工作流
-后端 `POST /api/image/generate-main` 会调用既有 `src.workflows.graph.run_workflow` 固定主链：
+后端 `POST /api/image/generate-main` 会调用既有 `backend.engine.workflows.graph.run_workflow` 固定主链：
 1. ingest_assets
 2. director_v2
 3. prompt_refine_v2
