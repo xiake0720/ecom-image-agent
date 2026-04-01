@@ -20,3 +20,9 @@
 - `frontend/src/pages/TasksPage.tsx`：任务记录页
 - `frontend/src/services/http.ts`：统一请求封装
 - `frontend/src/hooks/useTasks.ts`：任务查询 hook
+
+## 设计规范文档
+- `docs/design/ui-system.md`：全局 UI 视觉基础规范（颜色、字体、间距、圆角、阴影、动效、可访问性）。
+- `docs/design/page-layout-rules.md`：页面级布局规则（顶部导航 + 左操作 + 右进度结果）。
+- `docs/design/component-rules.md`：核心组件规范（上传卡、标签、参数区、进度区、结果卡、按钮）。
+- `docs/design/anti-patterns.md`：禁止事项与常见反模式清单。
