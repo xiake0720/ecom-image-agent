@@ -1,0 +1,32 @@
+[
+  {
+    "task_id": "bca02a6217d54ecfa3c6f3719c7893c4",
+    "task_type": "main_image",
+    "status": "review_required",
+    "created_at": "2026-04-01T06:07:52.928670",
+    "updated_at": "2026-04-01T06:07:52.928670",
+    "title": "",
+    "platform": "tmall",
+    "result_path": "outputs\\tasks\\bca02a6217d54ecfa3c6f3719c7893c4\\final"
+  },
+  {
+    "task_id": "903627b0f54445239c51aac0fcca1d8d",
+    "task_type": "main_image",
+    "status": "review_required",
+    "created_at": "2026-04-01T07:27:01.074856",
+    "updated_at": "2026-04-01T07:27:04.944656",
+    "title": "凤凰单丛",
+    "platform": "tmall",
+    "result_path": "outputs\\tasks\\903627b0f54445239c51aac0fcca1d8d\\final",
+    "progress_percent": 100,
+    "current_step": "finalize",
+    "current_step_label": "正在质检与整理结果",
+    "result_count_completed": 8,
+    "result_count_total": 8,
+    "export_zip_path": "exports/903627b0f54445239c51aac0fcca1d8d_final_images.zip",
+    "provider_label": "Mock Local",
+    "model_label": "Mock Local",
+    "detail_image_count": 1,
+    "background_image_count": 1
+  }
+]

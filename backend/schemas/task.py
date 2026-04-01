@@ -1,17 +1,15 @@
-"""任务相关请求与响应模型。"""
+﻿"""任务相关请求与响应模型。"""
 
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
 
 class MainImageGeneratePayload(BaseModel):
-    """主图生成参数。
-
-    说明：文件上传通过 multipart 传输，本文档模型用于记录文本字段含义。
-    """
+    """主图生成文本参数。"""
 
     brand_name: str = Field(default="")
     product_name: str = Field(default="")
@@ -25,7 +23,7 @@ class MainImageGeneratePayload(BaseModel):
 
 
 class TaskSummary(BaseModel):
-    """任务摘要，用于任务列表和详情页导航。"""
+    """任务摘要，用于任务列表和页面恢复。"""
 
     task_id: str
     task_type: str
@@ -35,6 +33,62 @@ class TaskSummary(BaseModel):
     title: str = ""
     platform: str = ""
     result_path: str = ""
+    progress_percent: int = 0
+    current_step: str = ""
+    current_step_label: str = ""
+    result_count_completed: int = 0
+    result_count_total: int = 0
+    export_zip_path: str = ""
+    provider_label: str = ""
+    model_label: str = ""
+    detail_image_count: int = 0
+    background_image_count: int = 0
+
+
+class TaskRuntimeImage(BaseModel):
+    """工作台结果卡片运行时数据。"""
+
+    id: str
+    title: str
+    subtitle: str = ""
+    status: Literal["queued", "running", "completed", "failed"]
+    image_url: str = ""
+    file_name: str = ""
+    width: int | None = None
+    height: int | None = None
+    generated_at: str = ""
+
+
+class TaskRuntimeQCSummary(BaseModel):
+    """工作台右侧质检摘要。"""
+
+    passed: bool = False
+    review_required: bool = False
+    warning_count: int = 0
+    failed_count: int = 0
+
+
+class TaskRuntimePayload(BaseModel):
+    """主图任务运行时视图。"""
+
+    task_id: str
+    status: str
+    progress_percent: int = 0
+    current_step: str = ""
+    current_step_label: str = ""
+    message: str = ""
+    queue_position: int | None = None
+    queue_size: int = 0
+    provider_label: str = ""
+    model_label: str = ""
+    detail_image_count: int = 0
+    background_image_count: int = 0
+    result_count_completed: int = 0
+    result_count_total: int = 0
+    export_zip_url: str = ""
+    full_bundle_zip_url: str = ""
+    qc_summary: TaskRuntimeQCSummary = Field(default_factory=TaskRuntimeQCSummary)
+    results: list[TaskRuntimeImage] = Field(default_factory=list)
 
 
 class DetailPageGenerateRequest(BaseModel):
