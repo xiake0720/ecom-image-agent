@@ -1,5 +1,5 @@
 /* 主图工作台页面样式。
- * 关键目标：落实 docs/design 的浅色 SaaS 规范，优先保证布局、留白与卡片层级。
+ * 关键目标：在保留现有三段结构前提下，增强大屏适配、左右分栏和顶部操作区完整度。
  */
 
 :root {
@@ -12,32 +12,39 @@
   --wb-text-primary: #0f172a;
   --wb-text-secondary: #334155;
   --wb-text-tertiary: #64748b;
-  --wb-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
-  --wb-shadow-hover: 0 8px 24px rgba(15, 23, 42, 0.1);
+  --wb-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+  --wb-shadow-hover: 0 12px 30px rgba(15, 23, 42, 0.1);
 }
 
 .main-workbench {
   min-height: 100vh;
   background: var(--wb-bg-page);
   color: var(--wb-text-primary);
-  padding: 24px;
+  padding: 24px 0 30px;
   font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
 }
 
-/* 顶部导航：三段式结构（品牌、导航、状态操作），避免额外左侧竖向导航。 */
+/* 大屏容器策略：在 1440/1920/4K 下通过 width + max-width 让主体区域更舒展。 */
+.workbench-topbar,
+.workbench-content {
+  width: calc(100vw - 64px);
+  max-width: 1800px;
+  margin-inline: auto;
+}
+
+/* 顶部导航：三段式结构（品牌、导航、状态操作），并统一右上角 action group。 */
 .workbench-topbar {
-  height: 72px;
+  min-height: 78px;
   background: var(--wb-bg-card);
   border: 1px solid var(--wb-border);
-  border-radius: 16px;
+  border-radius: 18px;
   box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06);
   display: grid;
-  grid-template-columns: 280px 1fr 220px;
+  grid-template-columns: minmax(240px, 280px) minmax(0, 1fr) minmax(280px, 360px);
   align-items: center;
   gap: 16px;
-  padding: 0 20px;
-  margin: 0 auto 20px;
-  max-width: 1520px;
+  padding: 8px 24px;
+  margin-bottom: 24px;
 }
 
 .brand-block {
@@ -47,8 +54,8 @@
 }
 
 .brand-logo {
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
   border-radius: 10px;
   background: linear-gradient(135deg, var(--wb-brand-500), var(--wb-accent-500));
   color: #fff;
@@ -75,14 +82,14 @@
 .top-nav {
   display: flex;
   justify-content: center;
-  gap: 22px;
+  gap: clamp(16px, 1.8vw, 30px);
 }
 
 .top-nav a {
   color: var(--wb-text-secondary);
   text-decoration: none;
   font-weight: 500;
-  padding: 6px 0;
+  padding: 8px 0;
   border-bottom: 2px solid transparent;
   transition: color 180ms ease, border-color 180ms ease;
 }
@@ -92,19 +99,83 @@
   border-bottom-color: var(--wb-brand-700);
 }
 
-.top-actions {
-  display: flex;
-  justify-content: flex-end;
+.top-actions-group {
+  justify-self: end;
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid var(--wb-border);
+  background: #f8fbff;
+}
+
+.action-chip {
+  height: 36px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: #ffffff;
+  color: var(--wb-text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  cursor: pointer;
+  transition: all 180ms ease;
+}
+
+.action-chip svg {
+  width: 16px;
+  height: 16px;
+}
+
+.action-chip:hover {
+  border-color: #c7d2fe;
+  color: var(--wb-brand-700);
+  transform: translateY(-1px);
+}
+
+.action-status-pill {
+  background: linear-gradient(180deg, #f0f5ff, #e8efff);
+  border-color: #c7d2fe;
+  font-weight: 600;
+  color: #27399f;
+}
+
+.action-status-pill .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #4f46e5;
+  box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.14);
+}
+
+.icon-chip {
+  width: 36px;
+  padding: 0;
+}
+
+.avatar-chip {
+  padding: 0 8px 0 4px;
+}
+
+.avatar-circle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
 }
 
 .workbench-content {
-  max-width: 1520px;
-  margin: 0 auto;
   display: grid;
-  grid-template-columns: 460px minmax(0, 1fr);
-  gap: 22px;
+  grid-template-columns: clamp(400px, 23vw, 440px) minmax(0, 1fr);
+  gap: 24px;
 }
 
 /* 左侧操作面板：每个模块独立白卡片，统一内外间距。 */
@@ -112,7 +183,7 @@
 .right-panel {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 18px;
 }
 
 .panel-card {
@@ -124,58 +195,104 @@
 }
 
 .panel-card h3 {
-  margin: 0 0 12px;
+  margin: 0;
   font-size: 18px;
   line-height: 26px;
 }
 
-.upload-row {
+.upload-description {
+  margin: 8px 0 0;
+  color: var(--wb-text-tertiary);
+  font-size: 13px;
+}
+
+/* 上传区统一成“缩略图 + 添加卡片”网格，解决商品图与参考图区视觉不一致问题。 */
+.upload-gallery-grid {
+  margin-top: 14px;
   display: grid;
-  grid-template-columns: 1fr 128px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
-.upload-dropzone {
+.upload-tile {
   min-height: 128px;
-  border: 1.5px dashed #cbd5e1;
   border-radius: 14px;
-  background: #f8faff;
+  border: 1px solid var(--wb-border);
+  background: #fbfdff;
   display: flex;
   flex-direction: column;
-  align-items: center;
   justify-content: center;
+  align-items: center;
+  text-align: center;
+  padding: 12px;
+  box-sizing: border-box;
+}
+
+.upload-empty {
+  border-style: dashed;
+  border-width: 1.5px;
+  color: var(--wb-text-tertiary);
   cursor: pointer;
+}
+
+.upload-empty strong {
+  color: var(--wb-text-secondary);
+}
+
+.upload-empty span {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.upload-thumb {
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 8px;
+  overflow: hidden;
+}
+
+.upload-thumb img {
+  width: 100%;
+  height: 100px;
+  object-fit: cover;
+  border-radius: 10px;
+}
+
+.upload-thumb span {
+  margin-top: 6px;
+  color: var(--wb-text-tertiary);
+  font-size: 12px;
+}
+
+.upload-add {
+  border-style: dashed;
+  border-width: 1.5px;
+  cursor: pointer;
+  background: #f8faff;
   transition: border-color 180ms ease, background-color 180ms ease;
 }
 
-.upload-dropzone:hover {
+.upload-add:hover,
+.upload-empty:hover {
   border-color: #a5b4fc;
   background: #eef2ff;
 }
 
-.upload-dropzone span {
-  font-weight: 600;
-}
-
-.upload-dropzone small {
-  color: var(--wb-text-tertiary);
-}
-
-.upload-preview {
-  border: 1px solid var(--wb-border);
-  border-radius: 12px;
-  min-height: 128px;
+.upload-add-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 9px;
   display: grid;
-  place-content: center;
-  color: var(--wb-text-tertiary);
-  background: #fbfdff;
+  place-items: center;
+  background: #e4e8ff;
+  color: #4754d6;
+  font-weight: 700;
+  margin-bottom: 6px;
 }
 
-.upload-preview img {
-  width: 100%;
-  height: 128px;
-  object-fit: cover;
-  border-radius: 12px;
+.upload-add small {
+  margin-top: 4px;
+  color: var(--wb-text-tertiary);
 }
 
 .hint {
@@ -242,19 +359,25 @@
   font-size: 13px;
 }
 
+.product-name-input,
 .form-grid input[type="range"],
 .form-grid select,
-.panel-card textarea,
-.panel-card input[type="file"] {
+.panel-card textarea {
   border: 1px solid var(--wb-border);
   border-radius: 10px;
   background: #fff;
 }
 
-.form-grid select,
-.panel-card input[type="file"] {
+.product-name-input,
+.form-grid select {
   height: 40px;
   padding: 0 10px;
+}
+
+.product-name-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 10px;
 }
 
 .panel-card textarea {
@@ -435,6 +558,17 @@
   border-color: #c7d2fe;
 }
 
+@media (max-width: 1440px) {
+  .workbench-topbar,
+  .workbench-content {
+    width: calc(100vw - 40px);
+  }
+
+  .workbench-topbar {
+    grid-template-columns: minmax(220px, 260px) minmax(0, 1fr) minmax(240px, 320px);
+  }
+}
+
 @media (max-width: 1280px) {
   .workbench-content {
     grid-template-columns: 1fr;
@@ -442,5 +576,26 @@
 
   .result-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .workbench-topbar {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .top-nav {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .top-actions-group {
+    justify-self: start;
+  }
+
+  .upload-gallery-grid {
+    grid-template-columns: 1fr;
   }
 }
