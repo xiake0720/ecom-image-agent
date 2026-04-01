@@ -15,7 +15,9 @@
 - `backend/templates/detail_pages/*.json`：平台/风格模板
 
 ## 前端关键文件
-- `frontend/src/pages/MainImagePage.tsx`：主图提交页面
+- `frontend/src/pages/MainImagePage.tsx`：主图工作台页面（顶部导航 + 左操作 + 右进度结果）。
+- `frontend/src/pages/MainImagePage.css`：主图工作台视觉规范样式实现（颜色/间距/卡片/状态标签）。
+- `frontend/src/components/Layout.tsx`：路由壳层，`/main-images` 由页面自身接管顶部导航。
 - `frontend/src/pages/DetailPageGeneratorPage.tsx`：详情页生成页面
 - `frontend/src/pages/TasksPage.tsx`：任务记录页
 - `frontend/src/services/http.ts`：统一请求封装
