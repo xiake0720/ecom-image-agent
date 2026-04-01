@@ -12,6 +12,23 @@ interface ResultCard {
   status: ResultStatus;
 }
 
+interface UploadGallerySectionProps {
+  /** 区块标题：用于统一商品图/参考图上传视觉语言。 */
+  title: string;
+  /** 区块说明：用于解释上传目的与格式限制。 */
+  description: string;
+  /** 输入框 ID：用于 label 与 input 绑定。 */
+  inputId: string;
+  /** 已上传文件列表：由页面状态统一管理，组件只负责展示。 */
+  files: File[];
+  /** 预览 URL：用于展示缩略图；保持与文件顺序一致。 */
+  previewUrls: string[];
+  /** 是否支持多选：参考图支持多选，商品图保持单选。 */
+  multiple?: boolean;
+  /** 文件变更回调：由页面在上层更新状态，避免组件侵入业务流程。 */
+  onChange: (files: File[]) => void;
+}
+
 const STYLE_TAGS = ["简洁", "自然", "优选", "佳节", "轻奢", "质感", "暖调", "极简"];
 const PLATFORMS = ["天猫", "京东", "拼多多", "抖音"];
 
@@ -34,7 +51,11 @@ export function MainImagePage() {
   const [message, setMessage] = useState("未提交");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const previewUrl = useMemo(() => (whiteBg ? URL.createObjectURL(whiteBg) : ""), [whiteBg]);
+  /**
+   * 预览图 URL 派生层：由 state 派生，避免 upload 组件内重复创建 URL。
+   */
+  const whiteBgPreviewUrls = useMemo(() => (whiteBg ? [URL.createObjectURL(whiteBg)] : []), [whiteBg]);
+  const referencePreviewUrls = useMemo(() => referenceImages.map((file) => URL.createObjectURL(file)), [referenceImages]);
 
   const resultCards: ResultCard[] = [
     { id: "1", title: "风格 A", subtitle: "场景 B", imageUrl: "https://images.unsplash.com/photo-1523293182086-7651a899d37f?auto=format&fit=crop&w=640&q=80", status: "completed" },
@@ -103,13 +124,21 @@ export function MainImagePage() {
             数据中心
           </a>
         </nav>
-        <div className="top-actions">
-          <span className="status-pill status-running">生成中</span>
-          <button type="button" className="icon-btn" aria-label="通知">
+        {/* 右上角操作区：统一成 action group，保证状态、通知、设置、用户入口风格一致。 */}
+        <div className="top-actions-group">
+          <button type="button" className="action-chip action-status-pill" aria-label="任务状态">
+            <span className="dot" />
+            生成中
+          </button>
+          <button type="button" className="action-chip icon-chip" aria-label="通知">
             <BellIcon />
           </button>
-          <button type="button" className="icon-btn" aria-label="设置">
+          <button type="button" className="action-chip icon-chip" aria-label="设置">
             <GearIcon />
+          </button>
+          <button type="button" className="action-chip avatar-chip" aria-label="用户菜单">
+            <span className="avatar-circle">AI</span>
+            <ChevronDownIcon />
           </button>
         </div>
       </header>
@@ -117,36 +146,24 @@ export function MainImagePage() {
       <main className="workbench-content">
         {/* 左侧操作面板：严格按规范顺序组织输入流程 */}
         <section className="left-panel">
-          <article className="panel-card">
-            <h3>上传商品图</h3>
-            <div className="upload-row">
-              <label className="upload-dropzone" htmlFor="white-bg-upload">
-                <span>上传商品图</span>
-                <small>JPG / PNG / WebP</small>
-              </label>
-              <input
-                id="white-bg-upload"
-                type="file"
-                accept="image/*"
-                onChange={(e) => setWhiteBg(e.target.files?.[0] ?? null)}
-                hidden
-              />
-              <div className="upload-preview">
-                {previewUrl ? <img src={previewUrl} alt="商品图预览" /> : <span>暂无预览</span>}
-              </div>
-            </div>
-          </article>
+          <UploadGallerySection
+            title="上传商品图"
+            description="请上传白底主商品图，系统会在保持主体结构的前提下生成主图。"
+            inputId="white-bg-upload"
+            files={whiteBg ? [whiteBg] : []}
+            previewUrls={whiteBgPreviewUrls}
+            onChange={(files) => setWhiteBg(files[0] ?? null)}
+          />
 
-          <article className="panel-card">
-            <h3>上传参考图</h3>
-            <input
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={(e) => setReferenceImages(Array.from(e.target.files ?? []))}
-            />
-            <p className="hint">已选择 {referenceImages.length} 张参考图，用于风格/构图提示。</p>
-          </article>
+          <UploadGallerySection
+            title="上传参考图"
+            description="可选，最多上传 6 张参考图用于风格、光线、构图引导。"
+            inputId="reference-upload"
+            files={referenceImages}
+            previewUrls={referencePreviewUrls}
+            multiple
+            onChange={(files) => setReferenceImages(files.slice(0, 6))}
+          />
 
           <article className="panel-card">
             <h3>选择平台</h3>
@@ -209,6 +226,14 @@ export function MainImagePage() {
 
           <article className="panel-card">
             <h3>文案备注</h3>
+            <input
+              className="product-name-input"
+              type="text"
+              placeholder="商品名称（可选）"
+              value={productName}
+              onChange={(e) => setProductName(e.target.value)}
+              maxLength={80}
+            />
             <textarea
               placeholder="请输入品牌名、核心卖点或禁用词"
               value={note}
@@ -275,6 +300,49 @@ export function MainImagePage() {
   );
 }
 
+/**
+ * 上传区复用组件。
+ * 职责：统一商品图与参考图的标题、说明、空状态、缩略图网格和添加卡片视觉。
+ */
+function UploadGallerySection({ title, description, inputId, files, previewUrls, multiple = false, onChange }: UploadGallerySectionProps) {
+  return (
+    <article className="panel-card">
+      <h3>{title}</h3>
+      <p className="upload-description">{description}</p>
+      <div className="upload-gallery-grid">
+        {previewUrls.length === 0 ? (
+          <label className="upload-tile upload-empty" htmlFor={inputId}>
+            <strong>暂无图片</strong>
+            <span>点击上传后将在这里展示缩略图</span>
+          </label>
+        ) : (
+          previewUrls.map((previewUrl, index) => (
+            <div className="upload-tile upload-thumb" key={`${inputId}-${index}`}>
+              <img src={previewUrl} alt={`${title} ${index + 1}`} />
+              <span>第 {index + 1} 张</span>
+            </div>
+          ))
+        )}
+
+        <label className="upload-tile upload-add" htmlFor={inputId}>
+          <span className="upload-add-icon">+</span>
+          <strong>{multiple ? "添加参考图" : "上传商品图"}</strong>
+          <small>{multiple ? "最多 6 张" : "支持 JPG / PNG / WebP"}</small>
+        </label>
+      </div>
+      <input
+        id={inputId}
+        type="file"
+        accept="image/*"
+        hidden
+        multiple={multiple}
+        onChange={(e) => onChange(Array.from(e.target.files ?? []))}
+      />
+      <p className="hint">已选择 {files.length} 张</p>
+    </article>
+  );
+}
+
 function statusLabel(status: ResultStatus): string {
   if (status === "completed") return "完成";
   if (status === "queued") return "队列中";
@@ -318,6 +386,14 @@ function GearIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="m12 3 1.4 1.8 2.2.4.6 2.2 1.8 1.4-1 2 1 2-1.8 1.4-.6 2.2-2.2.4L12 21l-1.4-1.8-2.2-.4-.6-2.2L6 15.2l1-2-1-2 1.8-1.4.6-2.2 2.2-.4L12 3Zm0 6.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ChevronDownIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

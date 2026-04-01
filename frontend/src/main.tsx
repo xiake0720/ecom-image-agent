@@ -21,7 +21,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/" element={<Layout />}>
-          <Route index element={<DashboardPage />} />
+          <Route index element={<Navigate to="main-images" replace />} />
+          <Route path="dashboard" element={<DashboardPage />} />
           <Route path="main-images" element={<MainImagePage />} />
           <Route path="detail-pages" element={<DetailPageGeneratorPage />} />
           <Route path="templates" element={<TemplatesPage />} />
@@ -29,7 +30,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="preview" element={<PreviewPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to="/main-images" replace />} />
       </Routes>
     </BrowserRouter>
   </React.StrictMode>

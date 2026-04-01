@@ -2,7 +2,7 @@
 
 ## 主要入口
 - `backend/main.py`：FastAPI 主入口（正式服务入口）。
-- `frontend/src/main.tsx`：React 主入口。
+- `frontend/src/main.tsx`：React 主入口（`/` 默认重定向到 `/main-images`）。
 - `backend/legacy/streamlit_app.py`：历史调试入口（已降级）。
 
 ## 后端关键文件
@@ -15,8 +15,8 @@
 - `backend/templates/detail_pages/*.json`：平台/风格模板
 
 ## 前端关键文件
-- `frontend/src/pages/MainImagePage.tsx`：主图工作台页面（顶部导航 + 左操作 + 右进度结果）。
-- `frontend/src/pages/MainImagePage.css`：主图工作台视觉规范样式实现（颜色/间距/卡片/状态标签）。
+- `frontend/src/pages/MainImagePage.tsx`：主图工作台页面（顶部导航 + 左操作 + 右进度结果），并内置统一上传区组件（商品图/参考图复用）。
+- `frontend/src/pages/MainImagePage.css`：主图工作台视觉规范样式实现（大屏自适应容器、左右分栏比例、统一上传区、顶部 action group）。
 - `frontend/src/components/Layout.tsx`：路由壳层，`/main-images` 由页面自身接管顶部导航。
 - `frontend/src/pages/DetailPageGeneratorPage.tsx`：详情页生成页面
 - `frontend/src/pages/TasksPage.tsx`：任务记录页
