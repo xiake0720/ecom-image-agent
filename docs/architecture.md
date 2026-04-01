@@ -1,28 +1,60 @@
-# 架构说明（2026-03 重构后）
+# 架构说明
 
-## 总体分层
-- **frontend/**：React 工作台，负责页面交互、表单、预览、任务列表。
-- **backend/**：FastAPI 服务，负责接口编排、统一响应、异常处理、任务记录、模板解析。
-- **backend/engine/**：复用既有核心能力（workflow/provider/rendering/storage），由后端 service 调用。
-- **backend/legacy/**：保留 Streamlit 调试入口与历史 UI。
+## 1. 整体架构
+当前仓库为前后端分离架构：
+- `frontend/`：React 工作台，负责用户交互与结果展示。
+- `backend/`：FastAPI API 服务，负责任务接入、任务查询、模板与资产访问。
+- `backend/engine/`：主图生成核心引擎（workflow、provider、渲染、落盘）。
 
-## 关键设计
-1. **后端分层**
-   - `api/`：路由与参数接入
-   - `schemas/`：请求响应模型
-   - `services/`：主图生成、详情页生成、模板读取
-   - `repositories/`：任务索引持久化
-   - `core/`：配置、日志、中间件、异常、统一返回
-2. **主图生成链路**
-   - API 收到 multipart 请求后，交给 `MainImageService`
-   - 服务层复用 `backend.engine.workflows.graph.run_workflow`
-   - 产物仍落盘到 `outputs/tasks/{task_id}/`
-3. **详情页生成链路**
-   - API 收到结构化商品数据
-   - 读取 `backend/templates/detail_pages/*.json`
-   - 生成模块数组、预览数据、导出素材清单
+## 2. frontend / backend 角色
 
-## 扩展点
-- 可在 `services/main_image_service.py` 中替换为异步任务队列。
-- 可在 `repositories/` 新增 SQLite/PostgreSQL 实现。
-- 可在 `templates/detail_pages/` 增加平台/风格/品类模板。
+### 2.1 前端（React）
+- 页面入口：`frontend/src/main.tsx`。
+- 核心页面：`frontend/src/pages/MainImagePage.tsx`。
+- 职责：上传文件、提交任务、轮询任务 runtime、展示进度与结果、触发预览下载。
+
+### 2.2 后端（FastAPI）
+- 服务入口：`backend/main.py`。
+- 路由层：`backend/api/`。
+- 服务层：`backend/services/`。
+- 职责：
+  - 接收任务请求并落盘；
+  - 调用引擎执行主图 workflow；
+  - 提供任务列表、任务 runtime、任务文件访问；
+  - 提供详情页模板化生成功能。
+
+## 3. 核心数据流
+
+### 3.1 主图任务数据流
+1. 前端发起 `POST /api/image/generate-main`（multipart）。
+2. `MainImageService.prepare_generation` 创建 `task_id`，落盘上传素材与 `task.json`。
+3. 任务写入 `storage/tasks/index.json`，并进入进程内队列。
+4. 队列 worker 调用 `run_workflow` 执行主图链路。
+5. 执行中持续回写任务状态，前端通过 runtime API 轮询查看。
+6. 前端通过任务文件 API 获取图片与 ZIP。
+
+### 3.2 详情页数据流
+1. 前端发起 `POST /api/detail/generate` 或 `POST /api/templates/detail-pages/preview`。
+2. `DetailPageService` 按平台+风格选择模板并组装模块。
+3. 落盘 `detail_page_modules.json`，并写入任务摘要。
+4. 接口返回 `modules`、`preview_data`、导出素材信息。
+
+## 4. 主图生成流程（后端）
+固定主链路（由 `backend.engine.workflows.graph.run_workflow` 执行）：
+1. `ingest_assets`
+2. `director_v2`
+3. `prompt_refine_v2`
+4. `render_images`
+5. `run_qc`
+6. `finalize`
+
+## 5. 详情页生成流程（后端）
+- 按模板定义模块骨架；
+- 根据请求内容填充文案与素材引用；
+- 输出结构化 JSON（`detail_page_modules.json`）与预览数据。
+
+## 6. 存储层位置
+- 任务索引：`storage/tasks/index.json`
+- 任务产物：`outputs/tasks/{task_id}/`
+  - 常见子目录：`inputs/`、`generated/`、`final/`、`exports/`
+- 模板文件：`backend/templates/detail_pages/*.json`

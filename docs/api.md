@@ -1,91 +1,124 @@
-﻿# API 文档
+# API 文档
 
-统一返回结构：
+## 1. 统一响应结构
+除文件流接口外，统一返回 envelope：
+
 ```json
 {
   "code": 0,
   "message": "ok",
   "data": {},
-  "requestId": "..."
+  "requestId": "req_xxx"
 }
 ```
 
-## 1. 健康检查
-- `GET /api/health`
+- `code=0` 代表成功。
+- 业务错误由 `AppException` 返回非 0 `code`。
 
-## 2. 主图生成
-- `POST /api/image/generate-main`
-- `multipart/form-data`
-- 必填文件：`white_bg`
-- 可选文件：`detail_files[]`、`bg_files[]`
-- 文本字段：
-  - `brand_name`
-  - `product_name`
+## 2. 接口清单
+
+### 2.1 健康检查
+- **方法**：`GET`
+- **路径**：`/api/health`
+- **说明**：服务存活检查。
+
+### 2.2 主图任务提交
+- **方法**：`POST`
+- **路径**：`/api/image/generate-main`
+- **Content-Type**：`multipart/form-data`
+- **文件字段**：
+  - `white_bg`（必填，单文件）
+  - `detail_files`（可选，多文件）
+  - `bg_files`（可选，多文件）
+- **文本字段**：
+  - `brand_name`（默认空）
+  - `product_name`（默认空）
+  - `category`（默认 `tea`）
+  - `platform`（默认 `tmall`）
+  - `style_type`（默认 `高端极简`）
+  - `style_notes`（默认空）
+  - `shot_count`（默认 `8`，范围 `1~12`）
+  - `aspect_ratio`（默认 `1:1`）
+  - `image_size`（默认 `2K`）
+- **成功返回 data（节选）**：`task_id`、`status`、`progress_percent`、`provider_label` 等任务摘要字段。
+
+### 2.3 详情页生成
+- **方法**：`POST`
+- **路径**：`/api/detail/generate`
+- **Body(JSON)**：
+  - `title`（必填）
+  - `subtitle`
+  - `selling_points: string[]`
   - `category`
-  - `platform`
-  - `style_type`
-  - `style_notes`
-  - `shot_count`
-  - `aspect_ratio`
-  - `image_size`
-- 当前行为：
-  1. 创建任务并落盘素材
-  2. 写入 `task.json` 与任务索引
-  3. 放入进程内主图队列
-  4. 立即返回 `task_id`
-  5. 单 worker 串行执行 workflow
+  - `specs: [{name, value}]`
+  - `price_band`
+  - `platform`（默认 `tmall`）
+  - `style`（默认 `premium`）
+  - `main_image_task_id`
+  - `main_images: string[]`
+  - `product_images: string[]`
+  - `optional_copy: string[]`
+- **成功返回 data**：`task_id`、`module_config_path`、`preview_data`、`export_assets`、`modules`。
 
-## 3. 任务查询
-- `GET /api/tasks`
-  - 任务摘要已补充：
-    - `progress_percent`
-    - `current_step`
-    - `current_step_label`
-    - `result_count_completed`
-    - `result_count_total`
-    - `export_zip_path`
-    - `provider_label`
-    - `model_label`
-    - `detail_image_count`
-    - `background_image_count`
-- `GET /api/tasks/{task_id}`
-- `GET /api/tasks/{task_id}/runtime`
-  - 用于主图工作台轮询
-  - 返回字段：
-    - `task_id`
-    - `status`
-    - `progress_percent`
-    - `current_step`
-    - `current_step_label`
-    - `message`
-    - `queue_position`
-    - `queue_size`
-    - `provider_label`
-    - `model_label`
-    - `result_count_completed`
-    - `result_count_total`
-    - `export_zip_url`
-    - `full_bundle_zip_url`
-    - `qc_summary`
-    - `results[]`
-- `GET /api/tasks/{task_id}/files/{file_name}`
-  - 访问 `outputs/tasks/{task_id}/` 下的真实产物
-  - 支持 `final/01_shot_01.png`、`exports/{task_id}_final_images.zip` 这类相对路径
+### 2.4 任务列表
+- **方法**：`GET`
+- **路径**：`/api/tasks`
+- **说明**：返回任务摘要列表（按更新时间倒序）。
 
-## 4. 详情页生成
-- `POST /api/detail/generate`
-- JSON 请求，核心字段：
-  - `title`
-  - `platform`
-  - `style`
-  - `selling_points[]`
-- 返回：模块数组、预览数据、导出资产清单
+### 2.5 任务详情
+- **方法**：`GET`
+- **路径**：`/api/tasks/{task_id}`
+- **说明**：返回单任务摘要；任务不存在返回业务错误。
 
-## 5. 模板查询
-- `GET /api/templates/main-images`
-- `GET /api/templates/detail-pages`
-- `POST /api/templates/detail-pages/preview`
+### 2.6 主图运行时（工作台轮询）
+- **方法**：`GET`
+- **路径**：`/api/tasks/{task_id}/runtime`
+- **说明**：聚合 `task.json`、`prompt_plan_v2.json`、`qc_report.json`、结果目录与队列快照。
+- **返回核心字段**：
+  - 任务状态：`status`、`progress_percent`、`current_step`、`current_step_label`、`message`
+  - 队列信息：`queue_position`、`queue_size`
+  - 模型信息：`provider_label`、`model_label`
+  - 统计信息：`result_count_completed`、`result_count_total`
+  - 下载地址：`export_zip_url`、`full_bundle_zip_url`
+  - 质检摘要：`qc_summary`
+  - 结果卡片：`results[]`
 
-## 6. 资产访问
-- `GET /api/assets/{file_name}`
-- 该接口仍只覆盖 `storage/` 根目录下的静态文件，不用于任务输出目录访问
+### 2.7 任务文件访问
+- **方法**：`GET`
+- **路径**：`/api/tasks/{task_id}/files/{file_name}`
+- **说明**：访问任务目录下真实文件，后端会校验路径不可越界。
+- **返回类型**：文件流（`FileResponse`）。
+
+### 2.8 模板接口
+- `GET /api/templates/main-images`：主图模板占位列表。
+- `GET /api/templates/detail-pages`：详情页模板列表（读取 `backend/templates/detail_pages/*.json`）。
+- `POST /api/templates/detail-pages/preview`：按输入返回详情页预览结构。
+
+### 2.9 静态资产访问
+- **方法**：`GET`
+- **路径**：`/api/assets/{file_name}`
+- **说明**：按文件名访问 `storage_root` 下文件。
+
+## 3. 典型示例
+
+### 3.1 主图提交（curl）
+```bash
+curl -X POST "http://127.0.0.1:8000/api/image/generate-main" \
+  -F "white_bg=@./demo/white_bg.png" \
+  -F "detail_files=@./demo/detail1.png" \
+  -F "bg_files=@./demo/bg1.png" \
+  -F "brand_name=示例品牌" \
+  -F "product_name=高山乌龙" \
+  -F "platform=tmall" \
+  -F "shot_count=8"
+```
+
+### 3.2 查询运行时
+```bash
+curl "http://127.0.0.1:8000/api/tasks/{task_id}/runtime"
+```
+
+## 4. 错误说明
+- 参数校验失败：HTTP `422`。
+- 业务错误：HTTP `400`（例如任务不存在、文件不存在、模板不存在等）。
+- 未处理异常：HTTP `500`，返回统一错误文案。
