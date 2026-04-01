@@ -13,15 +13,15 @@ from typing import Iterator
 
 from PIL import Image
 
-from src.core.config import get_settings
-from src.core.logging import attach_task_file_handler, detach_task_file_handler, initialize_logging
-from src.core.paths import ensure_task_dirs
-from src.domain.generation_result import GenerationResult
-from src.domain.qc_report import QCReport
-from src.domain.task import Task, TaskStatus
-from src.services.storage.local_storage import LocalStorageService
-from src.workflows.graph import build_workflow, reload_runtime
-from src.workflows.state import WorkflowExecutionError, format_workflow_log
+from backend.engine.core.config import get_settings
+from backend.engine.core.logging import attach_task_file_handler, detach_task_file_handler, initialize_logging
+from backend.engine.core.paths import ensure_task_dirs
+from backend.engine.domain.generation_result import GenerationResult
+from backend.engine.domain.qc_report import QCReport
+from backend.engine.domain.task import Task, TaskStatus
+from backend.engine.services.storage.local_storage import LocalStorageService
+from backend.engine.workflows.graph import build_workflow, reload_runtime
+from backend.engine.workflows.state import WorkflowExecutionError, format_workflow_log
 
 
 @dataclass(frozen=True)

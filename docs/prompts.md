@@ -1,8 +1,8 @@
 # Prompts
 
 ## 当前有效 prompt 文件
-- `src/prompts/director_v2.md`
-- `src/prompts/prompt_refine_v2.md`
+- `backend/engine/prompts/director_v2.md`
+- `backend/engine/prompts/prompt_refine_v2.md`
 
 ## 职责
 
@@ -22,4 +22,4 @@
 - `generate_layout.md`
 - `shot_prompt_refiner.md`
 - `build_image_prompts.md`
-- `src/prompts/base/*`
+- `backend/engine/prompts/base/*`

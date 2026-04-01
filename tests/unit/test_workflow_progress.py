@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from src.domain.task import Task
-from src.workflows import graph as graph_module
-from src.workflows.state import WorkflowDependencies
+from backend.engine.domain.task import Task
+from backend.engine.workflows import graph as graph_module
+from backend.engine.workflows.state import WorkflowDependencies
 
 
 class FakeStorage:

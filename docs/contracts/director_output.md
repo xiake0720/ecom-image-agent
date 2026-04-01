@@ -3,7 +3,7 @@
 ## 文件
 - `director_output.json`
 - Python 模型：
-  - `src/domain/director_output.py`
+  - `backend/engine/domain/director_output.py`
 
 ## 顶层字段
 - `product_summary`

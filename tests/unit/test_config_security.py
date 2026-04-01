@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.core import config as config_module
+from backend.engine.core import config as config_module
 
 
 def test_settings_defaults_match_v2_production_baseline(monkeypatch) -> None:

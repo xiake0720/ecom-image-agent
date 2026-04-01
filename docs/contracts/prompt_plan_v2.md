@@ -3,7 +3,7 @@
 ## 文件
 - `prompt_plan_v2.json`
 - Python 模型：
-  - `src/domain/prompt_plan_v2.py`
+  - `backend/engine/domain/prompt_plan_v2.py`
 
 ## 顶层字段
 - `shots`

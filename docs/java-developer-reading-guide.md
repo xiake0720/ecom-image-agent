@@ -3,27 +3,27 @@
 ## 1. 从 Java 视角怎么理解这个项目
 
 ### 先用熟悉的分层概念对照
-- `streamlit_app.py` + `src/ui/pages/*.py`
+- `backend/legacy/streamlit_app.py` + `backend/legacy/ui/pages/*.py`
   - 类似 Java Web 项目里的入口类加页面控制层。
   - 不完全等价于 Spring MVC `Controller`，因为这里没有 HTTP Controller，而是 Streamlit 事件驱动页面。
-- `src/workflows/graph.py`
+- `backend/engine/workflows/graph.py`
   - 类似“编排层”或“pipeline 配置类”。
   - 你可以把它看成 Java 里的一个显式任务编排器，负责把多个 service 串起来。
-- `src/workflows/nodes/*.py`
+- `backend/engine/workflows/nodes/*.py`
   - 类似一组按顺序执行的 application service / use case handler。
   - 每个节点做一件事，输入输出都通过统一状态对象传递。
-- `src/domain/*.py`
+- `backend/engine/domain/*.py`
   - 类似 Java 里的 `DTO + VO + command/result schema`。
   - 这些类既是运行时数据结构，也是落盘 JSON contract。
-- `src/providers/*.py`
+- `backend/engine/providers/*.py`
   - 类似 Java 里的 `Gateway / Client / Strategy`。
   - 负责调用外部模型服务，屏蔽 HTTP 细节和不同 provider 差异。
-- `src/services/*.py`
+- `backend/engine/services/*.py`
   - 类似 Java 里的 `Domain Service / Infrastructure Service`。
   - 负责布局规则、文字渲染、落盘、QC、参考图筛选等。
-- `src/core/config.py`
+- `backend/engine/core/config.py`
   - 类似 Java 里的 `application.yml + @ConfigurationProperties + route resolver`。
-- `src/workflows/state.py`
+- `backend/engine/workflows/state.py`
   - 类似 Java 里的“全链路上下文对象”，可以理解成 pipeline context。
 
 ### workflow 节点相当于什么
@@ -34,17 +34,17 @@
   - `WorkflowState` 类似整个流水线共享的上下文对象
 
 ### provider/router 相当于什么
-- `src/providers/router.py`
+- `backend/engine/providers/router.py`
   - 类似 Java 里的工厂 + 策略路由器。
   - 根据配置返回不同 provider 实现。
-- `src/providers/image/routed_image.py`
+- `backend/engine/providers/image/routed_image.py`
   - 类似带分流逻辑的 facade。
   - 有参考图时走 `image_edit`，没有时走 `t2i`。
 
 ### state / contract / json schema 相当于什么
 - `WorkflowState`
   - 类似整个 pipeline 的 `Context`。
-- `src/domain/*.py`
+- `backend/engine/domain/*.py`
   - 类似 Java 的 DTO/VO。
 - `docs/contracts/*.json`
   - 类似对外或跨层 contract 示例与 schema 文档。
@@ -55,8 +55,8 @@
 
 ### dataclass
 - 典型文件：
-  - `src/workflows/state.py`
-  - `src/providers/image/routed_image.py`
+  - `backend/engine/workflows/state.py`
+  - `backend/engine/providers/image/routed_image.py`
 - 用法理解：
   - 类似 Java 里只承载数据的简单类，但写法更轻量。
   - 你可以把 `@dataclass(frozen=True)` 理解为“不可变轻量 POJO”。
@@ -85,8 +85,8 @@
 
 ### pathlib
 - 典型文件：
-  - `src/core/config.py`
-  - `src/workflows/nodes/render_images.py`
+  - `backend/engine/core/config.py`
+  - `backend/engine/workflows/nodes/render_images.py`
 - `Path("outputs/tasks")`
   - 类似 Java 里 `Paths.get(...)`，但更常用。
 - 常见操作：
@@ -94,7 +94,7 @@
 
 ### Pydantic
 - 典型文件：
-  - `src/domain/*.py`
+  - `backend/engine/domain/*.py`
 - 对 Java 开发者来说，可以理解成：
   - “带校验能力的 DTO”
   - 同时负责反序列化、序列化、字段默认值、字段约束
@@ -121,16 +121,16 @@
 ## 3. 主链路怎么读
 
 ### 先从入口开始
-1. 看 [`streamlit_app.py`](/D:/python/ecom-image-agent/streamlit_app.py)
+1. 看 [`backend/legacy/streamlit_app.py`](/D:/python/ecom-image-agent/backend/legacy/streamlit_app.py)
    - 确认应用如何启动。
-2. 看 [`src/ui/pages/home.py`](/D:/python/ecom-image-agent/src/ui/pages/home.py)
+2. 看 [`backend/legacy/ui/pages/home.py`](/D:/python/ecom-image-agent/backend/legacy/ui/pages/home.py)
    - 确认上传、表单、preview/final 按钮、task state 如何组织。
-3. 看 [`src/workflows/graph.py`](/D:/python/ecom-image-agent/src/workflows/graph.py)
+3. 看 [`backend/engine/workflows/graph.py`](/D:/python/ecom-image-agent/backend/engine/workflows/graph.py)
    - 确认 workflow 顺序和依赖注入。
 
 ### 再看状态如何流转
 - 关键文件：
-  - [`src/workflows/state.py`](/D:/python/ecom-image-agent/src/workflows/state.py)
+  - [`backend/engine/workflows/state.py`](/D:/python/ecom-image-agent/backend/engine/workflows/state.py)
 - 重点关注：
   - `WorkflowState` 里有哪些字段
   - 哪些字段会被后续节点消费
@@ -222,9 +222,9 @@
   - `image_model_id`
   - `render_generation_mode`
 - 再看：
-  - `src/core/config.py`
-  - `src/providers/router.py`
-  - `src/providers/image/routed_image.py`
+  - `backend/engine/core/config.py`
+  - `backend/engine/providers/router.py`
+  - `backend/engine/providers/image/routed_image.py`
 - 常见症状：
   - 明明上传了参考图却还走 `t2i`
   - `generation_mode` 和实际 provider 行为不一致
@@ -236,7 +236,7 @@
   - `selected_reference_asset_ids`
   - `selection_reason`
 - 再看：
-  - [`src/services/assets/reference_selector.py`](/D:/python/ecom-image-agent/src/services/assets/reference_selector.py)
+  - [`backend/engine/services/assets/reference_selector.py`](/D:/python/ecom-image-agent/backend/engine/services/assets/reference_selector.py)
 
 ### 如何判断是布局或后贴字问题
 - 看：
@@ -260,15 +260,15 @@
 
 ### 如何判断是 UI 问题
 - 如果任务目录里的图片和 JSON 都正常，但页面显示不对：
-  - 看 `src/ui/pages/result_view.py`
-  - 看 `src/ui/components/download_panel.py`
-  - 看 `src/ui/pages/home.py` 的 `_normalize_task_state()`
+  - 看 `backend/legacy/ui/pages/result_view.py`
+  - 看 `backend/legacy/ui/components/download_panel.py`
+  - 看 `backend/legacy/ui/pages/home.py` 的 `_normalize_task_state()`
 
 ### 如何判断是 QC 问题
 - 看：
   - `qc_report.json`
-  - `src/services/qc/task_qc.py`
-  - `src/workflows/nodes/run_qc.py`
+  - `backend/engine/services/qc/task_qc.py`
+  - `backend/engine/workflows/nodes/run_qc.py`
 - 当前 QC 不是审美模型，而是轻量风险筛查：
   - `text_background_contrast`
   - `text_area_complexity`
@@ -281,10 +281,10 @@
 1. [`docs/codebase-file-map.md`](/D:/python/ecom-image-agent/docs/codebase-file-map.md)
 2. [`docs/architecture.md`](/D:/python/ecom-image-agent/docs/architecture.md)
 3. [`docs/workflow.md`](/D:/python/ecom-image-agent/docs/workflow.md)
-4. [`streamlit_app.py`](/D:/python/ecom-image-agent/streamlit_app.py)
-5. [`src/ui/pages/home.py`](/D:/python/ecom-image-agent/src/ui/pages/home.py)
-6. [`src/workflows/graph.py`](/D:/python/ecom-image-agent/src/workflows/graph.py)
-7. [`src/workflows/state.py`](/D:/python/ecom-image-agent/src/workflows/state.py)
+4. [`backend/legacy/streamlit_app.py`](/D:/python/ecom-image-agent/backend/legacy/streamlit_app.py)
+5. [`backend/legacy/ui/pages/home.py`](/D:/python/ecom-image-agent/backend/legacy/ui/pages/home.py)
+6. [`backend/engine/workflows/graph.py`](/D:/python/ecom-image-agent/backend/engine/workflows/graph.py)
+7. [`backend/engine/workflows/state.py`](/D:/python/ecom-image-agent/backend/engine/workflows/state.py)
 
 ### 第二遍：按主链路读数据 contract
 1. `task.py`
@@ -335,7 +335,7 @@
   - 每个节点落盘什么文件
 
 ### 这个仓库不是“到处直接调模型”
-- 所有真实模型调用都尽量收敛在 `src/providers/`。
+- 所有真实模型调用都尽量收敛在 `backend/engine/providers/`。
 - 如果你发现 UI 或 workflow 节点里出现大量 HTTP 细节，那通常说明代码开始失控了。
 
 ### 看不懂某段逻辑时，先找对应 JSON 产物

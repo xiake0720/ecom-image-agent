@@ -7,17 +7,17 @@ import zipfile
 
 from PIL import Image
 
-from src.core.config import Settings
-from src.domain.generation_result import GeneratedImage, GenerationResult
-from src.domain.prompt_plan_v2 import PromptPlanV2, PromptShot
-from src.domain.qc_report import QCReport
-from src.domain.task import Task, TaskStatus
-from src.providers.image.runapi_gemini31_image import RunApiGemini31ImageProvider
-from src.services.rendering.text_renderer import TextRenderer
-from src.workflows.nodes.finalize import finalize
-from src.workflows.nodes.render_images import render_images
-from src.workflows.nodes.run_qc import run_qc
-from src.workflows.state import WorkflowDependencies
+from backend.engine.core.config import Settings
+from backend.engine.domain.generation_result import GeneratedImage, GenerationResult
+from backend.engine.domain.prompt_plan_v2 import PromptPlanV2, PromptShot
+from backend.engine.domain.qc_report import QCReport
+from backend.engine.domain.task import Task, TaskStatus
+from backend.engine.providers.image.runapi_gemini31_image import RunApiGemini31ImageProvider
+from backend.engine.services.rendering.text_renderer import TextRenderer
+from backend.engine.workflows.nodes.finalize import finalize
+from backend.engine.workflows.nodes.render_images import render_images
+from backend.engine.workflows.nodes.run_qc import run_qc
+from backend.engine.workflows.state import WorkflowDependencies
 
 
 class FakeImageProvider:
@@ -106,11 +106,11 @@ def test_render_qc_finalize_keeps_overlay_fallback_inside_render(monkeypatch, tm
         text_provider_mode="mock",
         image_provider_mode="mock",
     )
-    monkeypatch.setattr("src.workflows.nodes.render_images.get_task_generated_dir", lambda task_id: str(task_dir / "generated"))
-    monkeypatch.setattr("src.workflows.nodes.render_images.get_task_final_dir", lambda task_id: str(task_dir / "final"))
-    monkeypatch.setattr("src.workflows.nodes.run_qc.get_task_dir", lambda task_id: task_dir)
+    monkeypatch.setattr("backend.engine.workflows.nodes.render_images.get_task_generated_dir", lambda task_id: str(task_dir / "generated"))
+    monkeypatch.setattr("backend.engine.workflows.nodes.render_images.get_task_final_dir", lambda task_id: str(task_dir / "final"))
+    monkeypatch.setattr("backend.engine.workflows.nodes.run_qc.get_task_dir", lambda task_id: task_dir)
     monkeypatch.setattr(
-        "src.services.storage.zip_export.ensure_task_dirs",
+        "backend.engine.services.storage.zip_export.ensure_task_dirs",
         lambda task_id: {
             "task": task_dir,
             "inputs": task_dir / "inputs",
@@ -180,8 +180,8 @@ def test_render_images_reports_partial_results_per_shot(monkeypatch, tmp_path: P
         image_provider_mode="mock",
         progress_callback=lambda state: progress_events.append(state),
     )
-    monkeypatch.setattr("src.workflows.nodes.render_images.get_task_generated_dir", lambda task_id: str(task_dir / "generated"))
-    monkeypatch.setattr("src.workflows.nodes.render_images.get_task_final_dir", lambda task_id: str(task_dir / "final"))
+    monkeypatch.setattr("backend.engine.workflows.nodes.render_images.get_task_generated_dir", lambda task_id: str(task_dir / "generated"))
+    monkeypatch.setattr("backend.engine.workflows.nodes.render_images.get_task_final_dir", lambda task_id: str(task_dir / "final"))
     state = {
         "task": task,
         "assets": [],
@@ -259,7 +259,7 @@ def test_runapi_gemini31_request_disables_environment_proxy(monkeypatch) -> None
             session_state["post_kwargs"] = kwargs
             return FakeResponse()
 
-    monkeypatch.setattr("src.providers.image.runapi_gemini31_image.requests.Session", FakeSession)
+    monkeypatch.setattr("backend.engine.providers.image.runapi_gemini31_image.requests.Session", FakeSession)
     provider = RunApiGemini31ImageProvider(
         Settings(
             image_provider_mode="real",
@@ -339,7 +339,7 @@ def test_runapi_gemini31_supports_file_data_uri_response(monkeypatch) -> None:
             session_state["download_headers"] = kwargs.get("headers")
             return FakeDownloadResponse()
 
-    monkeypatch.setattr("src.providers.image.runapi_gemini31_image.requests.Session", FakeSession)
+    monkeypatch.setattr("backend.engine.providers.image.runapi_gemini31_image.requests.Session", FakeSession)
     provider = RunApiGemini31ImageProvider(
         Settings(
             image_provider_mode="real",
@@ -370,7 +370,7 @@ def test_runapi_gemini31_supports_file_data_uri_response(monkeypatch) -> None:
 
 
 def _compat_plan_for_test(shot_id: str):
-    from src.domain.image_prompt_plan import ImagePrompt, ImagePromptPlan
+    from backend.engine.domain.image_prompt_plan import ImagePrompt, ImagePromptPlan
 
     return ImagePromptPlan(
         generation_mode="t2i",

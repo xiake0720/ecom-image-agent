@@ -3,8 +3,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from src.core.config import Settings
-from src.core.logging import (
+from backend.engine.core.config import Settings
+from backend.engine.core.logging import (
     attach_task_file_handler,
     detach_task_file_handler,
     get_task_log_path,
