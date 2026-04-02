@@ -1,8 +1,9 @@
-﻿import { useEffect, useMemo, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { submitMainImageTask } from "../services/mainImageApi";
 import { fetchTaskRuntime } from "../services/taskApi";
 import type { RuntimeResultStatus, TaskRuntimePayload, TaskRuntimeResult, TaskStatus } from "../types/api";
 import "./MainImagePage.css";
+import { PageShell } from "../components/layout/PageShell";
 
 type UploadLayout = "primary" | "uniform";
 
@@ -270,47 +271,8 @@ export function MainImagePage() {
   }
 
   return (
-    <div className="main-workbench">
-      <header className="workbench-topbar">
-        <div className="brand-block">
-          <div className="brand-logo">E</div>
-          <div className="brand-text">
-            <strong>ECOM_AI</strong>
-            <span>AI 电商图片生成平台</span>
-          </div>
-        </div>
-        <nav className="top-nav" aria-label="主导航">
-          <a className="active" href="#" onClick={(event) => event.preventDefault()}>
-            工作台
-          </a>
-          <a href="#" onClick={(event) => event.preventDefault()}>
-            模板中心
-          </a>
-          <a href="#" onClick={(event) => event.preventDefault()}>
-            资源库
-          </a>
-          <a href="#" onClick={(event) => event.preventDefault()}>
-            数据中心
-          </a>
-        </nav>
-        <div className="top-actions-group">
-          <button type="button" className="action-chip action-status-pill" aria-label="任务状态">
-            <span className="dot" />
-            {taskStatusLabel(taskRuntime?.status ?? null, isPolling)}
-          </button>
-          <button type="button" className="action-chip icon-chip" aria-label="通知">
-            <BellIcon />
-          </button>
-          <button type="button" className="action-chip icon-chip" aria-label="设置">
-            <GearIcon />
-          </button>
-          <button type="button" className="action-chip avatar-chip" aria-label="用户菜单">
-            <span className="avatar-circle">AI</span>
-            <ChevronDownIcon />
-          </button>
-        </div>
-      </header>
-
+    <PageShell activeKey="main-images">
+      <div className="main-workbench">
       <main className="workbench-content">
         <section className="left-panel">
           <UploadGallerySection
@@ -605,7 +567,8 @@ export function MainImagePage() {
       </main>
 
       <ImagePreviewDialog card={previewCard} onClose={() => setPreviewCard(null)} />
-    </div>
+      </div>
+    </PageShell>
   );
 }
 
