@@ -23,8 +23,9 @@ backend/
   engine/            # 主图工作流与模型调用核心能力
   templates/         # 模板文件
 frontend/
-  src/pages/         # 页面层（MainImagePage 为当前核心）
-  src/components/    # 复用组件
+  src/pages/         # 页面层（主图、详情、模板、预览、数据、设置、资源库、登录）
+  src/components/    # 复用组件（含统一 AppTopBar/PageShell）
+  src/mocks/         # 前端 mock 数据集中目录
   src/services/      # API 调用封装（统一通过 http.ts）
   src/types/         # 前端类型与协议定义
 docs/                # 中文文档（架构、API、流程、规范）
@@ -79,7 +80,18 @@ npm run dev
 
 详细字段与示例见 `docs/api.md`。
 
-## 8. 当前主工作台页面说明
+## 8. 当前前端页面路由
+- `/login` 登录页
+- `/main-images` 主图生成工作台
+- `/detail-pages` 详情长图编辑页（mock 三栏联动）
+- `/templates` 模板中心（mock 筛选）
+- `/preview` 预览中心（mock 任务切换）
+- `/tasks` 历史任务
+- `/dashboard` 数据中心
+- `/settings` 系统设置
+- `/assets-library` 资源库
+
+## 9. 当前主工作台页面说明
 - 核心页面：`frontend/src/pages/MainImagePage.tsx`。
 - 核心能力：
   - 上传白底图、参考图、背景参考图；
@@ -90,7 +102,7 @@ npm run dev
 
 详情见 `docs/frontend-workbench.md` 与 `docs/workflow.md`。
 
-## 9. 文档索引
+## 10. 文档索引
 - `docs/architecture.md`：整体架构与数据流。
 - `docs/api.md`：后端 API 清单、请求/响应与示例。
 - `docs/frontend-workbench.md`：主图工作台页面与前端数据流。
@@ -99,7 +111,7 @@ npm run dev
 - `docs/development-rules.md`：开发协作与提交前检查。
 - `docs/codebase-file-map.md`：代码地图与关键文件说明。
 
-## 10. AGENTS.md 说明入口
+## 11. AGENTS.md 说明入口
 根目录 `AGENTS.md` 是仓库级执行规范手册。后续无论是 Codex 还是人工开发，都必须遵循其中的：
 - 分层职责；
 - 禁止事项；

@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "./components/Layout";
 import { DashboardPage } from "./pages/DashboardPage";
+import { AssetsLibraryPage } from "./pages/AssetsLibraryPage";
 import { DetailPageGeneratorPage } from "./pages/DetailPageGeneratorPage";
 import { LoginPage } from "./pages/LoginPage";
 import { MainImagePage } from "./pages/MainImagePage";
@@ -10,6 +11,7 @@ import { PreviewPage } from "./pages/PreviewPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { TasksPage } from "./pages/TasksPage";
 import { TemplatesPage } from "./pages/TemplatesPage";
+import "./styles/console.css";
 
 /**
  * React 入口。
@@ -29,6 +31,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Route path="tasks" element={<TasksPage />} />
           <Route path="preview" element={<PreviewPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="assets-library" element={<AssetsLibraryPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/main-images" replace />} />
       </Routes>

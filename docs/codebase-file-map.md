@@ -39,10 +39,15 @@
 ## 3. 前端目录说明
 
 ### 3.1 `frontend/src/pages/`
-- `MainImagePage.tsx`：当前核心页面（主图提交/轮询/结果展示）。
-- `TasksPage.tsx`：任务记录页。
-- `DetailPageGeneratorPage.tsx`：详情页生成页。
-- 其他页面：`DashboardPage`、`TemplatesPage`、`PreviewPage`、`SettingsPage`、`LoginPage`。
+- `MainImagePage.tsx`：主图提交/轮询/结果展示（接入统一壳层）。
+- `DetailPageGeneratorPage.tsx`：详情长图编辑页（左中右三栏 + mock 预览联动）。
+- `TemplatesPage.tsx`：模板中心（筛选 + 模板卡片）。
+- `PreviewPage.tsx`：预览中心（任务分组 + 大图预览）。
+- `AssetsLibraryPage.tsx`：资源库页（分类/筛选/卡片网格）。
+- `DashboardPage.tsx`：数据中心（统计卡片 + 趋势图 + 榜单）。
+- `SettingsPage.tsx`：系统设置（左菜单 + 模型路由表单）。
+- `TasksPage.tsx`：历史任务。
+- `LoginPage.tsx`：登录页。
 
 ### 3.2 `frontend/src/services/`
 - `http.ts`：统一 axios 实例与 URL 解析。
@@ -50,9 +55,15 @@
 - `taskApi.ts`：任务查询与 runtime 查询 API。
 
 ### 3.3 `frontend/src/components/`
-- `Layout.tsx`：路由壳层布局（主图页可接管自身顶栏）。
+- `Layout.tsx`：路由容器。
+- `layout/AppTopBar.tsx`：统一顶部任务栏。
+- `layout/PageShell.tsx`：统一页面外壳。
+- `common/PageHeader.tsx`、`common/SectionCard.tsx`：通用标题/卡片组件。
 
-### 3.4 `frontend/src/types/`
+### 3.4 `frontend/src/mocks/`
+- `mainImageMock.ts`、`detailEditorMock.ts`、`templateCenterMock.ts`、`previewCenterMock.ts`、`settingsMock.ts`、`dashboardMock.ts`、`assetsLibraryMock.ts`、`sharedMock.ts`：页面 mock 数据集中管理。
+
+### 3.5 `frontend/src/types/`
 - `api.ts`：前端 API contract 类型。
 
 ## 4. 数据与产物目录
