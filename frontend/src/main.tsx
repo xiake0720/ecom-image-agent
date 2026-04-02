@@ -12,6 +12,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { TasksPage } from "./pages/TasksPage";
 import { TemplatesPage } from "./pages/TemplatesPage";
 import "./styles/console.css";
+import "./pages/WorkbenchRefine.css";
 
 /**
  * React 入口。
