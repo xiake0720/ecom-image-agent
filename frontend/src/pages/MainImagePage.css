@@ -29,7 +29,7 @@
 
 .workbench-topbar,
 .workbench-content {
-  width: min(1920px, calc(100vw - 56px));
+  width: min(2280px, calc(100vw - 56px));
   margin-inline: auto;
 }
 
@@ -914,6 +914,38 @@
   object-fit: contain;
   border-radius: 18px;
   background: #fff;
+}
+
+@media (min-width: 1921px) and (max-width: 2560px) {
+  .workbench-topbar,
+  .workbench-content {
+    width: min(2320px, calc(100vw - 64px));
+  }
+
+  .workbench-content {
+    grid-template-columns: clamp(500px, 32vw, 620px) minmax(0, 1fr);
+    gap: 30px;
+  }
+
+  .result-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 2561px) {
+  .workbench-topbar,
+  .workbench-content {
+    width: min(2840px, calc(100vw - 96px));
+  }
+
+  .workbench-content {
+    grid-template-columns: clamp(520px, 30vw, 680px) minmax(0, 1fr);
+    gap: 34px;
+  }
+
+  .result-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 1679px) {
