@@ -128,5 +128,12 @@ curl "http://127.0.0.1:8000/api/tasks/{task_id}/runtime"
 - `POST /api/detail/jobs`：创建并执行详情图任务（multipart/form-data，支持 packaging_files / dry_leaf_files / tea_soup_files / leaf_bottom_files / scene_ref_files / bg_ref_files）。
 - `POST /api/detail/jobs/plan`：仅生成详情规划、文案和 prompt，不执行渲染。
 - `GET /api/detail/jobs/{task_id}`：查询详情图任务摘要。
-- `GET /api/detail/jobs/{task_id}/runtime`：查询详情图 runtime（阶段、规划、copy、prompt、QC、结果图、ZIP）。
+- `GET /api/detail/jobs/{task_id}/runtime`：查询详情图 runtime（阶段、规划、copy、prompt、QC、结果图、ZIP、失败 message）。
 - `GET /api/detail/jobs/{task_id}/files/{file_name}`：下载详情图任务文件。
+
+### 详情图 runtime 关键字段补充
+- `message`：运行提示或失败原因，失败时透传 `task.json.error_message`。
+- `generated_count / planned_count`：已生成数量与规划数量。
+- `images[].status`：单页状态（`queued/running/completed/failed`）。
+- `images[].reference_roles`：该页绑定的参考角色（来自 prompt plan）。
+- `export_zip_url`：成功后可下载 `exports/detail_bundle.zip`。

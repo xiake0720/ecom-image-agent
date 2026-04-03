@@ -162,7 +162,15 @@ class DetailPageJobService:
         task_dir = get_task_dir(prepared.task_id)
         task = Task.model_validate_json((task_dir / "task.json").read_text(encoding="utf-8"))
         try:
-            task = task.model_copy(update={"status": TaskStatus.RUNNING, "current_step": "planning", "current_step_label": "正在生成详情规划", "progress_percent": 15})
+            task = task.model_copy(
+                update={
+                    "status": TaskStatus.RUNNING,
+                    "current_step": "planning",
+                    "current_step_label": "正在生成详情规划",
+                    "progress_percent": 15,
+                    "error_message": "",
+                }
+            )
             self.storage.save_task_manifest(task)
             self.repo.save_runtime_task(task, task_type="detail_page_v2")
 
@@ -177,12 +185,20 @@ class DetailPageJobService:
             (task_dir / "plan" / "detail_prompt_plan.json").write_text(json.dumps([item.model_dump(mode="json") for item in prompt_plan], ensure_ascii=False, indent=2), encoding="utf-8")
 
             if plan_only:
-                task = task.model_copy(update={"status": TaskStatus.COMPLETED, "current_step": "planning_done", "current_step_label": "规划已完成", "progress_percent": 100})
+                task = task.model_copy(
+                    update={
+                        "status": TaskStatus.COMPLETED,
+                        "current_step": "planning_done",
+                        "current_step_label": "规划已完成",
+                        "progress_percent": 100,
+                        "error_message": "",
+                    }
+                )
                 self.storage.save_task_manifest(task)
                 self.repo.save_runtime_task(task, task_type="detail_page_v2")
                 return
 
-            task = task.model_copy(update={"current_step": "rendering", "current_step_label": "正在生成详情图", "progress_percent": 70})
+            task = task.model_copy(update={"current_step": "rendering", "current_step_label": "正在生成详情图", "progress_percent": 70, "error_message": ""})
             self.storage.save_task_manifest(task)
             self.repo.save_runtime_task(task, task_type="detail_page_v2")
 
@@ -191,11 +207,27 @@ class DetailPageJobService:
             (task_dir / "qc" / "detail_qc_report.json").write_text(qc.model_dump_json(indent=2), encoding="utf-8")
             self.render_service.build_bundle(task_dir)
 
-            task = task.model_copy(update={"status": TaskStatus.COMPLETED, "current_step": "done", "current_step_label": "详情图任务完成", "progress_percent": 100})
+            task = task.model_copy(
+                update={
+                    "status": TaskStatus.COMPLETED,
+                    "current_step": "done",
+                    "current_step_label": "详情图任务完成",
+                    "progress_percent": 100,
+                    "error_message": "",
+                }
+            )
             self.storage.save_task_manifest(task)
             self.repo.save_runtime_task(task, task_type="detail_page_v2")
         except Exception as exc:
-            failed = task.model_copy(update={"status": TaskStatus.FAILED, "current_step": "failed", "current_step_label": "详情图任务失败", "error_message": str(exc)})
+            failed_message = self._format_exception_message(exc)
+            failed = task.model_copy(
+                update={
+                    "status": TaskStatus.FAILED,
+                    "current_step": "failed",
+                    "current_step_label": "详情图任务失败",
+                    "error_message": failed_message,
+                }
+            )
             self.storage.save_task_manifest(failed)
             self.repo.save_runtime_task(failed, task_type="detail_page_v2")
 
@@ -294,3 +326,10 @@ class DetailPageJobService:
         for name in ["inputs", "plan", "generated", "qc", "exports"]:
             (task_dir / name).mkdir(parents=True, exist_ok=True)
 
+    def _format_exception_message(self, exc: Exception) -> str:
+        """把异常转成可直接给前端展示的中文错误信息。"""
+
+        text = str(exc).strip()
+        if text:
+            return text
+        return f"{exc.__class__.__name__}：详情图任务执行异常"

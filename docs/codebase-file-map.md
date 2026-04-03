@@ -40,7 +40,8 @@
 
 ### 3.1 `frontend/src/pages/`
 - `MainImagePage.tsx`：主图提交/轮询/结果展示（接入统一壳层）。
-- `DetailPageGeneratorPage.tsx`：详情长图编辑页（左中右三栏 + mock 预览联动）。
+- `DetailPageGeneratorPage.tsx`：详情图工作台页面（主图图卡导入、规划/生成反馈、中栏结果联动）。
+- `DetailPageGeneratorPage.css`：详情图工作台专属三栏与卡片样式。
 - `TemplatesPage.tsx`：模板中心（筛选 + 模板卡片）。
 - `PreviewPage.tsx`：预览中心（任务分组 + 大图预览）。
 - `AssetsLibraryPage.tsx`：资源库页（分类/筛选/卡片网格）。
@@ -87,7 +88,7 @@
 - `backend/services/detail_planner_service.py`：规划生成。
 - `backend/services/detail_copy_service.py`：结构化文案生成。
 - `backend/services/detail_prompt_service.py`：prompt 计划生成。
-- `backend/services/detail_render_service.py`：V1 详情图渲染与 ZIP。
+- `backend/services/detail_render_service.py`：详情图模型渲染与 ZIP（复用主图 provider 路由，不再使用占位画布）。
 - `frontend/src/services/detailPageApi.ts`：详情图前端 API 封装。
 - `frontend/src/types/detail.ts`：详情图前端类型。
 - `backend/templates/detail_pages/tea_tmall_premium_v1.json`：茶叶天猫高端模板。

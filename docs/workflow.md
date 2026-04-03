@@ -42,11 +42,20 @@
 - `completed`：执行完成
 - `failed`：执行失败
 
-## 3. 详情页链路
-1. 前端调用 `POST /api/detail/generate` 或 `POST /api/templates/detail-pages/preview`。
-2. `DetailPageService` 按平台+风格选模板并组装模块。
-3. 输出 `detail_page_modules.json` 与 `modules/preview_data`。
-4. 将详情页任务摘要写入 `storage/tasks/index.json`。
+## 3. 详情图任务链路（V2）
+1. 前端在 `/detail-pages` 提交 `POST /api/detail/jobs/plan`（仅规划）或 `POST /api/detail/jobs`（全量生成）。
+2. `DetailPageJobService` 创建独立详情图任务并落盘输入：
+   - `inputs/request_payload.json`
+   - `inputs/asset_manifest.json`（含主图导入的 `main_result`）
+3. worker 执行规划阶段，输出：
+   - `plan/detail_plan.json`
+   - `plan/detail_copy_plan.json`
+   - `plan/detail_prompt_plan.json`
+4. 全量任务进入渲染阶段：`DetailRenderService` 复用 `backend/engine/providers/router.py` 的图片 provider 路由逐页调用模型生成，不再使用 PIL 占位图。
+5. 生成后输出 QC 与打包：
+   - `qc/detail_qc_report.json`
+   - `exports/detail_bundle.zip`
+6. 前端轮询 `GET /api/detail/jobs/{task_id}/runtime`，中栏/右栏同步展示阶段、规划、结果、错误信息；失败原因来自 `task.json.error_message`。
 
 ## 4. 与前端工作台的对应关系
 - 提交入口：左侧上传和参数区。
