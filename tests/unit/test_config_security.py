@@ -51,10 +51,12 @@ def test_environment_value_overrides_streamlit_secret(monkeypatch) -> None:
 
 
 def test_legacy_provider_aliases_are_ignored_in_v2(monkeypatch) -> None:
+    monkeypatch.delenv("ECOM_IMAGE_AGENT_TEXT_PROVIDER_MODE", raising=False)
+    monkeypatch.delenv("ECOM_IMAGE_AGENT_IMAGE_PROVIDER_MODE", raising=False)
     monkeypatch.setenv("ECOM_IMAGE_AGENT_TEXT_PROVIDER", "dashscope")
     monkeypatch.setenv("ECOM_IMAGE_AGENT_IMAGE_PROVIDER", "dashscope")
 
     settings = config_module.Settings()
 
     assert settings.resolve_text_provider_route().alias == "runapi_openai"
-    assert settings.resolve_image_provider_route().alias == "runapi_gemini31"
+    assert settings.resolve_image_provider_route().alias == "banana2"

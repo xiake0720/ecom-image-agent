@@ -46,9 +46,9 @@ async def create_detail_job(
     extra_requirements: str = Form(default=""),
     prefer_main_result_first: bool = Form(default=True),
 ) -> dict[str, object]:
-    """创建详情图任务并异步执行。"""
+    """创建详情图任务并执行完整 graph。"""
 
-    payload = DetailPageJobCreatePayload(
+    payload = _build_payload(
         brand_name=brand_name,
         product_name=product_name,
         tea_type=tea_type,
@@ -58,9 +58,9 @@ async def create_detail_job(
         target_slice_count=target_slice_count,
         image_size=image_size,
         main_image_task_id=main_image_task_id,
-        selected_main_result_ids=_safe_json_list(selected_main_result_ids),
-        selling_points=_safe_json_list(selling_points_json),
-        specs=_safe_json_dict(specs_json),
+        selected_main_result_ids=selected_main_result_ids,
+        selling_points_json=selling_points_json,
+        specs_json=specs_json,
         style_notes=style_notes,
         brew_suggestion=brew_suggestion,
         extra_requirements=extra_requirements,
@@ -105,9 +105,9 @@ async def create_detail_plan(
     extra_requirements: str = Form(default=""),
     prefer_main_result_first: bool = Form(default=True),
 ) -> dict[str, object]:
-    """只生成规划，不执行最终渲染。"""
+    """只生成规划、文案和 prompt，不执行渲染。"""
 
-    payload = DetailPageJobCreatePayload(
+    payload = _build_payload(
         brand_name=brand_name,
         product_name=product_name,
         tea_type=tea_type,
@@ -117,9 +117,9 @@ async def create_detail_plan(
         target_slice_count=target_slice_count,
         image_size=image_size,
         main_image_task_id=main_image_task_id,
-        selected_main_result_ids=_safe_json_list(selected_main_result_ids),
-        selling_points=_safe_json_list(selling_points_json),
-        specs=_safe_json_dict(specs_json),
+        selected_main_result_ids=selected_main_result_ids,
+        selling_points_json=selling_points_json,
+        specs_json=specs_json,
         style_notes=style_notes,
         brew_suggestion=brew_suggestion,
         extra_requirements=extra_requirements,
@@ -135,7 +135,7 @@ async def create_detail_plan(
         bg_ref_files=bg_ref_files,
         plan_only=True,
     )
-    return success_response(result.model_dump(mode="json"), request.state.request_id, message="详情图规划已生成")
+    return success_response(result.model_dump(mode="json"), request.state.request_id, message="详情图规划任务已完成")
 
 
 @router.get("/{task_id}")
@@ -167,6 +167,45 @@ def get_detail_file(task_id: str, file_name: str) -> FileResponse:
     return FileResponse(target)
 
 
+def _build_payload(
+    *,
+    brand_name: str,
+    product_name: str,
+    tea_type: str,
+    platform: str,
+    style_preset: str,
+    price_band: str,
+    target_slice_count: int,
+    image_size: str,
+    main_image_task_id: str,
+    selected_main_result_ids: str,
+    selling_points_json: str,
+    specs_json: str,
+    style_notes: str,
+    brew_suggestion: str,
+    extra_requirements: str,
+    prefer_main_result_first: bool,
+) -> DetailPageJobCreatePayload:
+    return DetailPageJobCreatePayload(
+        brand_name=brand_name,
+        product_name=product_name,
+        tea_type=tea_type,
+        platform=platform,
+        style_preset=style_preset,
+        price_band=price_band,
+        target_slice_count=target_slice_count,
+        image_size=image_size,
+        main_image_task_id=main_image_task_id,
+        selected_main_result_ids=_safe_json_list(selected_main_result_ids),
+        selling_points=_safe_json_list(selling_points_json),
+        specs=_safe_json_dict(specs_json),
+        style_notes=style_notes,
+        brew_suggestion=brew_suggestion,
+        extra_requirements=extra_requirements,
+        prefer_main_result_first=prefer_main_result_first,
+    )
+
+
 def _safe_json_list(raw: str) -> list[str]:
     try:
         parsed = json.loads(raw or "[]")
@@ -181,4 +220,3 @@ def _safe_json_dict(raw: str) -> dict[str, str]:
         return parsed if isinstance(parsed, dict) else {}
     except json.JSONDecodeError:
         return {}
-

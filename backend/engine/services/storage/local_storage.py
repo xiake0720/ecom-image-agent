@@ -73,10 +73,7 @@ class LocalStorageService:
 
         task_path = ensure_task_dirs(task_id)["task"] / filename
         task_path.parent.mkdir(parents=True, exist_ok=True)
-        if hasattr(payload, "model_dump"):
-            content = payload.model_dump(mode="json")
-        else:
-            content = payload
+        content = self._serialize_payload(payload)
         task_path.write_text(json.dumps(content, ensure_ascii=False, indent=2), encoding="utf-8")
         return task_path
 
@@ -121,10 +118,7 @@ class LocalStorageService:
 
         cache_path = self._get_cache_path(node_name, cache_key)
         cache_path.parent.mkdir(parents=True, exist_ok=True)
-        if hasattr(payload, "model_dump"):
-            content = payload.model_dump(mode="json")
-        else:
-            content = payload
+        content = self._serialize_payload(payload)
         wrapped = {
             "metadata": metadata or {},
             "payload": content,
@@ -136,6 +130,19 @@ class LocalStorageService:
         """返回缓存文件路径。"""
 
         return get_cache_dir() / node_name / f"{cache_key}.json"
+
+    def _serialize_payload(self, payload: object) -> object:
+        """把 Pydantic model / 列表 / 字典稳定转换成 JSON 可写结构。"""
+
+        if hasattr(payload, "model_dump"):
+            return payload.model_dump(mode="json")
+        if isinstance(payload, list):
+            return [self._serialize_payload(item) for item in payload]
+        if isinstance(payload, tuple):
+            return [self._serialize_payload(item) for item in payload]
+        if isinstance(payload, dict):
+            return {key: self._serialize_payload(value) for key, value in payload.items()}
+        return payload
 
     def _read_image_size(self, image_path: Path) -> tuple[int | None, int | None]:
         """读取图片尺寸。"""

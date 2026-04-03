@@ -28,7 +28,7 @@ export interface DetailJobSubmitPayload {
   bgRefFiles: File[];
 }
 
-/** 提交详情图任务，支持仅规划或全流程。 */
+/** 提交详情图任务，支持仅规划或完整生成。 */
 export async function submitDetailJob(payload: DetailJobSubmitPayload): Promise<DetailJobCreateResult> {
   const form = new FormData();
   payload.packagingFiles.forEach((file) => form.append("packaging_files", file));
@@ -67,8 +67,11 @@ export async function fetchDetailRuntime(taskId: string): Promise<DetailPageRunt
   const payload = resp.data.data;
   return {
     ...payload,
-    export_zip_url: resolveApiUrl(payload.export_zip_url),
-    images: payload.images.map((item) => ({ ...item, image_url: resolveApiUrl(item.image_url) })),
+    export_zip_url: payload.export_zip_url ? resolveApiUrl(payload.export_zip_url) : "",
+    images: payload.images.map((item) => ({
+      ...item,
+      image_url: item.image_url ? resolveApiUrl(item.image_url) : "",
+    })),
   };
 }
 
@@ -78,7 +81,7 @@ export async function fetchDetailTask(taskId: string): Promise<TaskSummary> {
   return resp.data.data;
 }
 
-/** 构建详情图文件下载地址。 */
+/** 构建详情图文件访问地址。 */
 export function resolveDetailFileUrl(taskId: string, fileName: string): string {
   return resolveApiUrl(`/detail/jobs/${taskId}/files/${encodeURI(fileName)}`);
 }

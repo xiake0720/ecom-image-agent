@@ -5,44 +5,165 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from backend.schemas.detail import DetailPageAssetRef, DetailPageJobCreatePayload, DetailPagePlanPage, DetailPagePlanPayload, DetailPagePlanScreen
+from backend.engine.core.config import get_settings
+from backend.engine.providers.llm.base import BaseTextProvider
+from backend.engine.providers.router import build_capability_bindings
+from backend.schemas.detail import (
+    DetailAssetRole,
+    DetailPageAssetRef,
+    DetailPageJobCreatePayload,
+    DetailPagePlanPage,
+    DetailPagePlanPayload,
+    DetailPagePlanScreen,
+)
 
 
 class DetailPlannerService:
-    """负责根据输入与模板生成详情图结构化规划。"""
+    """负责生成茶叶详情图的结构化规划。"""
 
     def __init__(self, template_root: Path) -> None:
         self.template_root = template_root
 
-    def build_plan(self, payload: DetailPageJobCreatePayload, assets: list[DetailPageAssetRef]) -> DetailPagePlanPayload:
-        """生成整套 1:3 长图规划。"""
+    def build_plan(
+        self,
+        payload: DetailPageJobCreatePayload,
+        assets: list[DetailPageAssetRef],
+        *,
+        planning_provider: BaseTextProvider | None = None,
+    ) -> DetailPagePlanPayload:
+        """生成整套 1:3 长图规划。
+
+        V1 优先走统一文本 provider；若模型不可用或结构不完整，再回退到模板化兜底。
+        """
+
+        provider = planning_provider or build_capability_bindings(get_settings()).planning_provider
+        fallback = self._fallback_plan(payload, assets)
+        prompt = self._build_prompt(payload, assets, fallback)
+        try:
+            result = provider.generate_structured(
+                prompt,
+                DetailPagePlanPayload,
+                system_prompt=(
+                    "你是茶叶电商详情图导演 Agent。"
+                    "请只输出严格 JSON，面向天猫高端茶叶详情图，"
+                    "每张图必须包含两个 screen，且只能规划茶叶场景。"
+                ),
+            )
+            return self._normalize_plan(result, payload, assets, fallback)
+        except Exception:
+            return fallback
+
+    def _normalize_plan(
+        self,
+        plan: DetailPagePlanPayload,
+        payload: DetailPageJobCreatePayload,
+        assets: list[DetailPageAssetRef],
+        fallback: DetailPagePlanPayload,
+    ) -> DetailPagePlanPayload:
+        """把模型输出修正为稳定可执行的 detail plan。"""
+
+        normalized_pages: list[DetailPagePlanPage] = []
+        source_pages = plan.pages or fallback.pages
+        target_pages = payload.target_slice_count
+        for page_index in range(target_pages):
+            fallback_page = fallback.pages[page_index]
+            source_page = source_pages[page_index] if page_index < len(source_pages) else fallback_page
+            screens = self._normalize_screens(
+                source_page.screens,
+                fallback_page.screens,
+                page_index=page_index,
+                assets=assets,
+            )
+            normalized_pages.append(
+                DetailPagePlanPage(
+                    page_id=f"page-{page_index + 1:02d}",
+                    title=source_page.title.strip() or fallback_page.title,
+                    style_anchor=source_page.style_anchor.strip() or fallback_page.style_anchor,
+                    narrative_position=page_index + 1,
+                    screens=screens,
+                )
+            )
+
+        narrative = [item.strip() for item in plan.narrative if item.strip()] or fallback.narrative
+        total_pages = len(normalized_pages)
+        return DetailPagePlanPayload(
+            template_name=plan.template_name or fallback.template_name,
+            category=payload.category,
+            platform=payload.platform,
+            style_preset=payload.style_preset,
+            global_style_anchor=plan.global_style_anchor.strip() or fallback.global_style_anchor,
+            narrative=narrative[:total_pages] if len(narrative) >= total_pages else fallback.narrative[:total_pages],
+            total_screens=total_pages * 2,
+            total_pages=total_pages,
+            pages=normalized_pages,
+        )
+
+    def _normalize_screens(
+        self,
+        source_screens: list[DetailPagePlanScreen],
+        fallback_screens: list[DetailPagePlanScreen],
+        *,
+        page_index: int,
+        assets: list[DetailPageAssetRef],
+    ) -> list[DetailPagePlanScreen]:
+        normalized: list[DetailPagePlanScreen] = []
+        for screen_index in range(2):
+            fallback_screen = fallback_screens[screen_index]
+            source_screen = source_screens[screen_index] if screen_index < len(source_screens) else fallback_screen
+            preferred_roles = source_screen.suggested_asset_roles or fallback_screen.suggested_asset_roles
+            normalized.append(
+                DetailPagePlanScreen(
+                    screen_id=f"p{page_index + 1:02d}s{screen_index + 1}",
+                    theme=source_screen.theme.strip() or fallback_screen.theme,
+                    goal=source_screen.goal.strip() or fallback_screen.goal,
+                    screen_type=source_screen.screen_type or fallback_screen.screen_type,
+                    suggested_asset_roles=self._filter_roles(preferred_roles, assets, fallback_screen.suggested_asset_roles),
+                )
+            )
+        return normalized
+
+    def _filter_roles(
+        self,
+        roles: list[DetailAssetRole],
+        assets: list[DetailPageAssetRef],
+        fallback_roles: list[DetailAssetRole],
+    ) -> list[DetailAssetRole]:
+        existing_roles = {asset.role for asset in assets}
+        matched = [role for role in roles if role in existing_roles]
+        return matched or fallback_roles
+
+    def _fallback_plan(
+        self,
+        payload: DetailPageJobCreatePayload,
+        assets: list[DetailPageAssetRef],
+    ) -> DetailPagePlanPayload:
+        """在模型不可用时，按茶叶详情图模板输出兜底规划。"""
 
         template = self._load_template()
-        target_pages = payload.target_slice_count
-        total_screens = target_pages * 2
-        tea_focus = self._resolve_tea_focus(payload.tea_type)
+        blueprint = list(template.get("screen_blueprint", []))
         narrative = [
-            "品牌首屏与产品主体",
-            "核心卖点展开",
-            "茶干条索细节",
-            "茶汤质感与香气表达",
-            "叶底与工艺说明",
-            "参数/冲泡/场景/发货信息",
+            "品牌与产品主视觉",
+            "卖点展开与信任建立",
+            "干茶条索与工艺细节",
+            "茶汤色泽与香气表现",
+            "叶底状态与原料说明",
+            "参数、冲泡与购买行动",
         ]
-        screen_defs = template.get("screen_blueprint", [])
         pages: list[DetailPagePlanPage] = []
-        for page_index in range(target_pages):
-            first = screen_defs[(page_index * 2) % len(screen_defs)]
-            second = screen_defs[(page_index * 2 + 1) % len(screen_defs)]
+        role_order = self._resolve_main_roles(payload)
+        for page_index in range(payload.target_slice_count):
+            first = blueprint[(page_index * 2) % len(blueprint)]
+            second = blueprint[(page_index * 2 + 1) % len(blueprint)]
             screens = [
-                self._build_screen(page_index, 1, first, tea_focus, assets),
-                self._build_screen(page_index, 2, second, tea_focus, assets),
+                self._build_screen(page_index, 1, first, assets, role_order),
+                self._build_screen(page_index, 2, second, assets, role_order),
             ]
+            title = f"{screens[0].theme} / {screens[1].theme}"
             pages.append(
                 DetailPagePlanPage(
-                    page_id=f"page-{page_index+1:02d}",
-                    title=f"详情长图 {page_index+1:02d}",
-                    style_anchor=template.get("global_style_anchor", "天猫茶叶高端统一风格"),
+                    page_id=f"page-{page_index + 1:02d}",
+                    title=title,
+                    style_anchor=str(template.get("global_style_anchor", "")),
                     narrative_position=page_index + 1,
                     screens=screens,
                 )
@@ -52,10 +173,10 @@ class DetailPlannerService:
             category=payload.category,
             platform=payload.platform,
             style_preset=payload.style_preset,
-            global_style_anchor=str(template.get("global_style_anchor", "高级克制、统一材质、中文排版清晰")),
-            narrative=narrative,
-            total_screens=total_screens,
-            total_pages=target_pages,
+            global_style_anchor=str(template.get("global_style_anchor", "天猫高端茶叶详情图，留白克制、材质真实、中文清晰")),
+            narrative=narrative[: payload.target_slice_count],
+            total_screens=payload.target_slice_count * 2,
+            total_pages=payload.target_slice_count,
             pages=pages,
         )
 
@@ -64,39 +185,78 @@ class DetailPlannerService:
         page_index: int,
         screen_index: int,
         blueprint: dict[str, object],
-        tea_focus: list[str],
         assets: list[DetailPageAssetRef],
+        role_order: list[DetailAssetRole],
     ) -> DetailPagePlanScreen:
-        """构建单屏规划，确保素材角色可追踪。"""
-
         preferred_roles = [str(item) for item in blueprint.get("preferred_roles", [])]
-        matched_roles = [role for role in preferred_roles if any(asset.role == role for asset in assets)]
-        fallback_roles = preferred_roles if preferred_roles else ["packaging"]
+        roles: list[DetailAssetRole] = []
+        for role in [*preferred_roles, *role_order]:
+            if any(asset.role == role for asset in assets) and role not in roles:
+                roles.append(role)  # type: ignore[arg-type]
+        if not roles:
+            roles = [assets[0].role if assets else role_order[0]]
         return DetailPagePlanScreen(
-            screen_id=f"p{page_index+1:02d}s{screen_index}",
-            theme=str(blueprint.get("theme", "茶叶卖点展示")),
-            goal=f"强调{tea_focus[(page_index + screen_index - 1) % len(tea_focus)]}，并保持全套视觉统一",
+            screen_id=f"p{page_index + 1:02d}s{screen_index}",
+            theme=str(blueprint.get("theme", "茶叶详情图表达")),
+            goal=self._build_screen_goal(str(blueprint.get("theme", ""))),
             screen_type=str(blueprint.get("screen_type", "visual")),
-            suggested_asset_roles=matched_roles or fallback_roles,
+            suggested_asset_roles=roles[:3],
         )
 
-    def _resolve_tea_focus(self, tea_type: str) -> list[str]:
-        """按茶类返回默认卖点语义。"""
+    def _build_screen_goal(self, theme: str) -> str:
+        if "干茶" in theme:
+            return "突出干茶条索、色泽与原叶等级，建立质感认知。"
+        if "茶汤" in theme:
+            return "表现汤色通透感、香气氛围与饮用欲望。"
+        if "叶底" in theme:
+            return "说明叶底舒展状态与原料真实度。"
+        if "参数" in theme or "冲泡" in theme:
+            return "用克制信息表达参数、冲泡建议与购买行动。"
+        if "卖点" in theme:
+            return "把核心卖点拆成适合上图的双屏信息表达。"
+        return "建立品牌气质与产品主体识别，形成整套详情图的叙事开篇。"
 
-        normalized = tea_type.lower()
-        if any(item in normalized for item in ["乌龙", "单丛", "凤凰"]):
-            return ["香气层次", "回甘", "山韵", "耐泡"]
-        if any(item in normalized for item in ["红茶", "金骏眉", "正山小种"]):
-            return ["甜润", "蜜香果香", "顺口", "早餐下午茶"]
-        if any(item in normalized for item in ["花茶", "茉莉", "桂花"]):
-            return ["鲜灵花香", "清爽", "办公室友好", "新手友好"]
-        if any(item in normalized for item in ["白茶", "陈皮"]):
-            return ["清润", "柔和", "回甘", "日常轻饮"]
-        return ["香气", "回甘", "质感", "日常适饮"]
+    def _resolve_main_roles(self, payload: DetailPageJobCreatePayload) -> list[DetailAssetRole]:
+        if payload.prefer_main_result_first:
+            return ["main_result", "packaging", "scene_ref"]
+        return ["packaging", "main_result", "scene_ref"]
+
+    def _build_prompt(
+        self,
+        payload: DetailPageJobCreatePayload,
+        assets: list[DetailPageAssetRef],
+        fallback: DetailPagePlanPayload,
+    ) -> str:
+        """拼接规划模型提示词，把所有输入显式收口进去。"""
+
+        asset_manifest = [
+            {
+                "role": asset.role,
+                "file_name": asset.file_name,
+                "source_task_id": asset.source_task_id,
+                "source_result_file": asset.source_result_file,
+            }
+            for asset in assets
+        ]
+        return (
+            "请为茶叶电商详情图生成结构化规划。"
+            f"品牌名={payload.brand_name or '未提供'}；"
+            f"商品名={payload.product_name or '未提供'}；"
+            f"茶类={payload.tea_type}；平台={payload.platform}；风格={payload.style_preset}；"
+            f"价格带={payload.price_band or '未提供'}；目标页数={payload.target_slice_count}；"
+            f"卖点补充={payload.selling_points or ['未提供']}；"
+            f"商品参数={payload.specs or {'默认': '未提供'}}；"
+            f"冲泡建议={payload.brew_suggestion or '未提供'}；"
+            f"用户额外要求={payload.extra_requirements or '未提供'}；"
+            f"优先使用主图结果={payload.prefer_main_result_first}；"
+            f"素材清单={json.dumps(asset_manifest, ensure_ascii=False)}；"
+            "请只规划天猫风格茶叶详情图，每张图包含两个 screen，"
+            "输出字段必须包含 global_style_anchor、narrative、total_pages、total_screens、pages。"
+            f"若不确定，请至少参考这个兜底结构：{json.dumps(fallback.model_dump(mode='json'), ensure_ascii=False)}"
+        )
 
     def _load_template(self) -> dict[str, object]:
         """读取茶叶详情图模板。"""
 
         template_path = self.template_root / "detail_pages" / "tea_tmall_premium_v1.json"
         return json.loads(template_path.read_text(encoding="utf-8"))
-

@@ -1,91 +1,128 @@
-# 前端工作台说明（MainImagePage）
+# 前端工作台说明
 
-## 1. 页面定位
-- 核心页面：`frontend/src/pages/MainImagePage.tsx`
-- 路由：`/main-images`
-- 角色：主图任务提交、进度观测、结果预览/下载的一站式工作台。
+## 1. 页面总览
+- 主图工作台：[`frontend/src/pages/MainImagePage.tsx`](/D:/python/ecom-image-agent/frontend/src/pages/MainImagePage.tsx)
+- 详情图工作台：[`frontend/src/pages/DetailPageGeneratorPage.tsx`](/D:/python/ecom-image-agent/frontend/src/pages/DetailPageGeneratorPage.tsx)
 
-## 2. 页面布局
-页面为三段式：
-1. 顶部栏：品牌标识、导航占位、任务状态芯片与操作按钮。
-2. 左侧参数区：上传与参数配置、任务提交。
-3. 右侧结果区：流程进度、运行状态、结果卡片、预览弹层。
+两页都接入：
+- [`PageShell`](/D:/python/ecom-image-agent/frontend/src/components/layout/PageShell.tsx)
+- [`PageHeader`](/D:/python/ecom-image-agent/frontend/src/components/common/PageHeader.tsx)
+- [`SectionCard`](/D:/python/ecom-image-agent/frontend/src/components/common/SectionCard.tsx)
 
-## 3. 左侧上传与参数区
+## 2. 主图工作台
 
-### 3.1 上传区
-- 白底主图（必填）：`white_bg`
-- 商品参考图（可选，多图）：`detail_files`
-- 背景参考图（可选，多图）：`bg_files`
+### 2.1 路由
+- `/main-images`
 
-### 3.2 参数区
-- 品牌名、商品名
-- 平台（天猫/京东/拼多多/抖音）
-- 类目（当前仅茶叶）
-- 风格标签组合（写入 `style_type`）
-- 图数 `shot_count`
-- 比例 `aspect_ratio`
-- 图尺寸 `image_size`
-- 风格补充说明 `style_notes`
+### 2.2 主要职责
+- 上传白底图、参考图、背景图
+- 提交主图任务
+- 轮询主图 runtime
+- 展示进度、QC 摘要、结果卡片
+- 结果预览与下载
 
-## 4. 右侧进度与结果区
-- 流程阶段条：`ingest_assets -> director_v2 -> prompt_refine_v2 -> render_images -> run_qc -> finalize`
-- 进度信息来自 runtime：`progress_percent`、`current_step`、`message`
-- 状态补充：队列位置、provider/model、参考图数量、QC 摘要
-- 结果卡片来自 `results[]`，支持大图预览与下载。
+### 2.3 主图数据流
+1. 页面调用 `submitMainImageTask`
+2. 后端返回 `task_id`
+3. 页面轮询 `fetchTaskRuntime(task_id)`
+4. runtime 返回进度、队列、QC、结果 URL
+5. 页面展示真实任务状态与结果图
 
-## 5. 前端数据流
-1. 页面调用 `submitMainImageTask` 组装并提交 multipart。
-2. 成功后保存 `task_id` 到页面状态与 localStorage。
-3. 页面轮询 `fetchTaskRuntime(task_id)` 获取运行时数据。
-4. runtime 返回的相对 URL 由 `resolveApiUrl` 解析成可访问地址。
-5. 卡片点击触发预览弹层，下载按钮走直接 URL 下载。
+## 3. 详情图工作台
 
-## 6. 轮询逻辑
-- 轮询间隔：3 秒。
-- 任务处于终态（如 completed/failed/review_required）后停止轮询。
-- 页面刷新会读取 localStorage 中最近任务并恢复展示。
-- 当任务不存在（404 业务错误）时，自动清理 localStorage 中缓存任务 ID。
+### 3.1 路由
+- `/detail-pages`
 
-## 7. 结果预览逻辑
-- 仅当卡片存在 `image_url` 时允许预览。
-- 预览弹层开启时锁定页面滚动；`Esc` 可关闭。
-- 下载文件名优先取 `file_name` 最后一级，缺省回落为 `{card.id}.png`。
+### 3.2 当前正式布局
+详情图页已重构为三栏工作台：
+- 左栏：输入与素材控制
+- 中栏：主图导入预览、规划预览、文案预览、Prompt 摘要、结果图区
+- 右栏：状态、进度、QC、错误、ZIP 下载
 
+### 3.3 组件拆分
+- [`DetailTaskSourcePicker`](/D:/python/ecom-image-agent/frontend/src/components/detail/DetailTaskSourcePicker.tsx)
+- [`DetailMainResultGallery`](/D:/python/ecom-image-agent/frontend/src/components/detail/DetailMainResultGallery.tsx)
+- [`DetailAssetUploader`](/D:/python/ecom-image-agent/frontend/src/components/detail/DetailAssetUploader.tsx)
+- [`DetailProductForm`](/D:/python/ecom-image-agent/frontend/src/components/detail/DetailProductForm.tsx)
+- [`DetailGoalForm`](/D:/python/ecom-image-agent/frontend/src/components/detail/DetailGoalForm.tsx)
+- [`DetailPlanPreview`](/D:/python/ecom-image-agent/frontend/src/components/detail/DetailPlanPreview.tsx)
+- [`DetailCopyPreview`](/D:/python/ecom-image-agent/frontend/src/components/detail/DetailCopyPreview.tsx)
+- [`DetailPromptPreview`](/D:/python/ecom-image-agent/frontend/src/components/detail/DetailPromptPreview.tsx)
+- [`DetailResultGallery`](/D:/python/ecom-image-agent/frontend/src/components/detail/DetailResultGallery.tsx)
+- [`DetailRuntimeSidebar`](/D:/python/ecom-image-agent/frontend/src/components/detail/DetailRuntimeSidebar.tsx)
 
-## 8. 工作台与全站壳层统一
-- 主图页已接入统一壳层 `PageShell` 与统一顶栏 `AppTopBar`，与模板中心、详情页、预览中心、资源库、设置、数据中心保持同一视觉体系。
-- 主图页核心上传/提交/轮询/结果逻辑保持不变，仅统一页面外壳与导航结构。
+### 3.4 输入区能力
+- 选择主图任务来源
+- 自动读取主图任务 completed 结果
+- 主图结果图卡多选
+- 包装图、茶干图、茶汤图、叶底图、场景参考图、背景参考图上传
+- 商品信息、参数、冲泡建议录入
+- 卖点、风格补充、额外要求录入
 
-## 9. Mock 页面补充
-- 详情长图编辑、模板中心、预览中心、资源库、系统设置、数据中心、登录页均采用 `frontend/src/mocks/` 的 mock 数据驱动，不依赖后端接口。
-- 页面路由见 `README.md` 的“当前前端页面路由”。
+### 3.5 中栏能力
+- 主图导入图卡预览
+- 规划预览
+- 文案预览
+- Prompt 摘要预览
+- 结果图预览
+- 单张下载
+- 错误横幅
 
-## 10. 第二轮 UI 精修与响应式规则（2026-04-02）
-- 本轮未新增页面，基于既有页面进行比例与节奏精修，保留当前 mock 数据结构与路由。
-- 统一断点策略：
-  - `<= 1440`：小桌面（压缩容器宽度、减少卡片间距、降低网格列数）
-  - `1441 ~ 1920`：标准桌面（默认容器）
-  - `1921 ~ 2560`：2K（增大容器宽度、扩展卡片列数）
-  - `>= 2561`：大屏扩展（继续放宽容器与网格上限，避免内容缩在中间）
-- 全站壳层统一：`frontend/src/styles/console.css`
-  - 统一 `console-main` / `app-topbar` 宽度策略（由变量控制而非固定 `max-width`）。
-  - 统一页面级 spacing、卡片 padding、控件高度、标题字号基线。
-- 页面级精修：`frontend/src/pages/WorkbenchRefine.css`
-  - 详情长图编辑页三栏改为“左右栏受控 + 中间自适应扩展”。
-  - 预览中心、模板中心、资源库、数据中心、系统设置统一为可复用 grid 规则。
-  - 登录页补充大屏背景层次与卡片节奏。
-- 主图工作台保持原业务链路（提交、轮询、预览、下载）不变，仅增强 2K/4K 下容器与结果区宽度利用。
+### 3.6 右栏能力
+- 任务状态芯片
+- 进度条
+- 当前阶段
+- 已生成 / 计划数量
+- QC 问题列表
+- 真实错误信息
+- ZIP 下载入口
 
+### 3.7 运行状态
+页面显式支持：
+- `loading`
+- `error`
+- `empty`
+- `success`
+- `selected`
+- `generating`
+- `completed`
+- `failed`
 
-## 茶叶详情图工作台（/detail-pages）
-- 布局：固定三栏工作台（左 360 / 中自适应 / 右 320），大屏左右栏 sticky，小屏自动堆叠。
-- 左栏：素材输入（含主图结果导入 + 包装/茶干/茶汤/叶底/场景/背景上传）、商品信息、卖点目标、任务操作。
-- 中栏拆分为三块：
-  1) 主图导入预览区：展示 completed 主图结果缩略图卡片，支持多选、选中高亮、导入数量反馈；
-  2) 规划结果区：展示总页数、每页两屏主题/目标、每页参考角色；
-  3) 最终结果图区：展示单图状态、缩略图预览、单张下载。
-- 右栏：任务状态、阶段、进度、计划/生成数量、模板名、风格锚点、QC、失败信息、ZIP 下载。
-- 交互闭环：
-  - “生成详情图规划”提交后立即拉取 runtime，规划区直接展示结果；
-  - “开始生成详情图”提交后立即进入轮询，失败信息在中栏与右栏同步可见。
+具体表现：
+- 主图图卡有选中态
+- 按钮有 loading 文案
+- runtime 侧栏显示状态 badge
+- 中栏展示错误横幅
+- 结果图区按单页状态区分 `queued/running/completed/failed`
+
+### 3.8 详情图数据流
+1. 页面通过 [`frontend/src/services/detailPageApi.ts`](/D:/python/ecom-image-agent/frontend/src/services/detailPageApi.ts) 提交：
+   - `POST /api/detail/jobs/plan`
+   - `POST /api/detail/jobs`
+2. 成功后保存 `task_id`
+3. 页面轮询 `GET /api/detail/jobs/{task_id}/runtime`
+4. runtime 返回：
+   - `plan`
+   - `copy_blocks`
+   - `prompt_plan`
+   - `qc_summary`
+   - `images`
+   - `export_zip_url`
+   - `error_message`
+5. 页面按真实 runtime 更新中栏与右栏
+
+### 3.9 主图来源导入规则
+- 如果 URL 自带 `main_task_id`，页面会自动读取该主图任务
+- 页面默认选中第一张 completed 结果
+- 主图结果以图卡展示，不再用 checkbox 列表
+
+## 4. 样式文件
+- 主图页样式：[`frontend/src/pages/MainImagePage.css`](/D:/python/ecom-image-agent/frontend/src/pages/MainImagePage.css)
+- 详情图页样式：[`frontend/src/pages/DetailPageGeneratorPage.css`](/D:/python/ecom-image-agent/frontend/src/pages/DetailPageGeneratorPage.css)
+- 全站壳层样式：[`frontend/src/styles/console.css`](/D:/python/ecom-image-agent/frontend/src/styles/console.css)
+
+## 5. 详情图页面当前设计原则
+- 保留现有工作台视觉语言，不另起一套站点壳层
+- 强化图卡选中态、hover/focus 与错误提示
+- 把 plan/copy/prompt/result 明确拆段展示
+- 右栏只做导演控制台，不做前端拼图或本地合成长图

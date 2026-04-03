@@ -58,18 +58,20 @@ class TaskRepository:
 
         existing = self.get_task(task.task_id)
         now = datetime.utcnow()
+        effective_task_type = existing.task_type if existing is not None else task_type
         result_count_completed = self._count_result_files(task.task_id)
         result_count_total = max(task.shot_count, result_count_completed)
-        export_zip_path = self._resolve_export_zip_path(task.task_id)
+        export_zip_path = self._resolve_export_zip_path(task.task_id, task_type=effective_task_type)
+        result_dir_name = "generated" if effective_task_type == "detail_page_v2" else "final"
         summary = TaskSummary(
             task_id=task.task_id,
-            task_type=existing.task_type if existing is not None else task_type,
+            task_type=effective_task_type,
             status=task.status.value,
             created_at=existing.created_at if existing is not None else task.created_at,
             updated_at=now,
             title=(existing.title if existing is not None and existing.title else task.product_name),
             platform=(existing.platform if existing is not None and existing.platform else task.platform),
-            result_path=str(Path(task.task_dir) / "final"),
+            result_path=str(Path(task.task_dir) / result_dir_name),
             progress_percent=task.progress_percent,
             current_step=task.current_step,
             current_step_label=task.current_step_label,
@@ -142,7 +144,7 @@ class TaskRepository:
                 "current_step_label": task.current_step_label,
                 "result_count_completed": completed,
                 "result_count_total": total,
-                "export_zip_path": self._resolve_export_zip_path(summary.task_id),
+                "export_zip_path": self._resolve_export_zip_path(summary.task_id, task_type=summary.task_type),
                 "provider_label": summary.provider_label,
                 "model_label": summary.model_label,
                 "detail_image_count": summary.detail_image_count,
@@ -161,12 +163,16 @@ class TaskRepository:
             return 0
         return len([path for path in target_dir.iterdir() if path.is_file() and path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}])
 
-    def _resolve_export_zip_path(self, task_id: str) -> str:
+    def _resolve_export_zip_path(self, task_id: str, *, task_type: str = "main_image") -> str:
         """返回结果图 ZIP 的相对路径。"""
 
         exports_dir = get_task_dir(task_id) / "exports"
         if not exports_dir.exists():
             return ""
+        if task_type == "detail_page_v2":
+            detail_bundle = exports_dir / "detail_bundle.zip"
+            if detail_bundle.exists():
+                return str(detail_bundle.relative_to(get_task_dir(task_id)).as_posix())
         candidates = sorted(
             [path for path in exports_dir.iterdir() if path.is_file() and path.name.endswith("_final_images.zip")],
             key=lambda item: item.stat().st_mtime,

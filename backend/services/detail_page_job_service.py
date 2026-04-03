@@ -2,45 +2,43 @@
 
 from __future__ import annotations
 
-import json
 from collections import deque
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from queue import Queue
 from threading import Lock, Thread
 
 from fastapi import UploadFile
 
+from backend.engine.core.config import get_settings
 from backend.engine.core.paths import ensure_task_dirs, get_task_dir
 from backend.engine.domain.task import Task, TaskStatus
 from backend.engine.services.storage.local_storage import LocalStorageService
-from backend.repositories.task_repository import TaskRepository
-from backend.schemas.detail import (
-    DetailPageAssetRef,
-    DetailPageJobCreatePayload,
-    DetailPageJobCreateResult,
-    DetailPageQCSummary,
+from backend.engine.workflows.detail_graph import run_detail_workflow
+from backend.engine.workflows.detail_state import (
+    DetailWorkflowExecutionError,
+    DetailWorkflowState,
+    format_detail_workflow_log,
 )
-from backend.services.detail_copy_service import DetailCopyService
-from backend.services.detail_planner_service import DetailPlannerService
-from backend.services.detail_prompt_service import DetailPromptService
-from backend.services.detail_render_service import DetailRenderService
+from backend.repositories.task_repository import TaskRepository
+from backend.schemas.detail import DetailPageAssetRef, DetailPageJobCreatePayload, DetailPageJobCreateResult
 
 
 @dataclass
 class PreparedDetailTask:
-    """详情图队列任务上下文。"""
+    """已完成落盘、可直接进入后台执行的详情图任务。"""
 
-    payload: DetailPageJobCreatePayload
     task_id: str
+    summary_title: str
+    initial_state: DetailWorkflowState
+    plan_only: bool
 
 
 class _DetailTaskQueue:
     """详情图单 worker 队列。"""
 
     def __init__(self) -> None:
-        self._queue: Queue[PreparedDetailTask] = Queue()
+        self._queue: Queue[tuple[PreparedDetailTask, object]] = Queue()
         self._pending: deque[str] = deque()
         self._active: str | None = None
         self._lock = Lock()
@@ -79,15 +77,11 @@ detail_task_queue = _DetailTaskQueue()
 
 
 class DetailPageJobService:
-    """负责详情图任务创建、执行、落盘。"""
+    """负责创建详情图任务并触发 detail graph。"""
 
     def __init__(self) -> None:
         self.storage = LocalStorageService()
         self.repo = TaskRepository()
-        self.planner = DetailPlannerService(template_root=Path("backend/templates"))
-        self.copy_service = DetailCopyService()
-        self.prompt_service = DetailPromptService()
-        self.render_service = DetailRenderService()
 
     async def create_job(
         self,
@@ -101,28 +95,28 @@ class DetailPageJobService:
         bg_ref_files: list[UploadFile],
         plan_only: bool,
     ) -> DetailPageJobCreateResult:
-        """创建详情图任务并投递到后台队列。"""
+        """创建详情图任务，并根据模式立即执行或入队。"""
 
+        settings = get_settings()
         task_id = self.storage.create_task_id()
         task_dirs = ensure_task_dirs(task_id)
         self._ensure_detail_dirs(task_dirs["task"])
-
         task = Task(
             task_id=task_id,
             brand_name=payload.brand_name,
-            product_name=payload.product_name,
+            product_name=payload.product_name or f"{payload.tea_type}详情图",
             category=payload.category,
             platform=payload.platform,
             shot_count=payload.target_slice_count,
             aspect_ratio="1:3",
             image_size=payload.image_size,
-            style_type=payload.style_preset,
-            style_notes=payload.style_notes,
             status=TaskStatus.CREATED,
             task_dir=str(task_dirs["task"]),
             current_step="queued",
             current_step_label="详情图任务已提交",
             progress_percent=0,
+            style_type=payload.style_preset,
+            style_notes=payload.style_notes,
         )
         self.storage.save_task_manifest(task)
 
@@ -136,100 +130,82 @@ class DetailPageJobService:
             scene_ref_files=scene_ref_files,
             bg_ref_files=bg_ref_files,
         )
-        self._write_inputs(task_id, payload, assets)
-
+        initial_state: DetailWorkflowState = {
+            "task": task,
+            "detail_payload": payload.model_copy(),
+            "detail_assets": assets,
+            "logs": [
+                format_detail_workflow_log(
+                    task_id=task_id,
+                    node_name="fastapi_entry",
+                    event="queued",
+                    detail="API 请求已创建详情图任务，等待 detail graph 执行",
+                )
+            ],
+            "error_message": "",
+        }
+        provider_label = settings.resolve_image_provider_route().label
+        model_label = settings.resolve_image_model_selection().label
         summary = self.repo.create_task_summary(
             task_id=task_id,
             task_type="detail_page_v2",
-            status="created",
-            title=payload.product_name or f"{payload.tea_type}详情图",
+            status=task.status.value,
+            title=task.product_name,
             platform=payload.platform,
             result_path=str(get_task_dir(task_id) / "generated"),
             created_at=task.created_at,
+            provider_label=provider_label,
+            model_label=model_label,
         )
         self.repo.save_task(summary)
 
-        prepared = PreparedDetailTask(payload=payload.model_copy(), task_id=task_id)
+        prepared = PreparedDetailTask(
+            task_id=task_id,
+            summary_title=task.product_name,
+            initial_state=initial_state,
+            plan_only=plan_only,
+        )
         if plan_only:
-            self.run_prepared(prepared, plan_only=True)
+            self.run_prepared(prepared)
         else:
-            detail_task_queue.enqueue(prepared, lambda item: self.run_prepared(item, plan_only=False))
+            detail_task_queue.enqueue(prepared, self.run_prepared)
         return DetailPageJobCreateResult(task_id=task_id, status="created")
 
-    def run_prepared(self, prepared: PreparedDetailTask, *, plan_only: bool) -> None:
-        """执行详情图任务。"""
+    def run_prepared(self, prepared: PreparedDetailTask) -> None:
+        """执行 detail graph，并持续把运行时状态写回索引。"""
 
-        task_dir = get_task_dir(prepared.task_id)
-        task = Task.model_validate_json((task_dir / "task.json").read_text(encoding="utf-8"))
+        initial_state = prepared.initial_state
+        task = initial_state["task"]
+
+        def persist_progress(progress_state: DetailWorkflowState) -> None:
+            progress_task = progress_state.get("task")
+            if progress_task is not None:
+                self.repo.save_runtime_task(progress_task, task_type="detail_page_v2")
+
         try:
-            task = task.model_copy(
-                update={
-                    "status": TaskStatus.RUNNING,
-                    "current_step": "planning",
-                    "current_step_label": "正在生成详情规划",
-                    "progress_percent": 15,
-                    "error_message": "",
-                }
+            result = run_detail_workflow(
+                initial_state,
+                stop_after="detail_generate_prompt" if prepared.plan_only else None,
+                on_progress=persist_progress,
             )
-            self.storage.save_task_manifest(task)
-            self.repo.save_runtime_task(task, task_type="detail_page_v2")
-
-            assets = self._load_assets(task_dir / "inputs" / "asset_manifest.json")
-            plan = self.planner.build_plan(prepared.payload, assets)
-            (task_dir / "plan" / "detail_plan.json").write_text(plan.model_dump_json(indent=2), encoding="utf-8")
-
-            copy_blocks = self.copy_service.build_copy(prepared.payload, plan)
-            (task_dir / "plan" / "detail_copy_plan.json").write_text(json.dumps([item.model_dump(mode="json") for item in copy_blocks], ensure_ascii=False, indent=2), encoding="utf-8")
-
-            prompt_plan = self.prompt_service.build_prompt_plan(plan, copy_blocks, assets)
-            (task_dir / "plan" / "detail_prompt_plan.json").write_text(json.dumps([item.model_dump(mode="json") for item in prompt_plan], ensure_ascii=False, indent=2), encoding="utf-8")
-
-            if plan_only:
-                task = task.model_copy(
-                    update={
-                        "status": TaskStatus.COMPLETED,
-                        "current_step": "planning_done",
-                        "current_step_label": "规划已完成",
-                        "progress_percent": 100,
-                        "error_message": "",
-                    }
-                )
-                self.storage.save_task_manifest(task)
-                self.repo.save_runtime_task(task, task_type="detail_page_v2")
-                return
-
-            task = task.model_copy(update={"current_step": "rendering", "current_step_label": "正在生成详情图", "progress_percent": 70, "error_message": ""})
-            self.storage.save_task_manifest(task)
-            self.repo.save_runtime_task(task, task_type="detail_page_v2")
-
-            self.render_service.render_pages(task_dir=task_dir, prompt_plan=prompt_plan, copy_blocks=copy_blocks, image_size=prepared.payload.image_size)
-            qc = self._run_qc(task_dir, plan.total_pages, prompt_plan, copy_blocks)
-            (task_dir / "qc" / "detail_qc_report.json").write_text(qc.model_dump_json(indent=2), encoding="utf-8")
-            self.render_service.build_bundle(task_dir)
-
-            task = task.model_copy(
-                update={
-                    "status": TaskStatus.COMPLETED,
-                    "current_step": "done",
-                    "current_step_label": "详情图任务完成",
-                    "progress_percent": 100,
-                    "error_message": "",
-                }
-            )
-            self.storage.save_task_manifest(task)
-            self.repo.save_runtime_task(task, task_type="detail_page_v2")
-        except Exception as exc:
-            failed_message = self._format_exception_message(exc)
-            failed = task.model_copy(
+            result_task = result["task"]
+            self.repo.save_runtime_task(result_task, task_type="detail_page_v2")
+        except DetailWorkflowExecutionError as exc:
+            failed_state = exc.task_state or {}
+            failed_task = failed_state.get("task") if isinstance(failed_state, dict) else None
+            if failed_task is not None:
+                self.repo.save_runtime_task(failed_task, task_type="detail_page_v2")
+        except Exception as exc:  # pragma: no cover - 兜底保护
+            failed_task = task.model_copy(
                 update={
                     "status": TaskStatus.FAILED,
-                    "current_step": "failed",
-                    "current_step_label": "详情图任务失败",
-                    "error_message": failed_message,
+                    "current_step": task.current_step or "fastapi_entry",
+                    "current_step_label": "详情图任务执行失败",
+                    "error_message": f"详情图任务执行异常：{exc}",
                 }
             )
-            self.storage.save_task_manifest(failed)
-            self.repo.save_runtime_task(failed, task_type="detail_page_v2")
+            self.storage.save_task_manifest(failed_task)
+            self.repo.save_runtime_task(failed_task, task_type="detail_page_v2")
 
     async def _persist_assets(
         self,
@@ -243,7 +219,7 @@ class DetailPageJobService:
         scene_ref_files: list[UploadFile],
         bg_ref_files: list[UploadFile],
     ) -> list[DetailPageAssetRef]:
-        """写入素材并记录角色。"""
+        """写入素材文件，并记录角色与来源。"""
 
         asset_rows: list[DetailPageAssetRef] = []
         role_map = [
@@ -269,15 +245,17 @@ class DetailPageJobService:
                     )
                 )
                 counter += 1
-        for index, rel in enumerate(payload.selected_main_result_ids, start=counter):
-            source = get_task_dir(payload.main_image_task_id) / rel
-            if source.exists():
-                name = f"main_{index:03d}_{Path(rel).name}"
+        if payload.main_image_task_id:
+            for rel in payload.selected_main_result_ids:
+                source = get_task_dir(payload.main_image_task_id) / rel
+                if not source.exists():
+                    continue
+                name = f"main_{counter:03d}_{Path(rel).name}"
                 target = get_task_dir(task_id) / "inputs" / name
                 target.write_bytes(source.read_bytes())
                 asset_rows.append(
                     DetailPageAssetRef(
-                        asset_id=f"asset-{index:03d}",
+                        asset_id=f"asset-{counter:03d}",
                         role="main_result",
                         file_name=name,
                         relative_path=f"inputs/{name}",
@@ -286,50 +264,9 @@ class DetailPageJobService:
                         source_result_file=rel,
                     )
                 )
+                counter += 1
         return asset_rows
-
-    def _write_inputs(self, task_id: str, payload: DetailPageJobCreatePayload, assets: list[DetailPageAssetRef]) -> None:
-        """写入请求参数与素材清单。"""
-
-        task_dir = get_task_dir(task_id)
-        (task_dir / "inputs" / "request_payload.json").write_text(payload.model_dump_json(indent=2), encoding="utf-8")
-        (task_dir / "inputs" / "asset_manifest.json").write_text(json.dumps([item.model_dump(mode="json") for item in assets], ensure_ascii=False, indent=2), encoding="utf-8")
-
-    def _load_assets(self, path: Path) -> list[DetailPageAssetRef]:
-        payload = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
-        return [DetailPageAssetRef.model_validate(item) for item in payload]
-
-    def _run_qc(self, task_dir: Path, planned_count: int, prompt_plan: list, copy_blocks: list) -> DetailPageQCSummary:
-        """规则型 QC。"""
-
-        issues: list[str] = []
-        generated = list((task_dir / "generated").glob("*.png"))
-        if len(generated) != planned_count:
-            issues.append("生成数量与计划不一致")
-        if not copy_blocks:
-            issues.append("文案规划为空")
-        if any(not item.references for item in prompt_plan):
-            issues.append("存在页面缺少参考图绑定")
-        if not any(any(ref.role in {"packaging", "main_result"} for ref in item.references) for item in prompt_plan[:1]):
-            issues.append("首屏缺少包装主体")
-        if any("茶汤" in "".join(item.screen_themes) and not any(ref.role == "tea_soup" for ref in item.references) for item in prompt_plan):
-            issues.append("茶汤屏缺少 tea_soup 参考")
-
-        return DetailPageQCSummary(
-            passed=len(issues) == 0,
-            warning_count=len(issues),
-            failed_count=0,
-            issues=issues,
-        )
 
     def _ensure_detail_dirs(self, task_dir: Path) -> None:
         for name in ["inputs", "plan", "generated", "qc", "exports"]:
             (task_dir / name).mkdir(parents=True, exist_ok=True)
-
-    def _format_exception_message(self, exc: Exception) -> str:
-        """把异常转成可直接给前端展示的中文错误信息。"""
-
-        text = str(exc).strip()
-        if text:
-            return text
-        return f"{exc.__class__.__name__}：详情图任务执行异常"

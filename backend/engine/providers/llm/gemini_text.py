@@ -114,4 +114,135 @@ class GeminiTextProvider(BaseTextProvider):
                     }
                 ]
             }
+        if name == "DetailPagePlanPayload":
+            return {
+                "template_name": "tea_tmall_premium_v1",
+                "category": "tea",
+                "platform": "tmall",
+                "style_preset": "tea_tmall_premium_light",
+                "global_style_anchor": "天猫高端茶叶详情图，米白留白、深茶墨绿、材质克制、中文排版清晰",
+                "narrative": ["品牌主视觉", "核心卖点", "干茶细节", "茶汤与叶底"],
+                "total_screens": 8,
+                "total_pages": 4,
+                "pages": [
+                    {
+                        "page_id": "page-01",
+                        "title": "品牌与产品主视觉",
+                        "style_anchor": "高级留白",
+                        "narrative_position": 1,
+                        "screens": [
+                            {
+                                "screen_id": "p01s1",
+                                "theme": "品牌与产品主体",
+                                "goal": "建立品牌识别与产品高级感",
+                                "screen_type": "visual",
+                                "suggested_asset_roles": ["main_result", "packaging"],
+                            },
+                            {
+                                "screen_id": "p01s2",
+                                "theme": "核心卖点总览",
+                                "goal": "用克制信息表达核心卖点",
+                                "screen_type": "info",
+                                "suggested_asset_roles": ["packaging", "main_result"],
+                            },
+                        ],
+                    },
+                    {
+                        "page_id": "page-02",
+                        "title": "干茶与工艺细节",
+                        "style_anchor": "质感微距",
+                        "narrative_position": 2,
+                        "screens": [
+                            {
+                                "screen_id": "p02s1",
+                                "theme": "干茶条索与色泽",
+                                "goal": "突出原叶质感与等级",
+                                "screen_type": "visual",
+                                "suggested_asset_roles": ["dry_leaf", "packaging"],
+                            },
+                            {
+                                "screen_id": "p02s2",
+                                "theme": "工艺与产地信息",
+                                "goal": "说明茶类、产区与制茶特点",
+                                "screen_type": "info",
+                                "suggested_asset_roles": ["dry_leaf", "packaging"],
+                            },
+                        ],
+                    },
+                    {
+                        "page_id": "page-03",
+                        "title": "茶汤表现与香气氛围",
+                        "style_anchor": "光感通透",
+                        "narrative_position": 3,
+                        "screens": [
+                            {
+                                "screen_id": "p03s1",
+                                "theme": "茶汤色泽与通透感",
+                                "goal": "强调汤色、清澈度与高级感",
+                                "screen_type": "visual",
+                                "suggested_asset_roles": ["tea_soup", "scene_ref"],
+                            },
+                            {
+                                "screen_id": "p03s2",
+                                "theme": "香气与口感表达",
+                                "goal": "用简洁文字承接饮用感受",
+                                "screen_type": "info",
+                                "suggested_asset_roles": ["tea_soup", "packaging"],
+                            },
+                        ],
+                    },
+                    {
+                        "page_id": "page-04",
+                        "title": "叶底与参数说明",
+                        "style_anchor": "真实档案感",
+                        "narrative_position": 4,
+                        "screens": [
+                            {
+                                "screen_id": "p04s1",
+                                "theme": "叶底舒展状态",
+                                "goal": "体现叶底完整度与鲜活度",
+                                "screen_type": "visual",
+                                "suggested_asset_roles": ["leaf_bottom", "scene_ref"],
+                            },
+                            {
+                                "screen_id": "p04s2",
+                                "theme": "参数与冲泡建议",
+                                "goal": "收口规格、冲泡和购买动作",
+                                "screen_type": "info",
+                                "suggested_asset_roles": ["packaging", "leaf_bottom"],
+                            },
+                        ],
+                    },
+                ],
+            }
+        if name == "DetailCopyPlanResult":
+            return {
+                "items": [
+                    {
+                        "page_id": "page-01",
+                        "screen_id": "p01s1",
+                        "headline": "山场原叶，杯中见真章",
+                        "subheadline": "品牌首屏先立住包装与气质",
+                        "selling_points": ["包装识别统一", "高端留白", "主体明确"],
+                        "body_copy": "以品牌主视觉建立第一印象，强调真实包装与克制氛围。",
+                        "parameter_copy": "",
+                        "cta_copy": "",
+                        "notes": "标题控制在 10 字内。",
+                    }
+                ]
+            }
+        if name == "DetailPromptPlanResult":
+            return {
+                "items": [
+                    {
+                        "page_id": "page-01",
+                        "page_title": "品牌与产品主视觉",
+                        "screen_themes": ["品牌与产品主体", "核心卖点总览"],
+                        "layout_notes": ["上屏偏视觉，下屏偏信息", "包装正面保留完整识别"],
+                        "prompt": "高级茶叶电商详情长图，包装主体稳定，留白大气，材质真实，中文排版清晰。",
+                        "negative_prompt": "garbled Chinese text, deformed packaging, replaced logo, cluttered layout",
+                        "reference_roles": ["main_result", "packaging"],
+                    }
+                ]
+            }
         return {}

@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     text_provider_mode: str = "real"
     image_provider_mode: str = "real"
     text_provider: str = "runapi_openai"
-    image_provider: str = "runapi_gemini31"
+    image_provider: str = "banana2"
 
     runapi_api_key: str | None = Field(default=None, validation_alias="ECOM_IMAGE_AGENT_RUNAPI_API_KEY")
     runapi_text_api_key: str | None = Field(default=None, validation_alias="ECOM_IMAGE_AGENT_RUNAPI_TEXT_API_KEY")
@@ -66,6 +66,15 @@ class Settings(BaseSettings):
     runapi_image_model: str = Field(
         default="gemini-3.1-flash-image-preview",
         validation_alias="ECOM_IMAGE_AGENT_RUNAPI_IMAGE_MODEL",
+    )
+    google_api_key: str | None = Field(default=None, validation_alias="ECOM_IMAGE_AGENT_GOOGLE_API_KEY")
+    google_image_base_url: str = Field(
+        default="https://generativelanguage.googleapis.com/v1beta",
+        validation_alias="ECOM_IMAGE_AGENT_GOOGLE_IMAGE_BASE_URL",
+    )
+    banana2_model: str = Field(
+        default="gemini-3.1-flash-image-preview",
+        validation_alias="ECOM_IMAGE_AGENT_BANANA2_MODEL",
     )
 
     default_font_path: Path = Path("assets/fonts/NotoSansSC-Regular.otf")
@@ -138,26 +147,34 @@ class Settings(BaseSettings):
         """解析文本 provider 路由。"""
 
         mode = self._normalize_mode(self.text_provider_mode)
-        alias = "mock" if mode != "real" else "runapi_openai"
+        alias = "mock" if mode != "real" else self._normalize_provider_alias(
+            self.text_provider,
+            capability="planning",
+            allowed={"runapi_openai"},
+        )
         return ResolvedProviderRoute(
             capability="planning",
             alias=alias,
             mode=mode,
             label="Mock Local" if alias == "mock" else alias,
-            source="fixed_v2_provider" if alias != "mock" else self.env_name_for("text_provider_mode"),
+            source=self.env_name_for("text_provider") if alias != "mock" else self.env_name_for("text_provider_mode"),
         )
 
     def resolve_image_provider_route(self) -> ResolvedProviderRoute:
         """解析图片 provider 路由。"""
 
         mode = self._normalize_mode(self.image_provider_mode)
-        alias = "mock" if mode != "real" else "runapi_gemini31"
+        alias = "mock" if mode != "real" else self._normalize_provider_alias(
+            self.image_provider,
+            capability="image",
+            allowed={"banana2", "runapi_gemini31"},
+        )
         return ResolvedProviderRoute(
             capability="image",
             alias=alias,
             mode=mode,
             label="Mock Local" if alias == "mock" else alias,
-            source="fixed_v2_provider" if alias != "mock" else self.env_name_for("image_provider_mode"),
+            source=self.env_name_for("image_provider") if alias != "mock" else self.env_name_for("image_provider_mode"),
         )
 
     def resolve_text_model_selection(self) -> ResolvedModelSelection:
@@ -166,7 +183,7 @@ class Settings(BaseSettings):
         route = self.resolve_text_provider_route()
         if route.alias == "mock":
             return ResolvedModelSelection("planning", "mock", "mock-local", "Mock Local", route.source)
-        model_id = "gpt-5-nano"
+        model_id = self.runapi_text_model
         return ResolvedModelSelection("planning", route.alias, model_id, self._label_for_model(model_id), "fixed_v2_model")
 
     def resolve_image_model_selection(self) -> ResolvedModelSelection:
@@ -175,7 +192,10 @@ class Settings(BaseSettings):
         route = self.resolve_image_provider_route()
         if route.alias == "mock":
             return ResolvedModelSelection("image", "mock", "mock-local", "Mock Local", route.source)
-        model_id = "gemini-3.1-flash-image-preview"
+        if route.alias == "banana2":
+            model_id = self.banana2_model
+        else:
+            model_id = self.runapi_image_model
         return ResolvedModelSelection("image", route.alias, model_id, self._label_for_model(model_id), "fixed_v2_model")
 
     def resolve_output_dimensions(self, *, aspect_ratio: str | None = None, image_size: str | None = None) -> tuple[int, int]:
@@ -191,6 +211,7 @@ class Settings(BaseSettings):
             "4:3": (2048, 1536),
             "16:9": (2048, 1152),
             "9:16": (1152, 2048),
+            "1:3": (1080, 3240),
         }
         if ratio not in size_map:
             raise RuntimeError(f"Unsupported aspect_ratio: {ratio}")
@@ -236,12 +257,22 @@ class Settings(BaseSettings):
             raise RuntimeError(f"Unsupported provider mode: {mode}")
         return mode
 
+    def _normalize_provider_alias(self, value: str, *, capability: str, allowed: set[str]) -> str:
+        """规范化 provider alias，避免无效值静默生效。"""
+
+        normalized = str(value or "").strip().lower()
+        if not normalized:
+            return "runapi_openai" if capability == "planning" else "banana2"
+        if normalized not in allowed:
+            return "runapi_openai" if capability == "planning" else "banana2"
+        return normalized
+
     def _label_for_model(self, model_id: str) -> str:
         normalized = str(model_id or "").strip().lower()
         if "gpt-5-nano" in normalized:
             return "GPT-5-Nano"
         if "gemini-3.1-flash-image-preview" in normalized:
-            return "Gemini 3.1 Flash Image Preview"
+            return "Banana2 / Gemini 3.1 Flash Image Preview"
         return model_id
 
 

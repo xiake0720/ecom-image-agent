@@ -12,128 +12,223 @@
 }
 ```
 
-- `code=0` 代表成功。
-- 业务错误由 `AppException` 返回非 0 `code`。
+## 2. 主图接口
 
-## 2. 接口清单
-
-### 2.1 健康检查
-- **方法**：`GET`
-- **路径**：`/api/health`
-- **说明**：服务存活检查。
-
-### 2.2 主图任务提交
-- **方法**：`POST`
-- **路径**：`/api/image/generate-main`
-- **Content-Type**：`multipart/form-data`
-- **文件字段**：
-  - `white_bg`（必填，单文件）
-  - `detail_files`（可选，多文件）
-  - `bg_files`（可选，多文件）
-- **文本字段**：
-  - `brand_name`（默认空）
-  - `product_name`（默认空）
-  - `category`（默认 `tea`）
-  - `platform`（默认 `tmall`）
-  - `style_type`（默认 `高端极简`）
-  - `style_notes`（默认空）
-  - `shot_count`（默认 `8`，范围 `1~12`）
-  - `aspect_ratio`（默认 `1:1`）
-  - `image_size`（默认 `2K`）
-- **成功返回 data（节选）**：`task_id`、`status`、`progress_percent`、`provider_label` 等任务摘要字段。
-
-### 2.3 详情页生成
-- **方法**：`POST`
-- **路径**：`/api/detail/generate`
-- **Body(JSON)**：
-  - `title`（必填）
-  - `subtitle`
-  - `selling_points: string[]`
+### 2.1 `POST /api/image/generate-main`
+- `Content-Type`：`multipart/form-data`
+- 文件字段：
+  - `white_bg` 必填
+  - `detail_files[]` 可选
+  - `bg_files[]` 可选
+- 文本字段：
+  - `brand_name`
+  - `product_name`
   - `category`
-  - `specs: [{name, value}]`
+  - `platform`
+  - `style_type`
+  - `style_notes`
+  - `shot_count`
+  - `aspect_ratio`
+  - `image_size`
+
+### 2.2 `GET /api/tasks`
+- 返回任务摘要列表。
+
+### 2.3 `GET /api/tasks/{task_id}`
+- 返回单个任务摘要。
+
+### 2.4 `GET /api/tasks/{task_id}/runtime`
+- 返回主图运行时聚合：
+  - `status`
+  - `progress_percent`
+  - `current_step`
+  - `current_step_label`
+  - `message`
+  - `queue_position`
+  - `queue_size`
+  - `provider_label`
+  - `model_label`
+  - `result_count_completed`
+  - `result_count_total`
+  - `export_zip_url`
+  - `full_bundle_zip_url`
+  - `qc_summary`
+  - `results[]`
+
+### 2.5 `GET /api/tasks/{task_id}/files/{file_name}`
+- 下载主图任务文件。
+
+## 3. 详情图接口
+
+### 3.1 `POST /api/detail/jobs`
+- 作用：执行完整 detail graph
+- `Content-Type`：`multipart/form-data`
+- 文件字段：
+  - `packaging_files[]`
+  - `dry_leaf_files[]`
+  - `tea_soup_files[]`
+  - `leaf_bottom_files[]`
+  - `scene_ref_files[]`
+  - `bg_ref_files[]`
+- 文本字段：
+  - `brand_name`
+  - `product_name`
+  - `tea_type`
+  - `platform`，当前默认 `tmall`
+  - `style_preset`，当前默认 `tea_tmall_premium_light`
   - `price_band`
-  - `platform`（默认 `tmall`）
-  - `style`（默认 `premium`）
+  - `target_slice_count`，当前支持 `4~6`
+  - `image_size`，当前默认 `2K`
   - `main_image_task_id`
-  - `main_images: string[]`
-  - `product_images: string[]`
-  - `optional_copy: string[]`
-- **成功返回 data**：`task_id`、`module_config_path`、`preview_data`、`export_assets`、`modules`。
+  - `selected_main_result_ids`，JSON 数组字符串
+  - `selling_points_json`，JSON 数组字符串
+  - `specs_json`，JSON 对象字符串
+  - `style_notes`
+  - `brew_suggestion`
+  - `extra_requirements`
+  - `prefer_main_result_first`
 
-### 2.4 任务列表
-- **方法**：`GET`
-- **路径**：`/api/tasks`
-- **说明**：返回任务摘要列表（按更新时间倒序）。
+返回 data：
 
-### 2.5 任务详情
-- **方法**：`GET`
-- **路径**：`/api/tasks/{task_id}`
-- **说明**：返回单任务摘要；任务不存在返回业务错误。
-
-### 2.6 主图运行时（工作台轮询）
-- **方法**：`GET`
-- **路径**：`/api/tasks/{task_id}/runtime`
-- **说明**：聚合 `task.json`、`prompt_plan_v2.json`、`qc_report.json`、结果目录与队列快照。
-- **返回核心字段**：
-  - 任务状态：`status`、`progress_percent`、`current_step`、`current_step_label`、`message`
-  - 队列信息：`queue_position`、`queue_size`
-  - 模型信息：`provider_label`、`model_label`
-  - 统计信息：`result_count_completed`、`result_count_total`
-  - 下载地址：`export_zip_url`、`full_bundle_zip_url`
-  - 质检摘要：`qc_summary`
-  - 结果卡片：`results[]`
-
-### 2.7 任务文件访问
-- **方法**：`GET`
-- **路径**：`/api/tasks/{task_id}/files/{file_name}`
-- **说明**：访问任务目录下真实文件，后端会校验路径不可越界。
-- **返回类型**：文件流（`FileResponse`）。
-
-### 2.8 模板接口
-- `GET /api/templates/main-images`：主图模板占位列表。
-- `GET /api/templates/detail-pages`：详情页模板列表（读取 `backend/templates/detail_pages/*.json`）。
-- `POST /api/templates/detail-pages/preview`：按输入返回详情页预览结构。
-
-### 2.9 静态资产访问
-- **方法**：`GET`
-- **路径**：`/api/assets/{file_name}`
-- **说明**：按文件名访问 `storage_root` 下文件。
-
-## 3. 典型示例
-
-### 3.1 主图提交（curl）
-```bash
-curl -X POST "http://127.0.0.1:8000/api/image/generate-main" \
-  -F "white_bg=@./demo/white_bg.png" \
-  -F "detail_files=@./demo/detail1.png" \
-  -F "bg_files=@./demo/bg1.png" \
-  -F "brand_name=示例品牌" \
-  -F "product_name=高山乌龙" \
-  -F "platform=tmall" \
-  -F "shot_count=8"
+```json
+{
+  "task_id": "detail_xxx",
+  "status": "created"
+}
 ```
 
-### 3.2 查询运行时
-```bash
-curl "http://127.0.0.1:8000/api/tasks/{task_id}/runtime"
-```
+### 3.2 `POST /api/detail/jobs/plan`
+- 作用：只执行到 `detail_generate_prompt`
+- 不执行：
+  - `detail_render_pages`
+  - `detail_run_qc`
+  - `detail_finalize`
 
-## 4. 错误说明
-- 参数校验失败：HTTP `422`。
-- 业务错误：HTTP `400`（例如任务不存在、文件不存在、模板不存在等）。
-- 未处理异常：HTTP `500`，返回统一错误文案。
+### 3.3 `GET /api/detail/jobs/{task_id}`
+- 返回详情图任务摘要。
 
+### 3.4 `GET /api/detail/jobs/{task_id}/runtime`
+- 返回 detail graph 运行时聚合，核心字段：
+  - `task_id`
+  - `status`
+  - `progress_percent`
+  - `current_stage`
+  - `current_stage_label`
+  - `message`
+  - `error_message`
+  - `generated_count`
+  - `planned_count`
+  - `plan`
+  - `copy_blocks`
+  - `prompt_plan`
+  - `qc_summary`
+  - `images`
+  - `export_zip_url`
 
-## 详情图任务 API（V2）
-- `POST /api/detail/jobs`：创建并执行详情图任务（multipart/form-data，支持 packaging_files / dry_leaf_files / tea_soup_files / leaf_bottom_files / scene_ref_files / bg_ref_files）。
-- `POST /api/detail/jobs/plan`：仅生成详情规划、文案和 prompt，不执行渲染。
-- `GET /api/detail/jobs/{task_id}`：查询详情图任务摘要。
-- `GET /api/detail/jobs/{task_id}/runtime`：查询详情图 runtime（阶段、规划、copy、prompt、QC、结果图、ZIP、失败 message）。
-- `GET /api/detail/jobs/{task_id}/files/{file_name}`：下载详情图任务文件。
+`plan` 结构核心字段：
+- `template_name`
+- `global_style_anchor`
+- `narrative`
+- `total_pages`
+- `total_screens`
+- `pages[]`
 
-### 详情图 runtime 关键字段补充
-- `message`：运行提示或失败原因，失败时透传 `task.json.error_message`。
-- `generated_count / planned_count`：已生成数量与规划数量。
-- `images[].status`：单页状态（`queued/running/completed/failed`）。
-- `images[].reference_roles`：该页绑定的参考角色（来自 prompt plan）。
-- `export_zip_url`：成功后可下载 `exports/detail_bundle.zip`。
+`copy_blocks[]` 结构核心字段：
+- `page_id`
+- `screen_id`
+- `headline`
+- `subheadline`
+- `selling_points`
+- `body_copy`
+- `parameter_copy`
+- `cta_copy`
+- `notes`
+
+`prompt_plan[]` 结构核心字段：
+- `page_id`
+- `page_title`
+- `global_style_anchor`
+- `screen_themes`
+- `layout_notes`
+- `prompt`
+- `negative_prompt`
+- `references[]`
+- `target_aspect_ratio`
+- `target_width`
+- `target_height`
+
+`qc_summary` 结构核心字段：
+- `passed`
+- `review_required`
+- `warning_count`
+- `failed_count`
+- `issues[]`
+- `checks[]`
+- `pages[]`
+
+`images[]` 结构核心字段：
+- `image_id`
+- `page_id`
+- `title`
+- `status`
+- `file_name`
+- `image_url`
+- `width`
+- `height`
+- `reference_roles`
+- `error_message`
+
+### 3.5 `GET /api/detail/jobs/{task_id}/files/{file_name}`
+- 下载详情图任务文件。
+
+## 4. detail graph 节点链路
+完整链路：
+1. `detail_ingest_assets`
+2. `detail_plan`
+3. `detail_generate_copy`
+4. `detail_generate_prompt`
+5. `detail_render_pages`
+6. `detail_run_qc`
+7. `detail_finalize`
+
+plan-only 链路：
+1. `detail_ingest_assets`
+2. `detail_plan`
+3. `detail_generate_copy`
+4. `detail_generate_prompt`
+
+## 5. mock / real 模式
+
+### 5.1 mock
+- `ECOM_IMAGE_AGENT_TEXT_PROVIDER_MODE=mock`
+- `ECOM_IMAGE_AGENT_IMAGE_PROVIDER_MODE=mock`
+
+说明：
+- mock text provider 返回稳定结构化 plan/copy/prompt
+- mock image provider 直接复制预置样张到 `generated/`
+- runtime、预览、下载、ZIP 仍走真实 detail graph 链路
+- mock mode 不再使用运行时 PIL 画占位详情长图
+
+### 5.2 real
+- `ECOM_IMAGE_AGENT_TEXT_PROVIDER_MODE=real`
+- `ECOM_IMAGE_AGENT_IMAGE_PROVIDER_MODE=real`
+- `ECOM_IMAGE_AGENT_IMAGE_PROVIDER=banana2`
+
+说明：
+- 文本规划/文案/prompt 继续走统一文本 provider/router
+- 图片渲染默认走 Banana2 provider
+- Banana2 provider 优先用 `ECOM_IMAGE_AGENT_GOOGLE_API_KEY`
+- 若未配置 Google API Key，则回退到 `ECOM_IMAGE_AGENT_RUNAPI_API_KEY` 对应的统一图片通道
+
+## 6. 模板与静态资源接口
+- `GET /api/templates/main-images`
+- `GET /api/templates/detail-pages`
+- `POST /api/templates/detail-pages/preview`
+- `GET /api/assets/{file_name}`
+
+## 7. 错误处理
+- 参数校验失败：HTTP `422`
+- 业务错误：HTTP `400`
+- 未处理异常：HTTP `500`
+
+detail 运行失败时，`runtime.message` 优先返回 `task.json.error_message`，前端中栏与右栏都会直接展示。

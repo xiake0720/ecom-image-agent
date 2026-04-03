@@ -15,8 +15,10 @@ from dataclasses import dataclass
 import logging
 
 from backend.engine.core.config import ResolvedModelSelection, ResolvedProviderRoute, Settings
+from backend.engine.providers.image.banana2_image import Banana2ImageProvider
 from backend.engine.providers.image.base import BaseImageProvider
 from backend.engine.providers.image.gemini_image import GeminiImageProvider
+from backend.engine.providers.image.gemini_image import MockBanana2ImageProvider
 from backend.engine.providers.image.runapi_gemini31_image import RunApiGemini31ImageProvider
 from backend.engine.providers.llm.base import BaseTextProvider
 from backend.engine.providers.llm.gemini_text import GeminiTextProvider
@@ -87,7 +89,9 @@ def _build_image_provider(
     route = settings.resolve_image_provider_route()
     selection = settings.resolve_image_model_selection()
     if route.mode != "real" or route.alias == "mock":
-        return GeminiImageProvider(), route, "mock-local", selection
+        return MockBanana2ImageProvider(), route, "mock-local", selection
+    if route.alias == "banana2":
+        return Banana2ImageProvider(settings), route, "ready", selection
     if route.alias == "runapi_gemini31":
         return RunApiGemini31ImageProvider(settings), route, "ready", selection
     raise RuntimeError(f"Unsupported image provider alias: {route.alias}")

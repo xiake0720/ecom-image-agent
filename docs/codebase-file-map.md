@@ -1,94 +1,93 @@
-# 代码地图（面向新接手开发）
+# 代码地图
 
-## 1. 根目录关键入口
-- `AGENTS.md`：仓库执行规范（Codex/人工均需遵守）。
-- `README.md`：项目启动与总览文档。
-- `backend/main.py`：FastAPI 应用入口。
-- `frontend/src/main.tsx`：React 应用入口。
+## 1. 根目录入口
+- [`README.md`](/D:/python/ecom-image-agent/README.md)：项目总览与启动方式
+- [`AGENTS.md`](/D:/python/ecom-image-agent/AGENTS.md)：仓库执行规范
+- [`backend/main.py`](/D:/python/ecom-image-agent/backend/main.py)：FastAPI 应用入口
+- [`frontend/src/main.tsx`](/D:/python/ecom-image-agent/frontend/src/main.tsx)：React 应用入口
 
-## 2. 后端目录说明
+## 2. 后端 API 层
+- [`backend/api/image.py`](/D:/python/ecom-image-agent/backend/api/image.py)：主图任务提交
+- [`backend/api/tasks.py`](/D:/python/ecom-image-agent/backend/api/tasks.py)：主图任务列表、runtime、文件访问
+- [`backend/api/detail_jobs.py`](/D:/python/ecom-image-agent/backend/api/detail_jobs.py)：详情图任务 API
+- [`backend/api/detail.py`](/D:/python/ecom-image-agent/backend/api/detail.py)：旧详情页 JSON 生成接口
+- [`backend/api/templates.py`](/D:/python/ecom-image-agent/backend/api/templates.py)：模板列表与详情页预览
 
-### 2.1 `backend/api/`
-- `health.py`：健康检查接口。
-- `image.py`：主图任务提交接口。
-- `detail.py`：详情页生成接口。
-- `tasks.py`：任务列表、任务详情、runtime、任务文件访问。
-- `templates.py`：模板列表与详情页预览接口。
-- `assets.py`：静态资产访问。
+## 3. 后端服务层
 
-### 2.2 `backend/services/`
-- `main_image_service.py`：主图任务创建、落盘、队列执行入口。
-- `task_queue_service.py`：进程内队列与 worker。
-- `task_runtime_service.py`：工作台 runtime 聚合。
-- `detail_page_service.py`：详情页模块化 JSON 生成。
-- `template_service.py`：模板读取服务。
+### 3.1 主图
+- [`backend/services/main_image_service.py`](/D:/python/ecom-image-agent/backend/services/main_image_service.py)：主图任务创建与 workflow 执行入口
+- [`backend/services/task_queue_service.py`](/D:/python/ecom-image-agent/backend/services/task_queue_service.py)：主图进程内队列
+- [`backend/services/task_runtime_service.py`](/D:/python/ecom-image-agent/backend/services/task_runtime_service.py)：主图 runtime 聚合
 
-### 2.3 `backend/schemas/`
-- `task.py`：主图提交、任务摘要、runtime、详情页生成等 schema。
+### 3.2 详情图
+- [`backend/services/detail_page_job_service.py`](/D:/python/ecom-image-agent/backend/services/detail_page_job_service.py)：详情图任务创建、素材落盘、detail graph 执行入口
+- [`backend/services/detail_runtime_service.py`](/D:/python/ecom-image-agent/backend/services/detail_runtime_service.py)：详情图 runtime 聚合
+- [`backend/services/detail_planner_service.py`](/D:/python/ecom-image-agent/backend/services/detail_planner_service.py)：导演 Agent 的 plan 生成服务
+- [`backend/services/detail_copy_service.py`](/D:/python/ecom-image-agent/backend/services/detail_copy_service.py)：导演 Agent 的 copy 生成服务
+- [`backend/services/detail_prompt_service.py`](/D:/python/ecom-image-agent/backend/services/detail_prompt_service.py)：导演 Agent 的 render prompt 生成服务
+- [`backend/services/detail_render_service.py`](/D:/python/ecom-image-agent/backend/services/detail_render_service.py)：详情图 provider 渲染、render report 与 ZIP
+- [`backend/services/detail_page_service.py`](/D:/python/ecom-image-agent/backend/services/detail_page_service.py)：旧详情页模块化预览服务
+- [`backend/services/template_service.py`](/D:/python/ecom-image-agent/backend/services/template_service.py)：模板读取
 
-### 2.4 `backend/repositories/`
-- `task_repository.py`：任务索引 `storage/tasks/index.json` 的读写与补全。
+## 4. schema 与仓储
+- [`backend/schemas/task.py`](/D:/python/ecom-image-agent/backend/schemas/task.py)：主图任务 schema
+- [`backend/schemas/detail.py`](/D:/python/ecom-image-agent/backend/schemas/detail.py)：详情图 plan/copy/prompt/render/qc/runtime schema
+- [`backend/repositories/task_repository.py`](/D:/python/ecom-image-agent/backend/repositories/task_repository.py)：任务索引 `storage/tasks/index.json` 的读写
 
-### 2.5 `backend/engine/`
-- 主图生成引擎目录（workflow、provider、domain、渲染、存储）。
-- `workflows/graph.py` 为主图 workflow 编排入口。
+## 5. engine 核心
 
-### 2.6 `backend/templates/`
-- `detail_pages/*.json`：详情页模板资源。
+### 5.1 workflow
+- [`backend/engine/workflows/graph.py`](/D:/python/ecom-image-agent/backend/engine/workflows/graph.py)：main graph
+- [`backend/engine/workflows/state.py`](/D:/python/ecom-image-agent/backend/engine/workflows/state.py)：main graph state
+- [`backend/engine/workflows/detail_graph.py`](/D:/python/ecom-image-agent/backend/engine/workflows/detail_graph.py)：detail graph
+- [`backend/engine/workflows/detail_state.py`](/D:/python/ecom-image-agent/backend/engine/workflows/detail_state.py)：detail graph state
+- [`backend/engine/workflows/nodes/`](/D:/python/ecom-image-agent/backend/engine/workflows/nodes)：主图节点
+- [`backend/engine/workflows/detail_nodes/`](/D:/python/ecom-image-agent/backend/engine/workflows/detail_nodes)：详情图节点
 
-## 3. 前端目录说明
+### 5.2 provider/router
+- [`backend/engine/providers/router.py`](/D:/python/ecom-image-agent/backend/engine/providers/router.py)：统一 capability 路由
+- [`backend/engine/providers/image/banana2_image.py`](/D:/python/ecom-image-agent/backend/engine/providers/image/banana2_image.py)：Banana2 图片 provider
+- [`backend/engine/providers/image/gemini_image.py`](/D:/python/ecom-image-agent/backend/engine/providers/image/gemini_image.py)：mock Banana2 图片 provider
+- [`backend/engine/providers/image/runapi_gemini31_image.py`](/D:/python/ecom-image-agent/backend/engine/providers/image/runapi_gemini31_image.py)：保留的旧图片 provider
+- [`backend/engine/providers/llm/gemini_text.py`](/D:/python/ecom-image-agent/backend/engine/providers/llm/gemini_text.py)：mock text provider
+- [`backend/engine/providers/llm/runapi_openai_text.py`](/D:/python/ecom-image-agent/backend/engine/providers/llm/runapi_openai_text.py)：real text provider
 
-### 3.1 `frontend/src/pages/`
-- `MainImagePage.tsx`：主图提交/轮询/结果展示（接入统一壳层）。
-- `DetailPageGeneratorPage.tsx`：详情图工作台页面（主图图卡导入、规划/生成反馈、中栏结果联动）。
-- `DetailPageGeneratorPage.css`：详情图工作台专属三栏与卡片样式。
-- `TemplatesPage.tsx`：模板中心（筛选 + 模板卡片）。
-- `PreviewPage.tsx`：预览中心（任务分组 + 大图预览）。
-- `AssetsLibraryPage.tsx`：资源库页（分类/筛选/卡片网格）。
-- `DashboardPage.tsx`：数据中心（统计卡片 + 趋势图 + 榜单）。
-- `SettingsPage.tsx`：系统设置（左菜单 + 模型路由表单）。
-- `TasksPage.tsx`：历史任务。
-- `LoginPage.tsx`：登录页。
+### 5.3 底层服务
+- [`backend/engine/services/storage/local_storage.py`](/D:/python/ecom-image-agent/backend/engine/services/storage/local_storage.py)：本地存储与 JSON artifact 落盘
+- [`backend/engine/core/config.py`](/D:/python/ecom-image-agent/backend/engine/core/config.py)：provider/router、尺寸与模型配置
+- [`backend/engine/core/paths.py`](/D:/python/ecom-image-agent/backend/engine/core/paths.py)：任务目录路径工具
 
-### 3.2 `frontend/src/services/`
-- `http.ts`：统一 axios 实例与 URL 解析。
-- `mainImageApi.ts`：主图提交 API。
-- `taskApi.ts`：任务查询与 runtime 查询 API。
+## 6. 模板与 mock 资源
+- [`backend/templates/detail_pages/tea_tmall_premium_v1.json`](/D:/python/ecom-image-agent/backend/templates/detail_pages/tea_tmall_premium_v1.json)：茶叶天猫高端 detail 模板
+- [`assets/mock/banana2/`](/D:/python/ecom-image-agent/assets/mock/banana2)：mock Banana2 长图样张
 
-### 3.3 `frontend/src/components/`
-- `Layout.tsx`：路由容器。
-- `layout/AppTopBar.tsx`：统一顶部任务栏。
-- `layout/PageShell.tsx`：统一页面外壳。
-- `common/PageHeader.tsx`、`common/SectionCard.tsx`：通用标题/卡片组件。
+## 7. 前端页面
+- [`frontend/src/pages/MainImagePage.tsx`](/D:/python/ecom-image-agent/frontend/src/pages/MainImagePage.tsx)：主图工作台
+- [`frontend/src/pages/DetailPageGeneratorPage.tsx`](/D:/python/ecom-image-agent/frontend/src/pages/DetailPageGeneratorPage.tsx)：详情图正式工作台
+- [`frontend/src/pages/DetailPageGeneratorPage.css`](/D:/python/ecom-image-agent/frontend/src/pages/DetailPageGeneratorPage.css)：详情图工作台专属样式
 
-### 3.4 `frontend/src/mocks/`
-- `mainImageMock.ts`、`detailEditorMock.ts`、`templateCenterMock.ts`、`previewCenterMock.ts`、`settingsMock.ts`、`dashboardMock.ts`、`assetsLibraryMock.ts`、`sharedMock.ts`：页面 mock 数据集中管理。
+## 8. 前端 detail 组件
+- [`frontend/src/components/detail/DetailTaskSourcePicker.tsx`](/D:/python/ecom-image-agent/frontend/src/components/detail/DetailTaskSourcePicker.tsx)：主图任务来源选择
+- [`frontend/src/components/detail/DetailMainResultGallery.tsx`](/D:/python/ecom-image-agent/frontend/src/components/detail/DetailMainResultGallery.tsx)：主图结果图卡多选
+- [`frontend/src/components/detail/DetailAssetUploader.tsx`](/D:/python/ecom-image-agent/frontend/src/components/detail/DetailAssetUploader.tsx)：详情图素材上传器
+- [`frontend/src/components/detail/DetailProductForm.tsx`](/D:/python/ecom-image-agent/frontend/src/components/detail/DetailProductForm.tsx)：商品信息表单
+- [`frontend/src/components/detail/DetailGoalForm.tsx`](/D:/python/ecom-image-agent/frontend/src/components/detail/DetailGoalForm.tsx)：目标与额外要求表单
+- [`frontend/src/components/detail/DetailPlanPreview.tsx`](/D:/python/ecom-image-agent/frontend/src/components/detail/DetailPlanPreview.tsx)：规划预览
+- [`frontend/src/components/detail/DetailCopyPreview.tsx`](/D:/python/ecom-image-agent/frontend/src/components/detail/DetailCopyPreview.tsx)：文案预览
+- [`frontend/src/components/detail/DetailPromptPreview.tsx`](/D:/python/ecom-image-agent/frontend/src/components/detail/DetailPromptPreview.tsx)：Prompt 摘要预览
+- [`frontend/src/components/detail/DetailResultGallery.tsx`](/D:/python/ecom-image-agent/frontend/src/components/detail/DetailResultGallery.tsx)：结果图画廊
+- [`frontend/src/components/detail/DetailRuntimeSidebar.tsx`](/D:/python/ecom-image-agent/frontend/src/components/detail/DetailRuntimeSidebar.tsx)：运行时侧栏
 
-### 3.5 `frontend/src/types/`
-- `api.ts`：前端 API contract 类型。
+## 9. 前端 API 与类型
+- [`frontend/src/services/detailPageApi.ts`](/D:/python/ecom-image-agent/frontend/src/services/detailPageApi.ts)：详情图 API 封装
+- [`frontend/src/types/detail.ts`](/D:/python/ecom-image-agent/frontend/src/types/detail.ts)：详情图前端 contract
+- [`frontend/src/services/taskApi.ts`](/D:/python/ecom-image-agent/frontend/src/services/taskApi.ts)：主图任务 API
+- [`frontend/src/types/api.ts`](/D:/python/ecom-image-agent/frontend/src/types/api.ts)：主图任务类型
 
-## 4. 数据与产物目录
-- `storage/tasks/index.json`：任务摘要索引。
-- `outputs/tasks/{task_id}/`：任务全量产物（输入、生成、导出、中间 JSON）。
-
-## 5. 文档目录建议阅读顺序
-1. `docs/architecture.md`
-2. `docs/workflow.md`
-3. `docs/api.md`
-4. `docs/frontend-workbench.md`
-5. `docs/storage.md`
-6. `docs/development-rules.md`
-
-
-## 详情图 V2 新增文件
-- `backend/api/detail_jobs.py`：详情图任务接口。
-- `backend/schemas/detail.py`：详情图专属 schema。
-- `backend/services/detail_page_job_service.py`：详情图任务创建/调度/落盘。
-- `backend/services/detail_runtime_service.py`：详情图 runtime 聚合。
-- `backend/services/detail_planner_service.py`：规划生成。
-- `backend/services/detail_copy_service.py`：结构化文案生成。
-- `backend/services/detail_prompt_service.py`：prompt 计划生成。
-- `backend/services/detail_render_service.py`：详情图模型渲染与 ZIP（复用主图 provider 路由，不再使用占位画布）。
-- `frontend/src/services/detailPageApi.ts`：详情图前端 API 封装。
-- `frontend/src/types/detail.ts`：详情图前端类型。
-- `backend/templates/detail_pages/tea_tmall_premium_v1.json`：茶叶天猫高端模板。
+## 10. 文档建议阅读顺序
+1. [`docs/architecture.md`](/D:/python/ecom-image-agent/docs/architecture.md)
+2. [`docs/workflow.md`](/D:/python/ecom-image-agent/docs/workflow.md)
+3. [`docs/api.md`](/D:/python/ecom-image-agent/docs/api.md)
+4. [`docs/frontend-workbench.md`](/D:/python/ecom-image-agent/docs/frontend-workbench.md)
+5. [`docs/storage.md`](/D:/python/ecom-image-agent/docs/storage.md)

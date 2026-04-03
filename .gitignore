@@ -20,3 +20,4 @@ outputs/exports/*
 /outputs/
 /backend/outputs/*
 /frontend/node_modules/*
+/backend/templates/
