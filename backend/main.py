@@ -9,7 +9,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.api import assets, detail, health, image, tasks, templates
+from backend.api import assets, detail, detail_jobs, health, image, tasks, templates
 from backend.core.config import get_settings
 from backend.core.exceptions import AppException
 from backend.core.logging import setup_logging
@@ -32,6 +32,7 @@ app.add_middleware(
 app.include_router(health.router, prefix=settings.api_prefix)
 app.include_router(image.router, prefix=settings.api_prefix)
 app.include_router(detail.router, prefix=settings.api_prefix)
+app.include_router(detail_jobs.router, prefix=settings.api_prefix)
 app.include_router(tasks.router, prefix=settings.api_prefix)
 app.include_router(templates.router, prefix=settings.api_prefix)
 app.include_router(assets.router, prefix=settings.api_prefix)

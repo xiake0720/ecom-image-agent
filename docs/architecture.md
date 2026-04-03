@@ -58,3 +58,10 @@
 - 任务产物：`outputs/tasks/{task_id}/`
   - 常见子目录：`inputs/`、`generated/`、`final/`、`exports/`
 - 模板文件：`backend/templates/detail_pages/*.json`
+
+
+## 新增：detail_page_v2 独立任务流
+- 入口：`/api/detail/jobs` 与 `/api/detail/jobs/plan`。
+- 与主图关系：仅可引用主图结果文件作为素材，不耦合 workflow，不共享 runtime 字段。
+- 任务目录：`outputs/tasks/{task_id}/inputs|plan|generated|qc|exports`。
+- 产物：规划 JSON、文案 JSON、prompt JSON、QC JSON、详情图 PNG 与 ZIP。

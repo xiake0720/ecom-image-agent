@@ -117,3 +117,9 @@ npm run dev
 - 禁止事项；
 - 文档同步规则；
 - 提交前检查清单。
+
+
+## 12. 茶叶详情图 V1（新增）
+- 详情图任务与主图任务完全独立：独立 task_id、独立 runtime、独立产物目录。
+- 支持从主图结果导入为 `main_result` 参考素材，但不会回写主图任务状态。
+- 任务产物新增：`inputs/request_payload.json`、`inputs/asset_manifest.json`、`plan/detail_plan.json`、`plan/detail_copy_plan.json`、`plan/detail_prompt_plan.json`、`qc/detail_qc_report.json`、`exports/detail_bundle.zip`。

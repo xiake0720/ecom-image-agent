@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import { submitMainImageTask } from "../services/mainImageApi";
 import { fetchTaskRuntime } from "../services/taskApi";
 import type { RuntimeResultStatus, TaskRuntimePayload, TaskRuntimeResult, TaskStatus } from "../types/api";
@@ -62,6 +63,7 @@ const IMAGE_SIZE_OPTIONS = ["2K"];
  * 职责：保持现有工作台结构不变，把真实提交、队列观测、下载能力和背景参考图上传接到当前页面。
  */
 export function MainImagePage() {
+  const navigate = useNavigate();
   const [brandName, setBrandName] = useState("");
   const [productName, setProductName] = useState("");
   const [whiteBg, setWhiteBg] = useState<File | null>(null);
@@ -418,7 +420,7 @@ export function MainImagePage() {
               <button className="btn-primary" onClick={submit} disabled={isSubmitting}>
                 {isSubmitting ? "提交中..." : "开始生成"}
               </button>
-              <button className="btn-secondary" type="button">
+              <button className="btn-secondary" type="button" onClick={() => navigate(`/detail-pages${activeTaskId ? `?main_task_id=${activeTaskId}` : ""}`)}>
                 生成详情页方案
               </button>
             </div>
