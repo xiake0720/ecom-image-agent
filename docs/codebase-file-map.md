@@ -77,3 +77,17 @@
 4. `docs/frontend-workbench.md`
 5. `docs/storage.md`
 6. `docs/development-rules.md`
+
+
+## 详情图 V2 新增文件
+- `backend/api/detail_jobs.py`：详情图任务接口。
+- `backend/schemas/detail.py`：详情图专属 schema。
+- `backend/services/detail_page_job_service.py`：详情图任务创建/调度/落盘。
+- `backend/services/detail_runtime_service.py`：详情图 runtime 聚合。
+- `backend/services/detail_planner_service.py`：规划生成。
+- `backend/services/detail_copy_service.py`：结构化文案生成。
+- `backend/services/detail_prompt_service.py`：prompt 计划生成。
+- `backend/services/detail_render_service.py`：V1 详情图渲染与 ZIP。
+- `frontend/src/services/detailPageApi.ts`：详情图前端 API 封装。
+- `frontend/src/types/detail.ts`：详情图前端类型。
+- `backend/templates/detail_pages/tea_tmall_premium_v1.json`：茶叶天猫高端模板。

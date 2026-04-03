@@ -1,0 +1,40 @@
+{
+  "name": "tea_tmall_premium_v1",
+  "platform": "tmall",
+  "category": "tea",
+  "supported_style_presets": [
+    "tea_tmall_premium_light",
+    "tea_tmall_premium_dark"
+  ],
+  "default_style_preset": "tea_tmall_premium_light",
+  "recommended_page_count": {
+    "min": 4,
+    "max": 6
+  },
+  "global_style_anchor": "浅暖米金底色、茶感材质、留白克制、中文排版清晰、整套连续叙事",
+  "color_keywords": ["米白", "岩茶褐", "茶汤琥珀", "竹青"],
+  "font_tone": "标题克制有力量，副标题真实简洁，不夸张功效",
+  "module_recommendations": [
+    "品牌与包装首屏",
+    "核心卖点",
+    "茶干条索",
+    "茶汤质感",
+    "叶底与工艺",
+    "参数与冲泡建议",
+    "场景与人群",
+    "发货与售后"
+  ],
+  "planner_prompt_template": "请围绕茶叶类目和天猫高端详情图，输出 8-12 屏规划，保证每两屏合并成一张 1:3 长图，强调风格统一。",
+  "copy_prompt_template": "请为每一屏输出结构化中文文案，语气克制真实，避免夸张和医疗化表述。",
+  "prompt_prompt_template": "请生成每张 1:3 长图可直接用于图像模型的完整 prompt，并附包装不变形、中文可读、风格连续的约束。",
+  "screen_blueprint": [
+    {"theme": "品牌首屏", "screen_type": "visual", "preferred_roles": ["main_result", "packaging"]},
+    {"theme": "核心卖点", "screen_type": "info", "preferred_roles": ["packaging", "scene_ref"]},
+    {"theme": "茶干条索", "screen_type": "visual", "preferred_roles": ["dry_leaf", "packaging"]},
+    {"theme": "茶汤展示", "screen_type": "visual", "preferred_roles": ["tea_soup", "bg_ref"]},
+    {"theme": "叶底与工艺", "screen_type": "info", "preferred_roles": ["leaf_bottom", "scene_ref"]},
+    {"theme": "参数与冲泡", "screen_type": "info", "preferred_roles": ["packaging", "tea_soup"]},
+    {"theme": "场景与人群", "screen_type": "visual", "preferred_roles": ["scene_ref", "bg_ref"]},
+    {"theme": "发货售后", "screen_type": "info", "preferred_roles": ["packaging"]}
+  ]
+}

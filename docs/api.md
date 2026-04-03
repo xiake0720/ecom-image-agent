@@ -122,3 +122,11 @@ curl "http://127.0.0.1:8000/api/tasks/{task_id}/runtime"
 - 参数校验失败：HTTP `422`。
 - 业务错误：HTTP `400`（例如任务不存在、文件不存在、模板不存在等）。
 - 未处理异常：HTTP `500`，返回统一错误文案。
+
+
+## 详情图任务 API（V2）
+- `POST /api/detail/jobs`：创建并执行详情图任务（multipart/form-data，支持 packaging_files / dry_leaf_files / tea_soup_files / leaf_bottom_files / scene_ref_files / bg_ref_files）。
+- `POST /api/detail/jobs/plan`：仅生成详情规划、文案和 prompt，不执行渲染。
+- `GET /api/detail/jobs/{task_id}`：查询详情图任务摘要。
+- `GET /api/detail/jobs/{task_id}/runtime`：查询详情图 runtime（阶段、规划、copy、prompt、QC、结果图、ZIP）。
+- `GET /api/detail/jobs/{task_id}/files/{file_name}`：下载详情图任务文件。
