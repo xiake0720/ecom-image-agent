@@ -67,7 +67,9 @@ npm run dev
 ## 7. 当前核心 API 能力概览
 - 健康检查：`GET /api/health`
 - 主图任务提交：`POST /api/image/generate-main`
-- 详情页生成：`POST /api/detail/generate`
+- 详情图任务创建：`POST /api/detail/jobs`
+- 详情图规划创建：`POST /api/detail/jobs/plan`
+- 详情图运行时：`GET /api/detail/jobs/{task_id}/runtime`
 - 任务列表：`GET /api/tasks`
 - 任务详情：`GET /api/tasks/{task_id}`
 - 主图运行时：`GET /api/tasks/{task_id}/runtime`
@@ -83,7 +85,7 @@ npm run dev
 ## 8. 当前前端页面路由
 - `/login` 登录页
 - `/main-images` 主图生成工作台
-- `/detail-pages` 详情长图编辑页（mock 三栏联动）
+- `/detail-pages` 茶叶详情图工作台（三栏可观测任务页）
 - `/templates` 模板中心（mock 筛选）
 - `/preview` 预览中心（mock 任务切换）
 - `/tasks` 历史任务
@@ -119,7 +121,9 @@ npm run dev
 - 提交前检查清单。
 
 
-## 12. 茶叶详情图 V1（新增）
+## 12. 茶叶详情图 V2（当前实现）
 - 详情图任务与主图任务完全独立：独立 task_id、独立 runtime、独立产物目录。
-- 支持从主图结果导入为 `main_result` 参考素材，但不会回写主图任务状态。
+- 支持从主图任务 runtime 导入 completed 结果图，前端以图卡方式多选并写入 `main_result` 参考素材，不会回写主图任务状态。
 - 任务产物新增：`inputs/request_payload.json`、`inputs/asset_manifest.json`、`plan/detail_plan.json`、`plan/detail_copy_plan.json`、`plan/detail_prompt_plan.json`、`qc/detail_qc_report.json`、`exports/detail_bundle.zip`。
+- 详情图最终渲染已切换为模型调用（复用 `backend/engine/providers/router.py` 的图片 provider 路由）；不再使用 PIL 占位图冒充结果。
+- 详情图 runtime 会透传任务失败错误信息（来自 `task.json.error_message`），前端在中栏与右栏都可感知错误态。

@@ -32,16 +32,19 @@ class DetailRuntimeService:
         copy_blocks = self._load_json_list(task_dir / "plan" / "detail_copy_plan.json", DetailPageCopyBlock)
         prompt_plan = self._load_json_list(task_dir / "plan" / "detail_prompt_plan.json", DetailPagePromptPlanItem)
         qc_summary = self._load_qc_summary(task_dir / "qc" / "detail_qc_report.json")
-        images = self._load_images(summary.task_id, task_dir, prompt_plan)
+        render_rows = self._load_render_report(task_dir / "generated" / "detail_render_report.json")
+        images = self._load_images(summary.task_id, task_dir, prompt_plan, render_rows)
         planned_count = plan.total_pages if plan else len(prompt_plan)
         generated_count = sum(1 for image in images if image.status == "completed")
+        task_error_message = self._load_task_error_message(task_dir)
+        runtime_message = self._resolve_runtime_message(status=summary.status, task_error_message=task_error_message)
         return DetailPageRuntimePayload(
             task_id=summary.task_id,
             status=summary.status,
             progress_percent=summary.progress_percent,
             current_stage=summary.current_step,
             current_stage_label=summary.current_step_label,
-            message="详情图任务运行中" if summary.status in {"created", "running"} else "详情图任务已完成" if summary.status == "completed" else "详情图任务失败",
+            message=runtime_message,
             generated_count=generated_count,
             planned_count=planned_count,
             plan=plan,
@@ -84,10 +87,18 @@ class DetailRuntimeService:
         payload = json.loads(path.read_text(encoding="utf-8"))
         return DetailPageQCSummary.model_validate(payload)
 
-    def _load_images(self, task_id: str, task_dir: Path, prompt_plan: list[DetailPagePromptPlanItem]) -> list[DetailPageRuntimeImage]:
+    def _load_images(
+        self,
+        task_id: str,
+        task_dir: Path,
+        prompt_plan: list[DetailPagePromptPlanItem],
+        render_rows: dict[str, dict[str, object]],
+    ) -> list[DetailPageRuntimeImage]:
         generated = sorted((task_dir / "generated").glob("*.png"))
         rows: list[DetailPageRuntimeImage] = []
         for index, item in enumerate(prompt_plan, start=1):
+            render_row = render_rows.get(item.page_id, {})
+            render_status = str(render_row.get("status", "")).strip()
             image_path = generated[index - 1] if index - 1 < len(generated) else None
             if image_path and image_path.exists():
                 width, height = self._size_of(image_path)
@@ -104,6 +115,16 @@ class DetailRuntimeService:
                         reference_roles=[ref.role for ref in item.references],
                     )
                 )
+            elif render_status == "failed":
+                rows.append(
+                    DetailPageRuntimeImage(
+                        image_id=f"detail-{index:02d}",
+                        page_id=item.page_id,
+                        title=item.page_title,
+                        status="failed",
+                        reference_roles=[ref.role for ref in item.references],
+                    )
+                )
             else:
                 rows.append(
                     DetailPageRuntimeImage(
@@ -114,6 +135,41 @@ class DetailRuntimeService:
                     )
                 )
         return rows
+
+    def _load_render_report(self, path: Path) -> dict[str, dict[str, object]]:
+        """读取渲染报告，透出单页状态。"""
+
+        if not path.exists():
+            return {}
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, list):
+            return {}
+        rows: dict[str, dict[str, object]] = {}
+        for item in payload:
+            if isinstance(item, dict) and isinstance(item.get("page_id"), str):
+                rows[item["page_id"]] = item
+        return rows
+
+    def _load_task_error_message(self, task_dir: Path) -> str:
+        """从 task.json 提取失败信息。"""
+
+        task_file = task_dir / "task.json"
+        if not task_file.exists():
+            return ""
+        payload = json.loads(task_file.read_text(encoding="utf-8"))
+        error_message = payload.get("error_message")
+        return str(error_message).strip() if error_message else ""
+
+    def _resolve_runtime_message(self, *, status: str, task_error_message: str) -> str:
+        """根据任务状态返回更明确的用户可读信息。"""
+
+        if status in {"created", "running"}:
+            return "详情图任务运行中"
+        if status == "completed":
+            return "详情图任务已完成"
+        if status == "failed":
+            return task_error_message or "详情图任务失败，请检查渲染日志与模型配置。"
+        return "详情图任务状态未知"
 
     def _resolve_export_url(self, task_id: str, task_dir: Path) -> str:
         path = task_dir / "exports" / "detail_bundle.zip"
@@ -131,4 +187,3 @@ class DetailRuntimeService:
                 return image.size
         except OSError:
             return None, None
-
