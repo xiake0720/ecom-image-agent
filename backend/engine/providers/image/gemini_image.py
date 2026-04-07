@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 from PIL import Image
 
+from backend.engine.core.config import get_settings
 from backend.engine.domain.asset import Asset
 from backend.engine.domain.generation_result import GeneratedImage, GenerationResult
 from backend.engine.domain.image_prompt_plan import ImagePromptPlan
@@ -39,10 +39,16 @@ class MockBanana2ImageProvider(BaseImageProvider):
         del reference_assets, background_style_assets
         output_dir.mkdir(parents=True, exist_ok=True)
         images: list[GeneratedImage] = []
+        settings = get_settings()
         for index, prompt in enumerate(plan.prompts, start=1):
             sample = self._resolve_sample_path(index=index)
             output_path = output_dir / f"{index:02d}_{prompt.shot_id}.png"
-            width, height = self._copy_sample(sample, output_path)
+            width, height = self._copy_sample(
+                sample,
+                output_path,
+                aspect_ratio=settings.default_image_aspect_ratio,
+                image_size=settings.default_image_size,
+            )
             images.append(
                 GeneratedImage(
                     shot_id=prompt.shot_id,
@@ -70,7 +76,7 @@ class MockBanana2ImageProvider(BaseImageProvider):
         for index, shot in enumerate(prompt_plan.shots, start=1):
             sample = self._resolve_sample_path(index=index)
             output_path = output_dir / f"{index:02d}_{shot.shot_id}.png"
-            width, height = self._copy_sample(sample, output_path)
+            width, height = self._copy_sample(sample, output_path, aspect_ratio=shot.aspect_ratio, image_size=shot.image_size)
             images.append(
                 GeneratedImage(
                     shot_id=shot.shot_id,
@@ -110,9 +116,15 @@ class MockBanana2ImageProvider(BaseImageProvider):
             raise RuntimeError(f"Mock Banana2 assets are missing under: {sample_dir}")
         return candidates[(index - 1) % len(candidates)]
 
-    def _copy_sample(self, sample: Path, output_path: Path) -> tuple[int, int]:
+    def _copy_sample(self, sample: Path, output_path: Path, *, aspect_ratio: str, image_size: str) -> tuple[int, int]:
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(sample, output_path)
+        target_width, target_height = get_settings().resolve_output_dimensions(
+            aspect_ratio=aspect_ratio,
+            image_size=image_size,
+        )
+        with Image.open(sample) as image:
+            resized = image.convert("RGB").resize((target_width, target_height))
+            resized.save(output_path)
         with Image.open(output_path) as image:
             width, height = image.size
         return width, height

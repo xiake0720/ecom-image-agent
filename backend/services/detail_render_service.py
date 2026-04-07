@@ -27,7 +27,7 @@ class DetailRenderService:
     - 统一落盘真实模型结果或 mock provider 结果；
     - 写出逐页 render report。
 
-    这里不做任何本地叠字、拼图或占位长图合成。
+    这里不做任何本地叠字、拼图或占位图合成。
     """
 
     def render_pages(

@@ -24,7 +24,7 @@ export function TemplatesPage() {
     <PageShell activeKey="templates">
       <PageHeader
         title="模板中心"
-        subtitle="管理主图模板与详情长图模板"
+        subtitle="管理主图模板与详情图模板"
         actions={
           <>
             <button className="btn-secondary">导入模板</button>

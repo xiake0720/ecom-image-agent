@@ -132,7 +132,7 @@ detail 不再单独维护一套 mock 开关，直接复用主图同一套 provid
   - `qc/detail_qc_report.json`
 - detail 最终导出：
   - `exports/detail_bundle.zip`
-- detail mock mode 已改成 provider 级 mock，不再使用运行时 PIL 拼接详情长图
+- detail mock mode 已改成 provider 级 mock，不再使用运行时 PIL 拼接详情图
 - 前端 `/detail-pages` 已重构为三栏工作台，支持：
   - 主图结果导入
   - 规划/文案/prompt 预览

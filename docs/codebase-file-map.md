@@ -60,7 +60,7 @@
 
 ## 6. 模板与 mock 资源
 - [`backend/templates/detail_pages/tea_tmall_premium_v1.json`](/D:/python/ecom-image-agent/backend/templates/detail_pages/tea_tmall_premium_v1.json)：茶叶天猫高端 detail 模板
-- [`assets/mock/banana2/`](/D:/python/ecom-image-agent/assets/mock/banana2)：mock Banana2 长图样张
+- [`assets/mock/banana2/`](/D:/python/ecom-image-agent/assets/mock/banana2)：mock Banana2 详情图样张
 
 ## 7. 前端页面
 - [`frontend/src/pages/MainImagePage.tsx`](/D:/python/ecom-image-agent/frontend/src/pages/MainImagePage.tsx)：主图工作台

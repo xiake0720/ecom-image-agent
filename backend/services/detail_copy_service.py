@@ -117,7 +117,7 @@ class DetailCopyService:
         if "品牌" in theme:
             return f"{payload.brand_name or '茶叶工作台'} 详情图首屏，先建立产品识别。"
         if "卖点" in theme:
-            return "把核心卖点拆成适合长图阅读的双屏信息。"
+            return "把核心卖点拆成适合单屏阅读的信息。"
         return f"{payload.product_name or payload.tea_type}，适合茶叶电商详情图表达。"
 
     def _fallback_body(self, theme: str, payload: DetailPageJobCreatePayload) -> str:

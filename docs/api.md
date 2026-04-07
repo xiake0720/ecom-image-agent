@@ -77,7 +77,7 @@
   - `platform`，当前默认 `tmall`
   - `style_preset`，当前默认 `tea_tmall_premium_light`
   - `price_band`
-  - `target_slice_count`，当前支持 `4~6`
+  - `target_slice_count`，当前支持 `8~12`，表示一次详情任务需要生成的总屏数/总张数
   - `image_size`，当前默认 `2K`
   - `main_image_task_id`
   - `selected_main_result_ids`，JSON 数组字符串
@@ -132,6 +132,11 @@
 - `total_pages`
 - `total_screens`
 - `pages[]`
+
+当前实现约束：
+- 一张图对应一屏内容
+- 成品比例固定为 `3:4`
+- `total_pages` 与 `total_screens` 在当前版本中保持一致
 
 `copy_blocks[]` 结构核心字段：
 - `page_id`
@@ -207,7 +212,7 @@ plan-only 链路：
 - mock text provider 返回稳定结构化 plan/copy/prompt
 - mock image provider 直接复制预置样张到 `generated/`
 - runtime、预览、下载、ZIP 仍走真实 detail graph 链路
-- mock mode 不再使用运行时 PIL 画占位详情长图
+- mock mode 不再使用运行时 PIL 画占位详情图
 
 ### 5.2 real
 - `ECOM_IMAGE_AGENT_TEXT_PROVIDER_MODE=real`

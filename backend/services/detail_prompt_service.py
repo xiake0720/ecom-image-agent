@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from typing import Any
 
 from backend.engine.core.config import get_settings
 from backend.engine.providers.llm.base import BaseTextProvider
@@ -31,7 +32,7 @@ class DetailPromptService:
         *,
         planning_provider: BaseTextProvider | None = None,
     ) -> list[DetailPagePromptPlanItem]:
-        """输出每张 1:3 长图的最终 render prompt。"""
+        """输出每张 3:4 单屏详情图的最终 render prompt。"""
 
         provider = planning_provider or build_capability_bindings(get_settings()).planning_provider
         fallback = self._fallback_prompt_plan(payload, plan, copy_blocks, assets)
@@ -68,21 +69,22 @@ class DetailPromptService:
             draft = draft_map.get(page.page_id)
             fallback_item = fallback_map[page.page_id]
             reference_roles = list(dict.fromkeys((draft.reference_roles if draft else []) or [ref.role for ref in fallback_item.references]))
-            references = self._resolve_references(reference_roles, page.page_id, page.screens, assets_by_role, fallback_item.references)
+            references = self._resolve_references(reference_roles, page.screens, assets_by_role, fallback_item.references)
+            layout_notes = draft.layout_notes if draft and draft.layout_notes else fallback_item.layout_notes
             normalized.append(
                 DetailPagePromptPlanItem(
                     page_id=page.page_id,
                     page_title=(draft.page_title if draft and draft.page_title.strip() else page.title),
                     global_style_anchor=plan.global_style_anchor,
                     screen_themes=(draft.screen_themes if draft and draft.screen_themes else [screen.theme for screen in page.screens]),
-                    layout_notes=(draft.layout_notes if draft and draft.layout_notes else fallback_item.layout_notes),
+                    layout_notes=layout_notes,
                     prompt=self._compose_final_prompt(
                         payload=payload,
                         page=page,
-                        copy_blocks=copy_map[page.page_id],
+                        copy_blocks=copy_map.get(page.page_id, []),
                         references=references,
                         prompt_seed=draft.prompt if draft else fallback_item.prompt,
-                        layout_notes=(draft.layout_notes if draft and draft.layout_notes else fallback_item.layout_notes),
+                        layout_notes=layout_notes,
                         plan=plan,
                     ),
                     negative_prompt=self._compose_negative_prompt(draft.negative_prompt if draft else fallback_item.negative_prompt),
@@ -107,10 +109,11 @@ class DetailPromptService:
         assets_by_role = self._group_assets_by_role(assets)
         rows: list[DetailPagePromptPlanItem] = []
         for page in plan.pages:
-            references = self._resolve_references([], page.page_id, page.screens, assets_by_role, [])
+            references = self._resolve_references([], page.screens, assets_by_role, [])
+            primary_screen = page.screens[0]
             layout_notes = [
-                f"{page.screens[0].screen_id} 为上屏，侧重 {page.screens[0].theme}",
-                f"{page.screens[1].screen_id} 为下屏，侧重 {page.screens[1].theme}",
+                f"{primary_screen.screen_id} 为独立单屏，主题为 {primary_screen.theme}",
+                "画面按 3:4 详情页单屏组织信息，主体与文案分区清晰。",
                 "保留清晰文字区，避免信息挤压主体。",
             ]
             rows.append(
@@ -123,13 +126,15 @@ class DetailPromptService:
                     prompt=self._compose_final_prompt(
                         payload=payload,
                         page=page,
-                        copy_blocks=copy_map[page.page_id],
+                        copy_blocks=copy_map.get(page.page_id, []),
                         references=references,
-                        prompt_seed="高级茶叶电商详情长图，真实材质、留白克制、产品主体稳定。",
+                        prompt_seed="高级茶叶电商详情单屏图，真实材质、留白克制、产品主体稳定。",
                         layout_notes=layout_notes,
                         plan=plan,
                     ),
-                    negative_prompt=self._compose_negative_prompt("garbled Chinese text, deformed packaging, replaced logo, cluttered layout"),
+                    negative_prompt=self._compose_negative_prompt(
+                        "garbled Chinese text, deformed packaging, replaced logo, cluttered layout"
+                    ),
                     references=references,
                 )
             )
@@ -139,7 +144,7 @@ class DetailPromptService:
         self,
         *,
         payload: DetailPageJobCreatePayload,
-        page,
+        page: Any,
         copy_blocks: list[DetailPageCopyBlock],
         references: list[DetailPageAssetRef],
         prompt_seed: str,
@@ -175,10 +180,10 @@ class DetailPromptService:
         user_specs = json.dumps(payload.specs or {}, ensure_ascii=False)
         user_points = json.dumps(payload.selling_points or [], ensure_ascii=False)
         lines = [
-            "使用 Banana2 生成一张 1:3 茶叶电商详情长图，一次请求完成，不拆屏，不本地拼接。",
+            "使用 Banana2 生成一张 3:4 茶叶电商详情单屏图，一次请求只输出一张图，不做本地拼接。",
             f"平台={payload.platform}；类目={payload.category}；茶类={payload.tea_type}；品牌名={payload.brand_name or '未提供'}；商品名={payload.product_name or '未提供'}。",
             f"风格 preset={payload.style_preset}；全局风格锚点={plan.global_style_anchor}；价格带={payload.price_band or '未提供'}。",
-            f"页面标题={page.title}；两屏主题={[screen.theme for screen in page.screens]}。",
+            f"页面标题={page.title}；单屏主题={[screen.theme for screen in page.screens]}。",
             f"页面目标={[screen.goal for screen in page.screens]}。",
             f"用户卖点补充={user_points}；商品参数={user_specs}；冲泡建议={payload.brew_suggestion or '未提供'}；额外要求={payload.extra_requirements or '未提供'}。",
             f"参考图绑定={reference_desc or ['无']}",
@@ -187,8 +192,8 @@ class DetailPromptService:
             "包装保护约束：不改包装、不改包装上的文字、不变形、不替换品牌识别、不杜撰标签细节。",
             "中文约束：中文必须清晰、可读、不乱码、字重自然、排版层级明确、不要拥挤。",
             "画面约束：真实茶叶质感、真实茶汤与叶底，不要塑料感，不要廉价广告风，不要低幼装饰。",
-            "执行风格：天猫高端茶叶详情图，克制留白、材质真实、配色稳重、适合电商长图阅读。",
-            f"Prompt 草案={prompt_seed.strip() or '高级茶叶详情图，双屏叙事明确。'}",
+            "执行风格：天猫高端茶叶详情图，克制留白、材质真实、配色稳重、适合电商单屏阅读。",
+            f"Prompt 草案={prompt_seed.strip() or '高级茶叶详情图，单屏表达明确。'}",
         ]
         return "\n".join(lines).strip()
 
@@ -211,8 +216,7 @@ class DetailPromptService:
     def _resolve_references(
         self,
         reference_roles: list[str],
-        page_id: str,
-        screens,
+        screens: list[Any],
         assets_by_role: dict[str, list[DetailPageAssetRef]],
         fallback_refs: list[DetailPageAssetRef],
     ) -> list[DetailPageAssetRef]:

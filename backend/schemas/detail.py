@@ -47,7 +47,7 @@ class DetailPagePlanScreen(BaseModel):
 
 
 class DetailPagePlanPage(BaseModel):
-    """单张 1:3 长图规划。"""
+    """单张 3:4 详情图规划。"""
 
     page_id: str
     title: str
@@ -119,9 +119,9 @@ class DetailPagePromptPlanItem(BaseModel):
     prompt: str
     negative_prompt: str
     references: list[DetailPageAssetRef] = Field(default_factory=list)
-    target_aspect_ratio: str = "1:3"
-    target_width: int = 1080
-    target_height: int = 3240
+    target_aspect_ratio: str = "3:4"
+    target_width: int = 1536
+    target_height: int = 2048
 
 
 class DetailPageRenderResult(BaseModel):
@@ -226,7 +226,7 @@ class DetailPageJobSummary(BaseModel):
     category: str = "tea"
     platform: str = "tmall"
     style_preset: str = "tea_tmall_premium_light"
-    target_slice_count: int = 4
+    target_slice_count: int = 8
 
 
 class DetailPageJobCreatePayload(BaseModel):
@@ -239,7 +239,7 @@ class DetailPageJobCreatePayload(BaseModel):
     platform: str = "tmall"
     style_preset: str = "tea_tmall_premium_light"
     price_band: str = ""
-    target_slice_count: int = Field(default=4, ge=4, le=6)
+    target_slice_count: int = Field(default=8, ge=8, le=12)
     image_size: str = "2K"
     main_image_task_id: str = ""
     selected_main_result_ids: list[str] = Field(default_factory=list)

@@ -8,8 +8,8 @@
   ],
   "default_style_preset": "tea_tmall_premium_light",
   "recommended_page_count": {
-    "min": 4,
-    "max": 6
+    "min": 8,
+    "max": 12
   },
   "global_style_anchor": "浅暖米金底色、茶感材质、留白克制、中文排版清晰、整套连续叙事",
   "color_keywords": ["米白", "岩茶褐", "茶汤琥珀", "竹青"],
@@ -24,9 +24,9 @@
     "场景与人群",
     "发货与售后"
   ],
-  "planner_prompt_template": "请围绕茶叶类目和天猫高端详情图，输出 8-12 屏规划，保证每两屏合并成一张 1:3 长图，强调风格统一。",
+  "planner_prompt_template": "请围绕茶叶类目和天猫高端详情图，输出 8-12 屏规划，每屏对应一张 3:4 详情图，强调风格统一。",
   "copy_prompt_template": "请为每一屏输出结构化中文文案，语气克制真实，避免夸张和医疗化表述。",
-  "prompt_prompt_template": "请生成每张 1:3 长图可直接用于图像模型的完整 prompt，并附包装不变形、中文可读、风格连续的约束。",
+  "prompt_prompt_template": "请生成每张 3:4 单屏详情图可直接用于图像模型的完整 prompt，并附包装不变形、中文可读、风格连续的约束。",
   "screen_blueprint": [
     {"theme": "品牌首屏", "screen_type": "visual", "preferred_roles": ["main_result", "packaging"]},
     {"theme": "核心卖点", "screen_type": "info", "preferred_roles": ["packaging", "scene_ref"]},

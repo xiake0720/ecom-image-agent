@@ -15,8 +15,8 @@ export function DetailPlanPreview({ plan, promptPlan, message }: DetailPlanPrevi
   return (
     <div className="detail-stack">
       <div className="detail-summary-strip">
-        <span>共 {plan.total_pages} 张 1:3 长图</span>
-        <span>{plan.total_screens} 个 screen</span>
+        <span>共 {plan.total_pages} 张 3:4 单屏图</span>
+        <span>{plan.total_screens} 屏内容</span>
         <span>{plan.global_style_anchor}</span>
       </div>
 

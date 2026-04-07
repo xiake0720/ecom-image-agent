@@ -7,7 +7,7 @@ interface DetailPromptPreviewProps {
 /** Prompt 摘要预览区。 */
 export function DetailPromptPreview({ promptPlan }: DetailPromptPreviewProps) {
   if (!promptPlan.length) {
-    return <div className="detail-empty-state">生成 Prompt 后，这里会展示每张长图的引用关系、版式提示和 prompt 摘要。</div>;
+    return <div className="detail-empty-state">生成 Prompt 后，这里会展示每张 3:4 单屏图的引用关系、版式提示和 prompt 摘要。</div>;
   }
 
   return (

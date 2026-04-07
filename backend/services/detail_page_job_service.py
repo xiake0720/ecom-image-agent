@@ -108,7 +108,7 @@ class DetailPageJobService:
             category=payload.category,
             platform=payload.platform,
             shot_count=payload.target_slice_count,
-            aspect_ratio="1:3",
+            aspect_ratio="3:4",
             image_size=payload.image_size,
             status=TaskStatus.CREATED,
             task_dir=str(task_dirs["task"]),

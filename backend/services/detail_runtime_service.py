@@ -194,7 +194,7 @@ class DetailRuntimeService:
         if task.status == TaskStatus.COMPLETED:
             if task.current_step == "detail_generate_prompt" or planned_count == 0:
                 return "规划、文案与 Prompt 已完成。"
-            return f"详情图任务已完成，共生成 {generated_count} / {planned_count} 张。"
+            return f"详情图任务已完成，共生成 {generated_count} / {planned_count} 张 3:4 单屏图。"
         return task.current_step_label or "详情图任务失败。"
 
     def _resolve_export_url(self, task_id: str, task_dir: Path) -> str:

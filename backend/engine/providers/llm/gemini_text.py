@@ -121,8 +121,8 @@ class GeminiTextProvider(BaseTextProvider):
                 "platform": "tmall",
                 "style_preset": "tea_tmall_premium_light",
                 "global_style_anchor": "天猫高端茶叶详情图，米白留白、深茶墨绿、材质克制、中文排版清晰",
-                "narrative": ["品牌主视觉", "核心卖点", "干茶细节", "茶汤与叶底"],
-                "total_screens": 8,
+                "narrative": ["品牌主视觉", "核心卖点", "干茶细节", "茶汤氛围"],
+                "total_screens": 4,
                 "total_pages": 4,
                 "pages": [
                     {
@@ -138,13 +138,6 @@ class GeminiTextProvider(BaseTextProvider):
                                 "screen_type": "visual",
                                 "suggested_asset_roles": ["main_result", "packaging"],
                             },
-                            {
-                                "screen_id": "p01s2",
-                                "theme": "核心卖点总览",
-                                "goal": "用克制信息表达核心卖点",
-                                "screen_type": "info",
-                                "suggested_asset_roles": ["packaging", "main_result"],
-                            },
                         ],
                     },
                     {
@@ -158,13 +151,6 @@ class GeminiTextProvider(BaseTextProvider):
                                 "theme": "干茶条索与色泽",
                                 "goal": "突出原叶质感与等级",
                                 "screen_type": "visual",
-                                "suggested_asset_roles": ["dry_leaf", "packaging"],
-                            },
-                            {
-                                "screen_id": "p02s2",
-                                "theme": "工艺与产地信息",
-                                "goal": "说明茶类、产区与制茶特点",
-                                "screen_type": "info",
                                 "suggested_asset_roles": ["dry_leaf", "packaging"],
                             },
                         ],
@@ -182,13 +168,6 @@ class GeminiTextProvider(BaseTextProvider):
                                 "screen_type": "visual",
                                 "suggested_asset_roles": ["tea_soup", "scene_ref"],
                             },
-                            {
-                                "screen_id": "p03s2",
-                                "theme": "香气与口感表达",
-                                "goal": "用简洁文字承接饮用感受",
-                                "screen_type": "info",
-                                "suggested_asset_roles": ["tea_soup", "packaging"],
-                            },
                         ],
                     },
                     {
@@ -203,13 +182,6 @@ class GeminiTextProvider(BaseTextProvider):
                                 "goal": "体现叶底完整度与鲜活度",
                                 "screen_type": "visual",
                                 "suggested_asset_roles": ["leaf_bottom", "scene_ref"],
-                            },
-                            {
-                                "screen_id": "p04s2",
-                                "theme": "参数与冲泡建议",
-                                "goal": "收口规格、冲泡和购买动作",
-                                "screen_type": "info",
-                                "suggested_asset_roles": ["packaging", "leaf_bottom"],
                             },
                         ],
                     },
@@ -237,9 +209,9 @@ class GeminiTextProvider(BaseTextProvider):
                     {
                         "page_id": "page-01",
                         "page_title": "品牌与产品主视觉",
-                        "screen_themes": ["品牌与产品主体", "核心卖点总览"],
-                        "layout_notes": ["上屏偏视觉，下屏偏信息", "包装正面保留完整识别"],
-                        "prompt": "高级茶叶电商详情长图，包装主体稳定，留白大气，材质真实，中文排版清晰。",
+                        "screen_themes": ["品牌与产品主体"],
+                        "layout_notes": ["单屏构图，包装正面保留完整识别", "主体与文案分区清晰"],
+                        "prompt": "高级茶叶电商详情单屏图，包装主体稳定，留白大气，材质真实，中文排版清晰。",
                         "negative_prompt": "garbled Chinese text, deformed packaging, replaced logo, cluttered layout",
                         "reference_roles": ["main_result", "packaging"],
                     }

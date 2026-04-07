@@ -31,16 +31,16 @@ export function DetailGoalForm({
   return (
     <div className="detail-stack">
       <div className="detail-field">
-        <label htmlFor="detail-target-slices">目标页数</label>
+        <label htmlFor="detail-target-slices">目标屏数</label>
         <select
           id="detail-target-slices"
           className="detail-input"
           value={String(targetSliceCount)}
           onChange={(event) => onTargetSliceCountChange(Number(event.target.value))}
         >
-          {[4, 5, 6].map((item) => (
+          {[8, 9, 10, 11, 12].map((item) => (
             <option key={item} value={item}>
-              {item} 页
+              {item} 屏
             </option>
           ))}
         </select>

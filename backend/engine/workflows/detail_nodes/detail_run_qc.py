@@ -122,13 +122,18 @@ def detail_run_qc(state: DetailWorkflowState, deps: DetailWorkflowDependencies) 
         if file_check.status != "passed":
             page_issues.append(file_check.message)
 
-        size_ok = bool(render_item and render_item.width and render_item.height and abs((render_item.height / render_item.width) - 3) < 0.2)
+        size_ok = bool(
+            render_item
+            and render_item.width
+            and render_item.height
+            and abs((render_item.height / render_item.width) - (4 / 3)) < 0.15
+        )
         size_check = _build_check(
             check_id=f"{page.page_id}-size",
-            check_name="long_image_size",
+            check_name="detail_image_size",
             page_id=page.page_id,
             passed=size_ok,
-            message="长图比例正确" if size_ok else "长图尺寸或比例不正确",
+            message="3:4 比例正确" if size_ok else "详情图尺寸或比例不正确",
             details={"width": render_item.width if render_item else None, "height": render_item.height if render_item else None},
         )
         checks.append(size_check)

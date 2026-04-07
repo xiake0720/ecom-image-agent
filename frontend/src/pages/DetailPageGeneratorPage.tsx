@@ -69,7 +69,7 @@ export function DetailPageGeneratorPage() {
   const [platform, setPlatform] = useState("tmall");
   const [stylePreset, setStylePreset] = useState("tea_tmall_premium_light");
   const [priceBand, setPriceBand] = useState("");
-  const [targetSliceCount, setTargetSliceCount] = useState(4);
+  const [targetSliceCount, setTargetSliceCount] = useState(8);
   const [styleNotes, setStyleNotes] = useState("");
   const [extraRequirements, setExtraRequirements] = useState("");
   const [brewSuggestion, setBrewSuggestion] = useState("");
@@ -264,7 +264,7 @@ export function DetailPageGeneratorPage() {
     setPlatform("tmall");
     setStylePreset("tea_tmall_premium_light");
     setPriceBand("");
-    setTargetSliceCount(4);
+    setTargetSliceCount(8);
     setStyleNotes("");
     setExtraRequirements("");
     setBrewSuggestion("");
@@ -433,7 +433,7 @@ export function DetailPageGeneratorPage() {
             <DetailPlanPreview
               plan={runtime?.plan ?? null}
               promptPlan={runtime?.prompt_plan ?? []}
-              message="先生成规划后，这里会展示每张 1:3 长图的双屏叙事、目标和引用关系。"
+              message="先生成规划后，这里会展示每张 3:4 单屏图的主题、目标和引用关系。"
             />
           </SectionCard>
 

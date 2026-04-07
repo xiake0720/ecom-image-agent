@@ -11,7 +11,7 @@ export function PreviewPage() {
 
   return (
     <PageShell activeKey="preview">
-      <PageHeader title="预览中心" subtitle="集中查看主图、详情长图与导出文件" />
+      <PageHeader title="预览中心" subtitle="集中查看主图、详情图与导出文件" />
       <div className="preview-layout">
         <SectionCard title="任务分组">
           <div className="sidebar-menu">

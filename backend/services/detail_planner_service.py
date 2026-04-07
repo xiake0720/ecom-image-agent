@@ -21,6 +21,8 @@ from backend.schemas.detail import (
 class DetailPlannerService:
     """负责生成茶叶详情图的结构化规划。"""
 
+    screens_per_page = 1
+
     def __init__(self, template_root: Path) -> None:
         self.template_root = template_root
 
@@ -31,7 +33,7 @@ class DetailPlannerService:
         *,
         planning_provider: BaseTextProvider | None = None,
     ) -> DetailPagePlanPayload:
-        """生成整套 1:3 长图规划。
+        """生成整套 3:4 单屏详情图规划。
 
         V1 优先走统一文本 provider；若模型不可用或结构不完整，再回退到模板化兜底。
         """
@@ -46,7 +48,7 @@ class DetailPlannerService:
                 system_prompt=(
                     "你是茶叶电商详情图导演 Agent。"
                     "请只输出严格 JSON，面向天猫高端茶叶详情图，"
-                    "每张图必须包含两个 screen，且只能规划茶叶场景。"
+                    "每张图只规划一个独立 screen，成品比例为 3:4，且只能规划茶叶场景。"
                 ),
             )
             return self._normalize_plan(result, payload, assets, fallback)
@@ -84,7 +86,10 @@ class DetailPlannerService:
                 )
             )
 
-        narrative = [item.strip() for item in plan.narrative if item.strip()] or fallback.narrative
+        fallback_narrative = fallback.narrative[:target_pages]
+        narrative = [item.strip() for item in plan.narrative if item.strip()]
+        if len(narrative) < target_pages:
+            narrative = fallback_narrative
         total_pages = len(normalized_pages)
         return DetailPagePlanPayload(
             template_name=plan.template_name or fallback.template_name,
@@ -92,8 +97,8 @@ class DetailPlannerService:
             platform=payload.platform,
             style_preset=payload.style_preset,
             global_style_anchor=plan.global_style_anchor.strip() or fallback.global_style_anchor,
-            narrative=narrative[:total_pages] if len(narrative) >= total_pages else fallback.narrative[:total_pages],
-            total_screens=total_pages * 2,
+            narrative=narrative[:total_pages],
+            total_screens=sum(len(page.screens) for page in normalized_pages),
             total_pages=total_pages,
             pages=normalized_pages,
         )
@@ -107,7 +112,7 @@ class DetailPlannerService:
         assets: list[DetailPageAssetRef],
     ) -> list[DetailPagePlanScreen]:
         normalized: list[DetailPagePlanScreen] = []
-        for screen_index in range(2):
+        for screen_index in range(self.screens_per_page):
             fallback_screen = fallback_screens[screen_index]
             source_screen = source_screens[screen_index] if screen_index < len(source_screens) else fallback_screen
             preferred_roles = source_screen.suggested_asset_roles or fallback_screen.suggested_asset_roles
@@ -141,31 +146,18 @@ class DetailPlannerService:
 
         template = self._load_template()
         blueprint = list(template.get("screen_blueprint", []))
-        narrative = [
-            "品牌与产品主视觉",
-            "卖点展开与信任建立",
-            "干茶条索与工艺细节",
-            "茶汤色泽与香气表现",
-            "叶底状态与原料说明",
-            "参数、冲泡与购买行动",
-        ]
         pages: list[DetailPagePlanPage] = []
         role_order = self._resolve_main_roles(payload)
         for page_index in range(payload.target_slice_count):
-            first = blueprint[(page_index * 2) % len(blueprint)]
-            second = blueprint[(page_index * 2 + 1) % len(blueprint)]
-            screens = [
-                self._build_screen(page_index, 1, first, assets, role_order),
-                self._build_screen(page_index, 2, second, assets, role_order),
-            ]
-            title = f"{screens[0].theme} / {screens[1].theme}"
+            screen_blueprint = blueprint[page_index % len(blueprint)]
+            screen = self._build_screen(page_index, 1, screen_blueprint, assets, role_order)
             pages.append(
                 DetailPagePlanPage(
                     page_id=f"page-{page_index + 1:02d}",
-                    title=title,
+                    title=screen.theme,
                     style_anchor=str(template.get("global_style_anchor", "")),
                     narrative_position=page_index + 1,
-                    screens=screens,
+                    screens=[screen],
                 )
             )
         return DetailPagePlanPayload(
@@ -174,8 +166,8 @@ class DetailPlannerService:
             platform=payload.platform,
             style_preset=payload.style_preset,
             global_style_anchor=str(template.get("global_style_anchor", "天猫高端茶叶详情图，留白克制、材质真实、中文清晰")),
-            narrative=narrative[: payload.target_slice_count],
-            total_screens=payload.target_slice_count * 2,
+            narrative=[page.title for page in pages],
+            total_screens=payload.target_slice_count,
             total_pages=payload.target_slice_count,
             pages=pages,
         )
@@ -213,7 +205,7 @@ class DetailPlannerService:
         if "参数" in theme or "冲泡" in theme:
             return "用克制信息表达参数、冲泡建议与购买行动。"
         if "卖点" in theme:
-            return "把核心卖点拆成适合上图的双屏信息表达。"
+            return "把核心卖点拆成适合单屏阅读的信息表达。"
         return "建立品牌气质与产品主体识别，形成整套详情图的叙事开篇。"
 
     def _resolve_main_roles(self, payload: DetailPageJobCreatePayload) -> list[DetailAssetRole]:
@@ -243,14 +235,14 @@ class DetailPlannerService:
             f"品牌名={payload.brand_name or '未提供'}；"
             f"商品名={payload.product_name or '未提供'}；"
             f"茶类={payload.tea_type}；平台={payload.platform}；风格={payload.style_preset}；"
-            f"价格带={payload.price_band or '未提供'}；目标页数={payload.target_slice_count}；"
+            f"价格带={payload.price_band or '未提供'}；目标屏数={payload.target_slice_count}；"
             f"卖点补充={payload.selling_points or ['未提供']}；"
             f"商品参数={payload.specs or {'默认': '未提供'}}；"
             f"冲泡建议={payload.brew_suggestion or '未提供'}；"
             f"用户额外要求={payload.extra_requirements or '未提供'}；"
             f"优先使用主图结果={payload.prefer_main_result_first}；"
             f"素材清单={json.dumps(asset_manifest, ensure_ascii=False)}；"
-            "请只规划天猫风格茶叶详情图，每张图包含两个 screen，"
+            "请只规划天猫风格茶叶详情图，每张图只包含一个 screen，成品为 3:4；"
             "输出字段必须包含 global_style_anchor、narrative、total_pages、total_screens、pages。"
             f"若不确定，请至少参考这个兜底结构：{json.dumps(fallback.model_dump(mode='json'), ensure_ascii=False)}"
         )
