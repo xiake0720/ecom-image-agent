@@ -68,5 +68,25 @@
     "model_label": "Mock Local",
     "detail_image_count": 0,
     "background_image_count": 0
+  },
+  {
+    "task_id": "f540430154854385a6ea29c25f9f8ae1",
+    "task_type": "detail_page_v2",
+    "status": "failed",
+    "created_at": "2026-04-07T09:30:02.742562",
+    "updated_at": "2026-04-07T09:30:02.826476",
+    "title": "奇兰",
+    "platform": "tmall",
+    "result_path": "outputs\\tasks\\f540430154854385a6ea29c25f9f8ae1\\generated",
+    "progress_percent": 28,
+    "current_step": "detail_plan",
+    "current_step_label": "正在规划详情图叙事",
+    "result_count_completed": 0,
+    "result_count_total": 8,
+    "export_zip_path": "",
+    "provider_label": "Mock Local",
+    "model_label": "Mock Local",
+    "detail_image_count": 0,
+    "background_image_count": 0
   }
 ]

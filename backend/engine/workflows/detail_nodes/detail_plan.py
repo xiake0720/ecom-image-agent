@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
+from backend.core.config import get_settings
 from backend.engine.workflows.detail_state import DetailWorkflowDependencies, DetailWorkflowState
 from backend.services.detail_planner_service import DetailPlannerService
 
@@ -11,7 +10,7 @@ from backend.services.detail_planner_service import DetailPlannerService
 def detail_plan(state: DetailWorkflowState, deps: DetailWorkflowDependencies) -> dict:
     """生成整套详情图规划并落盘。"""
 
-    service = DetailPlannerService(template_root=Path("backend/templates"))
+    service = DetailPlannerService(template_root=get_settings().template_root)
     plan = service.build_plan(
         state["detail_payload"],
         state.get("detail_assets", []),

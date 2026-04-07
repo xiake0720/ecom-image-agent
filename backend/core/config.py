@@ -14,6 +14,9 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
 class Settings(BaseSettings):
     """应用配置。
 
@@ -38,6 +41,15 @@ def get_settings() -> Settings:
     """返回缓存后的配置对象，并确保基础目录可用。"""
 
     settings = Settings()
+    settings.storage_root = _resolve_project_path(settings.storage_root)
+    settings.outputs_root = _resolve_project_path(settings.outputs_root)
+    settings.template_root = _resolve_project_path(settings.template_root)
     settings.storage_root.mkdir(parents=True, exist_ok=True)
     settings.outputs_root.mkdir(parents=True, exist_ok=True)
     return settings
+
+
+def _resolve_project_path(path: Path) -> Path:
+    """把相对路径统一解析到仓库根目录，避免依赖当前工作目录。"""
+
+    return path if path.is_absolute() else (PROJECT_ROOT / path).resolve()
