@@ -4,14 +4,14 @@
 
 ### 1.1 提交阶段
 1. 前端在 `/main-images` 组装 multipart，调用 `POST /api/image/generate-main`
-2. [`MainImageService.prepare_generation`](/D:/python/ecom-image-agent/backend/services/main_image_service.py)：
-   - 创建 `task_id`
-   - 落盘上传素材与 `task.json`
-   - 写入 `storage/tasks/index.json`
-   - 推入进程内主图队列
+2. `MainImageService.prepare_generation`
+3. 创建 `task_id`
+4. 落盘上传素材与 `task.json`
+5. 写入 `storage/tasks/index.json`
+6. 推入进程内主图队列
 
 ### 1.2 执行阶段
-主图队列 worker 调用 [`run_workflow`](/D:/python/ecom-image-agent/backend/engine/workflows/graph.py)：
+主图 worker 调用 `run_workflow(...)`，固定顺序为：
 1. `ingest_assets`
 2. `director_v2`
 3. `prompt_refine_v2`
@@ -21,8 +21,8 @@
 
 ### 1.3 展示阶段
 1. 前端轮询 `GET /api/tasks/{task_id}/runtime`
-2. [`TaskRuntimeService`](/D:/python/ecom-image-agent/backend/services/task_runtime_service.py) 聚合进度、队列、QC 与结果
-3. 前端展示进度条、QC 摘要、结果卡片、下载链接
+2. `TaskRuntimeService` 聚合进度、队列、QC 与结果
+3. 前端展示进度条、QC 摘要、结果卡片和下载入口
 
 ## 2. 详情图任务流
 
@@ -33,16 +33,16 @@
   - 跑完整 detail graph
 
 ### 2.2 创建阶段
-[`DetailPageJobService`](/D:/python/ecom-image-agent/backend/services/detail_page_job_service.py)：
+`DetailPageJobService` 负责：
 1. 创建独立 `task_id`
 2. 落盘上传素材到 `outputs/tasks/{task_id}/inputs/`
-3. 若选择主图任务结果，则复制主图 completed 文件并标记为 `main_result`
+3. 如选择主图结果，则复制主图 completed 文件并标记为 `main_result`
 4. 写入任务摘要到 `storage/tasks/index.json`
 5. 构建 detail initial state
 6. 触发 `run_detail_workflow(...)`
 
 ### 2.3 执行阶段
-[`run_detail_workflow`](/D:/python/ecom-image-agent/backend/engine/workflows/detail_graph.py) 固定顺序：
+`run_detail_workflow(...)` 固定顺序：
 1. `detail_ingest_assets`
 2. `detail_plan`
 3. `detail_generate_copy`
@@ -51,73 +51,100 @@
 6. `detail_run_qc`
 7. `detail_finalize`
 
-plan-only 模式停在第 4 步，并把任务状态收口为已完成。
+plan-only 模式停在第 4 步，并把任务状态收口为 `completed`。
 
-### 2.4 导演 Agent 与 Graph 的配合
-导演 Agent 节点：
-- `detail_plan`
-- `detail_generate_copy`
-- `detail_generate_prompt`
+### 2.4 detail V2 关键行为
+- 规划阶段固定走 `tea_tmall_premium_v2` 模板
+- 每页固定为 `3:4`、`single_screen_vertical_poster`
+- 每页必须有明确 `page_role`
+- planner 会按素材可用性选择页职责
+- 缺失 `dry_leaf / leaf_bottom` 时不伪造证据页
+- 缺失 `tea_soup / scene_ref / bg_ref` 时允许 AI 在页内补足辅助素材
+- prompt 按页职责生成，不再递归拼接 `Prompt 草案=`
+- packaging / main_result 会按页轮换绑定，避免所有页面都复用同一张包装图
 
-生产 Graph 节点：
-- `detail_ingest_assets`
-- `detail_render_pages`
-- `detail_run_qc`
-- `detail_finalize`
+### 2.5 渲染与容错
+- detail 渲染仍统一走图片 provider
+- 每页一次只生成 1 张 `3:4` 单屏图
+- 渲染阶段改成页级容错：
+  - 单页失败不会立即中断整条任务
+  - provider 抖动会触发页级重试
+  - 会记录 `retry_count` 与 `retry_strategies`
+- 因此一条详情任务现在可能是：
+  - 全部成功
+  - 部分成功并进入 `review_required`
+  - 全部失败并进入 `failed`
 
-职责边界：
-- Agent 负责“想”：规划、文案、Prompt
-- Graph 负责“跑”：执行、落盘、QC、导出、runtime
+### 2.6 评审与 QC
+`detail_run_qc` 会同时写出：
+- `review/visual_review.json`
+- `review/retry_decisions.json`
+- `qc/detail_qc_report.json`
 
-### 2.5 详情图落盘结构
-完整任务至少包含：
+当前 QC 覆盖：
+- 页数完成度
+- 包装参考是否过度复用
+- copy 是否缺失
+- 锚点素材是否绑定正确
+- 比例是否满足 `3:4`
+- 标题/参数页是否过密或出现占位值
+
+### 2.7 收尾与导出
+`detail_finalize` 会：
+1. 根据成功页数和 QC 状态决定任务状态
+2. 写入 `detail_manifest.json`
+3. 打包 `exports/detail_bundle.zip`
+
+状态规则：
+- 全部通过：`completed`
+- 部分成功或存在 QC 问题：`review_required`
+- 0 页成功：`failed`
+
+## 3. 详情图落盘结构
+完整任务当前至少包含：
 - `inputs/request_payload.json`
 - `inputs/asset_manifest.json`
+- `inputs/preflight_report.json`
+- `plan/director_brief.json`
 - `plan/detail_plan.json`
 - `plan/detail_copy_plan.json`
 - `plan/detail_prompt_plan.json`
 - `generated/*.png`
 - `generated/detail_render_report.json`
+- `review/visual_review.json`
+- `review/retry_decisions.json`
 - `qc/detail_qc_report.json`
 - `detail_manifest.json`
 - `exports/detail_bundle.zip`
 
-### 2.6 详情图渲染规则
-- 正式模式统一走 Banana2 provider
-- 每张详情图一次请求只生成一张 `3:4` 单屏图
-- 一次详情任务生成 `8-12` 张图，对应 `8-12` 屏内容
-- 不允许本地拼图、叠字、占位图冒充正式结果
-- 参考图通过 prompt plan 的 `references` 绑定下发
-
-### 2.7 detail mock mode
-- 通过统一 provider mode 切换
-- mock text provider 返回稳定结构化输出
-- mock image provider 复制预置样张到 `generated/`
-- runtime、QC、下载、ZIP 与真实模式保持一致
-
-## 3. 任务状态
-主图与详情图共用任务状态枚举：
+## 4. 任务状态
+主图与详情图共用状态枚举：
 - `created`
 - `running`
 - `review_required`
 - `completed`
 - `failed`
 
-detail 失败时：
-- `task.json.error_message` 写入真实用户可读错误
+detail 失败或部分失败时：
+- `task.json.error_message` 写用户可读错误
 - `GET /api/detail/jobs/{task_id}/runtime` 的 `message` 与 `error_message` 会直接透出
+- `review_required` 表示任务已产出部分结果，但仍需要复核 `review/` 与 `qc/`
 
-## 4. 前端轮询关系
+## 5. 前端轮询关系
 
-### 4.1 主图
+### 5.1 主图
 - `GET /api/tasks/{task_id}/runtime`
 
-### 4.2 详情图
+### 5.2 详情图
 - `GET /api/detail/jobs/{task_id}/runtime`
 
-详情图前端会同步展示：
+详情图前端当前会同步展示：
 - 中栏错误横幅
 - 右栏 runtime 侧栏
 - 规划 / 文案 / Prompt / 结果图
-> 2026-04 update:
-> - Frontend detail-page preview surfaces now display imported cards, result cards, and modal previews in `3:4` to match backend output.
+
+详情图 runtime 现在还会提供：
+- `preflight_report`
+- `director_brief`
+- `visual_review`
+- `retry_decisions`

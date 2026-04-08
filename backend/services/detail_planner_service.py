@@ -5,250 +5,360 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from backend.engine.core.config import get_settings
-from backend.engine.providers.llm.base import BaseTextProvider
-from backend.engine.providers.router import build_capability_bindings
 from backend.schemas.detail import (
     DetailAssetRole,
+    DetailDirectorBrief,
     DetailPageAssetRef,
     DetailPageJobCreatePayload,
     DetailPagePlanPage,
     DetailPagePlanPayload,
     DetailPagePlanScreen,
+    DetailPageRole,
+    DetailPreflightReport,
+    DetailPreflightRoleSummary,
 )
 
 
 class DetailPlannerService:
-    """负责生成茶叶详情图的结构化规划。"""
+    """负责生成稳定的 V2 详情图规划。
+
+    这里优先走模板化规划，而不是把页职责完全交给模型自由发挥。
+    原因是详情页链路的主要问题并不是“缺少创意”，而是页职责漂移、
+    素材绑定错误和计划与最终渲染不可执行。
+    """
 
     screens_per_page = 1
+    core_anchor_roles: tuple[DetailAssetRole, ...] = ("main_result", "packaging")
+    evidence_anchor_roles: tuple[DetailAssetRole, ...] = ("dry_leaf", "leaf_bottom")
+    ai_supplement_roles: tuple[DetailAssetRole, ...] = ("tea_soup", "scene_ref", "bg_ref")
+    optional_role_candidates: tuple[DetailPageRole, ...] = (
+        "brand_trust",
+        "gift_openbox_portable",
+        "scene_value_story",
+        "brewing_method_info",
+        "packaging_structure_value",
+        "package_closeup_evidence",
+        "brand_closing",
+    )
 
     def __init__(self, template_root: Path) -> None:
         self.template_root = template_root
+
+    def build_preflight_report(
+        self,
+        payload: DetailPageJobCreatePayload,
+        assets: list[DetailPageAssetRef],
+    ) -> DetailPreflightReport:
+        """根据已上传素材生成预检报告。"""
+
+        role_map = self._group_assets_by_role(assets)
+        available_roles = [role for role in role_map if role_map[role]]
+        warnings: list[str] = []
+        notes: list[str] = []
+        missing_required_roles: list[DetailAssetRole] = []
+        if not any(role_map.get(role) for role in self.core_anchor_roles):
+            missing_required_roles.append("packaging")
+            warnings.append("缺少 packaging 或 main_result，无法稳定生成详情页主锚点。")
+        missing_optional_roles = [
+            role for role in (*self.evidence_anchor_roles, *self.ai_supplement_roles) if not role_map.get(role)
+        ]
+        if not role_map.get("dry_leaf"):
+            warnings.append("缺少 dry_leaf，规划中不会生成干茶证据页。")
+        if not role_map.get("leaf_bottom"):
+            warnings.append("缺少 leaf_bottom，规划中不会生成叶底证据页。")
+        if not role_map.get("tea_soup"):
+            notes.append("缺少 tea_soup 时允许模型在茶汤页内补足真实茶汤。")
+        if not role_map.get("scene_ref"):
+            notes.append("缺少 scene_ref 时允许模型补足茶席、茶园或礼赠氛围。")
+        if not role_map.get("bg_ref"):
+            notes.append("缺少 bg_ref 时允许模型生成克制背景，但不能改动包装。")
+        if payload.brew_suggestion.strip():
+            notes.append("冲泡页仅使用用户明确提供的冲泡建议。")
+        else:
+            notes.append("未提供 brew_suggestion 时，冲泡页仅做结构化信息表达，不补猜水温与时长。")
+        report = DetailPreflightReport(
+            passed=not missing_required_roles,
+            warnings=warnings,
+            available_roles=available_roles,
+            missing_required_roles=missing_required_roles,
+            missing_optional_roles=missing_optional_roles,
+            asset_summary=[
+                DetailPreflightRoleSummary(
+                    role=role,
+                    count=len(rows),
+                    file_names=[item.file_name for item in rows],
+                )
+                for role, rows in role_map.items()
+                if rows
+            ],
+            recommended_page_roles=self._select_page_roles(payload.target_slice_count, role_map),
+            notes=notes,
+        )
+        return report
+
+    def build_director_brief(
+        self,
+        payload: DetailPageJobCreatePayload,
+        assets: list[DetailPageAssetRef],
+        *,
+        preflight_report: DetailPreflightReport | None = None,
+    ) -> DetailDirectorBrief:
+        """构建供 planner/copy/prompt 共用的导演简报。"""
+
+        template = self._load_template()
+        role_map = self._group_assets_by_role(assets)
+        preflight = preflight_report or self.build_preflight_report(payload, assets)
+        anchor_priority = self._resolve_anchor_priority(payload, role_map)
+        selected_roles = self._select_page_roles(payload.target_slice_count, role_map)
+        required_page_roles = [role for role in selected_roles if role in {"hero_opening", "tea_soup_evidence", "parameter_and_closing"}]
+        optional_page_roles = [role for role in selected_roles if role not in required_page_roles]
+        ai_supplement_page_roles = [
+            role
+            for role in selected_roles
+            if template["page_blueprints"][role]["allow_generated_supporting_materials"]
+        ]
+        material_notes = list(preflight.notes)
+        if role_map.get("main_result") and payload.prefer_main_result_first:
+            material_notes.append("首屏优先绑定 main_result，其余页优先轮换 packaging。")
+        elif role_map.get("packaging"):
+            material_notes.append("主锚点以 packaging 为主，必要时局部引入 main_result。")
+        constraints = [
+            "每页固定为 3:4 单屏竖版海报，不做左右分栏和拼贴。",
+            "hero、dry_leaf、leaf_bottom 页面形态忠实优先于装饰构图。",
+            "参数、冲泡、品牌页只允许使用输入中明确存在的信息。",
+            "tea_soup / scene / bg 缺失时允许 AI 补足，但包装文字、花纹和轮廓不得变化。",
+        ]
+        planning_notes = [
+            f"目标页数固定为 {payload.target_slice_count}，按页职责顺序补齐。",
+            "缺少 dry_leaf 或 leaf_bottom 时，改用品牌/场景/结构页填充，不伪造证据页。",
+            "文案保持短标题与低文本密度，避免大段说明。",
+        ]
+        return DetailDirectorBrief(
+            template_name=str(template["template_name"]),
+            category=payload.category,
+            platform=payload.platform,
+            style_preset=payload.style_preset,
+            global_style_anchor=str(template["global_style_anchor"]),
+            page_rhythm=list(template["page_rhythm"]),
+            anchor_priority=anchor_priority,
+            required_page_roles=required_page_roles,
+            optional_page_roles=optional_page_roles,
+            ai_supplement_page_roles=ai_supplement_page_roles,
+            planning_notes=planning_notes,
+            material_notes=material_notes,
+            constraints=constraints,
+        )
 
     def build_plan(
         self,
         payload: DetailPageJobCreatePayload,
         assets: list[DetailPageAssetRef],
         *,
-        planning_provider: BaseTextProvider | None = None,
+        preflight_report: DetailPreflightReport | None = None,
+        director_brief: DetailDirectorBrief | None = None,
+        planning_provider: object | None = None,
     ) -> DetailPagePlanPayload:
-        """生成整套 3:4 单屏详情图规划。
+        """生成整套 3:4 单屏详情图规划。"""
 
-        V1 优先走统一文本 provider；若模型不可用或结构不完整，再回退到模板化兜底。
-        """
-
-        provider = planning_provider or build_capability_bindings(get_settings()).planning_provider
-        fallback = self._fallback_plan(payload, assets)
-        prompt = self._build_prompt(payload, assets, fallback)
-        try:
-            result = provider.generate_structured(
-                prompt,
-                DetailPagePlanPayload,
-                system_prompt=(
-                    "你是茶叶电商详情图导演 Agent。"
-                    "请只输出严格 JSON，面向天猫高端茶叶详情图，"
-                    "每张图只规划一个独立 screen，成品比例为 3:4，且只能规划茶叶场景。"
-                ),
-            )
-            return self._normalize_plan(result, payload, assets, fallback)
-        except Exception:
-            return fallback
-
-    def _normalize_plan(
-        self,
-        plan: DetailPagePlanPayload,
-        payload: DetailPageJobCreatePayload,
-        assets: list[DetailPageAssetRef],
-        fallback: DetailPagePlanPayload,
-    ) -> DetailPagePlanPayload:
-        """把模型输出修正为稳定可执行的 detail plan。"""
-
-        normalized_pages: list[DetailPagePlanPage] = []
-        source_pages = plan.pages or fallback.pages
-        target_pages = payload.target_slice_count
-        for page_index in range(target_pages):
-            fallback_page = fallback.pages[page_index]
-            source_page = source_pages[page_index] if page_index < len(source_pages) else fallback_page
-            screens = self._normalize_screens(
-                source_page.screens,
-                fallback_page.screens,
-                page_index=page_index,
-                assets=assets,
-            )
-            normalized_pages.append(
-                DetailPagePlanPage(
-                    page_id=f"page-{page_index + 1:02d}",
-                    title=source_page.title.strip() or fallback_page.title,
-                    style_anchor=source_page.style_anchor.strip() or fallback_page.style_anchor,
-                    narrative_position=page_index + 1,
-                    screens=screens,
-                )
-            )
-
-        fallback_narrative = fallback.narrative[:target_pages]
-        narrative = [item.strip() for item in plan.narrative if item.strip()]
-        if len(narrative) < target_pages:
-            narrative = fallback_narrative
-        total_pages = len(normalized_pages)
-        return DetailPagePlanPayload(
-            template_name=plan.template_name or fallback.template_name,
-            category=payload.category,
-            platform=payload.platform,
-            style_preset=payload.style_preset,
-            global_style_anchor=plan.global_style_anchor.strip() or fallback.global_style_anchor,
-            narrative=narrative[:total_pages],
-            total_screens=sum(len(page.screens) for page in normalized_pages),
-            total_pages=total_pages,
-            pages=normalized_pages,
-        )
-
-    def _normalize_screens(
-        self,
-        source_screens: list[DetailPagePlanScreen],
-        fallback_screens: list[DetailPagePlanScreen],
-        *,
-        page_index: int,
-        assets: list[DetailPageAssetRef],
-    ) -> list[DetailPagePlanScreen]:
-        normalized: list[DetailPagePlanScreen] = []
-        for screen_index in range(self.screens_per_page):
-            fallback_screen = fallback_screens[screen_index]
-            source_screen = source_screens[screen_index] if screen_index < len(source_screens) else fallback_screen
-            preferred_roles = source_screen.suggested_asset_roles or fallback_screen.suggested_asset_roles
-            normalized.append(
-                DetailPagePlanScreen(
-                    screen_id=f"p{page_index + 1:02d}s{screen_index + 1}",
-                    theme=source_screen.theme.strip() or fallback_screen.theme,
-                    goal=source_screen.goal.strip() or fallback_screen.goal,
-                    screen_type=source_screen.screen_type or fallback_screen.screen_type,
-                    suggested_asset_roles=self._filter_roles(preferred_roles, assets, fallback_screen.suggested_asset_roles),
-                )
-            )
-        return normalized
-
-    def _filter_roles(
-        self,
-        roles: list[DetailAssetRole],
-        assets: list[DetailPageAssetRef],
-        fallback_roles: list[DetailAssetRole],
-    ) -> list[DetailAssetRole]:
-        existing_roles = {asset.role for asset in assets}
-        matched = [role for role in roles if role in existing_roles]
-        return matched or fallback_roles
-
-    def _fallback_plan(
-        self,
-        payload: DetailPageJobCreatePayload,
-        assets: list[DetailPageAssetRef],
-    ) -> DetailPagePlanPayload:
-        """在模型不可用时，按茶叶详情图模板输出兜底规划。"""
-
+        del planning_provider
         template = self._load_template()
-        blueprint = list(template.get("screen_blueprint", []))
+        role_map = self._group_assets_by_role(assets)
+        preflight = preflight_report or self.build_preflight_report(payload, assets)
+        brief = director_brief or self.build_director_brief(payload, assets, preflight_report=preflight)
+        selected_roles = preflight.recommended_page_roles or self._select_page_roles(payload.target_slice_count, role_map)
         pages: list[DetailPagePlanPage] = []
-        role_order = self._resolve_main_roles(payload)
-        for page_index in range(payload.target_slice_count):
-            screen_blueprint = blueprint[page_index % len(blueprint)]
-            screen = self._build_screen(page_index, 1, screen_blueprint, assets, role_order)
-            pages.append(
-                DetailPagePlanPage(
-                    page_id=f"page-{page_index + 1:02d}",
-                    title=screen.theme,
-                    style_anchor=str(template.get("global_style_anchor", "")),
-                    narrative_position=page_index + 1,
-                    screens=[screen],
-                )
-            )
+        for index, page_role in enumerate(selected_roles, start=1):
+            blueprint = template["page_blueprints"][page_role]
+            pages.append(self._build_page(index, page_role, blueprint, brief, role_map))
         return DetailPagePlanPayload(
-            template_name=str(template.get("name", "tea_tmall_premium_v1")),
+            template_name=str(template["template_name"]),
             category=payload.category,
             platform=payload.platform,
             style_preset=payload.style_preset,
-            global_style_anchor=str(template.get("global_style_anchor", "天猫高端茶叶详情图，留白克制、材质真实、中文清晰")),
+            canvas_aspect_ratio=str(template["canvas"]["aspect_ratio"]),
+            screens_per_page=int(template["canvas"]["screens_per_page"]),
+            layout_mode=str(template["canvas"]["layout_mode"]),
+            global_style_anchor=brief.global_style_anchor,
             narrative=[page.title for page in pages],
-            total_screens=payload.target_slice_count,
-            total_pages=payload.target_slice_count,
+            total_screens=len(pages),
+            total_pages=len(pages),
             pages=pages,
         )
 
-    def _build_screen(
+    def _build_page(
         self,
         page_index: int,
-        screen_index: int,
+        page_role: DetailPageRole,
         blueprint: dict[str, object],
-        assets: list[DetailPageAssetRef],
-        role_order: list[DetailAssetRole],
-    ) -> DetailPagePlanScreen:
-        preferred_roles = [str(item) for item in blueprint.get("preferred_roles", [])]
-        roles: list[DetailAssetRole] = []
-        for role in [*preferred_roles, *role_order]:
-            if any(asset.role == role for asset in assets) and role not in roles:
-                roles.append(role)  # type: ignore[arg-type]
-        if not roles:
-            roles = [assets[0].role if assets else role_order[0]]
-        return DetailPagePlanScreen(
-            screen_id=f"p{page_index + 1:02d}s{screen_index}",
-            theme=str(blueprint.get("theme", "茶叶详情图表达")),
-            goal=self._build_screen_goal(str(blueprint.get("theme", ""))),
+        brief: DetailDirectorBrief,
+        role_map: dict[DetailAssetRole, list[DetailPageAssetRef]],
+    ) -> DetailPagePlanPage:
+        anchor_roles = self._filter_existing_roles(self._cast_roles(blueprint.get("anchor_roles", [])), role_map)
+        preferred_roles = self._filter_existing_roles(self._cast_roles(blueprint.get("preferred_roles", [])), role_map)
+        supplement_roles = self._cast_roles(blueprint.get("supplement_roles", []))
+        asset_strategy = str(blueprint.get("asset_strategy", "reference_preferred"))
+        allow_generated_supporting_materials = bool(blueprint.get("allow_generated_supporting_materials", False))
+        material_focus = str(blueprint.get("material_focus", ""))
+        reference_roles = anchor_roles or preferred_roles or self._fallback_reference_roles(brief.anchor_priority, role_map)
+        screen_id = f"p{page_index:02d}s1"
+        screen = DetailPagePlanScreen(
+            screen_id=screen_id,
+            theme=str(blueprint.get("screen_theme", blueprint.get("title", ""))),
+            goal=str(blueprint.get("screen_goal", "")),
             screen_type=str(blueprint.get("screen_type", "visual")),
-            suggested_asset_roles=roles[:3],
+            suggested_asset_roles=reference_roles[:3] or self._fallback_reference_roles(brief.anchor_priority, role_map)[:1],
+            asset_strategy=asset_strategy,  # type: ignore[arg-type]
+            anchor_roles=anchor_roles,
+            supplement_roles=supplement_roles,
+            allow_generated_supporting_materials=allow_generated_supporting_materials,
+            material_focus=material_focus,
+            notes=self._build_screen_notes(page_role, anchor_roles, supplement_roles, allow_generated_supporting_materials),
+        )
+        return DetailPagePlanPage(
+            page_id=f"page-{page_index:02d}",
+            title=str(blueprint.get("title", page_role)),
+            page_role=page_role,
+            layout_mode="single_screen_vertical_poster",
+            primary_headline_screen_id=screen_id,
+            style_anchor=brief.global_style_anchor,
+            narrative_position=page_index,
+            asset_strategy=asset_strategy,  # type: ignore[arg-type]
+            anchor_roles=anchor_roles,
+            supplement_roles=supplement_roles,
+            allow_generated_supporting_materials=allow_generated_supporting_materials,
+            review_focus=[str(item) for item in blueprint.get("review_focus", [])],
+            screens=[screen],
         )
 
-    def _build_screen_goal(self, theme: str) -> str:
-        if "干茶" in theme:
-            return "突出干茶条索、色泽与原叶等级，建立质感认知。"
-        if "茶汤" in theme:
-            return "表现汤色通透感、香气氛围与饮用欲望。"
-        if "叶底" in theme:
-            return "说明叶底舒展状态与原料真实度。"
-        if "参数" in theme or "冲泡" in theme:
-            return "用克制信息表达参数、冲泡建议与购买行动。"
-        if "卖点" in theme:
-            return "把核心卖点拆成适合单屏阅读的信息表达。"
-        return "建立品牌气质与产品主体识别，形成整套详情图的叙事开篇。"
+    def _build_screen_notes(
+        self,
+        page_role: DetailPageRole,
+        anchor_roles: list[DetailAssetRole],
+        supplement_roles: list[DetailAssetRole],
+        allow_generated_supporting_materials: bool,
+    ) -> list[str]:
+        notes = [
+            "固定为 single_screen_vertical_poster。",
+            "每页只允许一个主要标题层级。",
+        ]
+        if page_role in {"dry_leaf_evidence", "leaf_bottom_process_evidence"}:
+            notes.append("形态忠实优先于装饰构图。")
+        if anchor_roles:
+            notes.append(f"优先锁定锚点素材：{', '.join(anchor_roles)}。")
+        if allow_generated_supporting_materials and supplement_roles:
+            notes.append(f"可补足辅助素材：{', '.join(supplement_roles)}。")
+        return notes
 
-    def _resolve_main_roles(self, payload: DetailPageJobCreatePayload) -> list[DetailAssetRole]:
-        if payload.prefer_main_result_first:
-            return ["main_result", "packaging", "scene_ref"]
-        return ["packaging", "main_result", "scene_ref"]
+    def _select_page_roles(
+        self,
+        target_count: int,
+        role_map: dict[DetailAssetRole, list[DetailPageAssetRef]],
+    ) -> list[DetailPageRole]:
+        """按素材可用性选择页职责，不伪造证据页。"""
 
-    def _build_prompt(
+        template = self._load_template()
+        default_sequence = [
+            "hero_opening",
+            "dry_leaf_evidence",
+            "tea_soup_evidence",
+            "parameter_and_closing",
+            "leaf_bottom_process_evidence",
+            "brand_trust",
+            "gift_openbox_portable",
+            "scene_value_story",
+            "brewing_method_info",
+            "packaging_structure_value",
+            "package_closeup_evidence",
+            "brand_closing",
+        ]
+        sequence = template.get("page_sequences", {}).get(str(target_count), default_sequence)
+        selected: list[DetailPageRole] = []
+        for candidate in sequence:
+            role = str(candidate)
+            if not self._role_is_allowed(role, role_map):
+                continue
+            selected.append(role)  # type: ignore[arg-type]
+        for candidate in self.optional_role_candidates:
+            if len(selected) >= target_count:
+                break
+            if candidate in selected:
+                continue
+            if self._role_is_allowed(candidate, role_map):
+                selected.append(candidate)
+        if len(selected) < target_count:
+            for candidate in default_sequence:
+                page_role = str(candidate)
+                if page_role in selected:
+                    continue
+                selected.append(page_role)  # type: ignore[arg-type]
+                if len(selected) >= target_count:
+                    break
+        return selected[:target_count]
+
+    def _role_is_allowed(
+        self,
+        page_role: str | DetailPageRole,
+        role_map: dict[DetailAssetRole, list[DetailPageAssetRef]],
+    ) -> bool:
+        if page_role == "dry_leaf_evidence":
+            return bool(role_map.get("dry_leaf"))
+        if page_role == "leaf_bottom_process_evidence":
+            return bool(role_map.get("leaf_bottom"))
+        if page_role == "hero_opening":
+            return any(role_map.get(role) for role in self.core_anchor_roles)
+        return True
+
+    def _resolve_anchor_priority(
         self,
         payload: DetailPageJobCreatePayload,
-        assets: list[DetailPageAssetRef],
-        fallback: DetailPagePlanPayload,
-    ) -> str:
-        """拼接规划模型提示词，把所有输入显式收口进去。"""
+        role_map: dict[DetailAssetRole, list[DetailPageAssetRef]],
+    ) -> list[DetailAssetRole]:
+        priority: list[DetailAssetRole] = []
+        preferred = ["main_result", "packaging"] if payload.prefer_main_result_first else ["packaging", "main_result"]
+        for role in preferred + ["dry_leaf", "leaf_bottom", "tea_soup", "scene_ref", "bg_ref"]:
+            if role_map.get(role) and role not in priority:
+                priority.append(role)  # type: ignore[arg-type]
+        for role in self.core_anchor_roles:
+            if role not in priority:
+                priority.append(role)
+        return priority
 
-        asset_manifest = [
-            {
-                "role": asset.role,
-                "file_name": asset.file_name,
-                "source_task_id": asset.source_task_id,
-                "source_result_file": asset.source_result_file,
-            }
-            for asset in assets
-        ]
-        return (
-            "请为茶叶电商详情图生成结构化规划。"
-            f"品牌名={payload.brand_name or '未提供'}；"
-            f"商品名={payload.product_name or '未提供'}；"
-            f"茶类={payload.tea_type}；平台={payload.platform}；风格={payload.style_preset}；"
-            f"价格带={payload.price_band or '未提供'}；目标屏数={payload.target_slice_count}；"
-            f"卖点补充={payload.selling_points or ['未提供']}；"
-            f"商品参数={payload.specs or {'默认': '未提供'}}；"
-            f"冲泡建议={payload.brew_suggestion or '未提供'}；"
-            f"用户额外要求={payload.extra_requirements or '未提供'}；"
-            f"优先使用主图结果={payload.prefer_main_result_first}；"
-            f"素材清单={json.dumps(asset_manifest, ensure_ascii=False)}；"
-            "请只规划天猫风格茶叶详情图，每张图只包含一个 screen，成品为 3:4；"
-            "输出字段必须包含 global_style_anchor、narrative、total_pages、total_screens、pages。"
-            f"若不确定，请至少参考这个兜底结构：{json.dumps(fallback.model_dump(mode='json'), ensure_ascii=False)}"
-        )
+    def _fallback_reference_roles(
+        self,
+        anchor_priority: list[DetailAssetRole],
+        role_map: dict[DetailAssetRole, list[DetailPageAssetRef]],
+    ) -> list[DetailAssetRole]:
+        return [role for role in anchor_priority if role_map.get(role)]
+
+    def _group_assets_by_role(self, assets: list[DetailPageAssetRef]) -> dict[DetailAssetRole, list[DetailPageAssetRef]]:
+        grouped: dict[DetailAssetRole, list[DetailPageAssetRef]] = {
+            "main_result": [],
+            "packaging": [],
+            "dry_leaf": [],
+            "tea_soup": [],
+            "leaf_bottom": [],
+            "scene_ref": [],
+            "bg_ref": [],
+        }
+        for asset in assets:
+            grouped[asset.role].append(asset)
+        return grouped
+
+    def _filter_existing_roles(
+        self,
+        roles: list[DetailAssetRole],
+        role_map: dict[DetailAssetRole, list[DetailPageAssetRef]],
+    ) -> list[DetailAssetRole]:
+        return [role for role in roles if role_map.get(role)]
+
+    def _cast_roles(self, values: object) -> list[DetailAssetRole]:
+        roles: list[DetailAssetRole] = []
+        for item in values if isinstance(values, list) else []:
+            roles.append(str(item))  # type: ignore[arg-type]
+        return roles
 
     def _load_template(self) -> dict[str, object]:
-        """读取茶叶详情图模板。"""
+        """读取茶叶详情图 V2 模板。"""
 
-        template_path = self.template_root / "detail_pages" / "tea_tmall_premium_v1.json"
+        template_path = self.template_root / "detail_pages" / "tea_tmall_premium_v2.json"
         return json.loads(template_path.read_text(encoding="utf-8"))

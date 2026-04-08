@@ -11,6 +11,7 @@ from backend.engine.core.paths import get_task_dir
 from backend.engine.domain.task import Task, TaskStatus
 from backend.schemas.detail import (
     DetailCopyPlanResult,
+    DetailDirectorBrief,
     DetailPageCopyBlock,
     DetailPagePlanPayload,
     DetailPagePromptPlanItem,
@@ -18,6 +19,9 @@ from backend.schemas.detail import (
     DetailPageRenderResult,
     DetailPageRuntimeImage,
     DetailPageRuntimePayload,
+    DetailPreflightReport,
+    DetailRetryDecisionReport,
+    DetailVisualReviewReport,
 )
 from backend.schemas.task import TaskSummary
 
@@ -34,6 +38,10 @@ class DetailRuntimeService:
         copy_wrapper = self._load_json(task_dir / "plan" / "detail_copy_plan.json", DetailCopyPlanResult)
         copy_blocks = copy_wrapper.items if copy_wrapper is not None else []
         prompt_plan = self._load_json_list(task_dir / "plan" / "detail_prompt_plan.json", DetailPagePromptPlanItem)
+        preflight_report = self._load_json(task_dir / "inputs" / "preflight_report.json", DetailPreflightReport)
+        director_brief = self._load_json(task_dir / "plan" / "director_brief.json", DetailDirectorBrief)
+        visual_review = self._load_json(task_dir / "review" / "visual_review.json", DetailVisualReviewReport)
+        retry_decisions = self._load_json(task_dir / "review" / "retry_decisions.json", DetailRetryDecisionReport)
         qc_summary = self._load_json(task_dir / "qc" / "detail_qc_report.json", DetailPageQCSummary) or DetailPageQCSummary()
         render_results = self._load_json_list(task_dir / "generated" / "detail_render_report.json", DetailPageRenderResult)
         images = self._build_images(task, plan, prompt_plan, render_results)
@@ -53,6 +61,10 @@ class DetailRuntimeService:
             plan=plan,
             copy_blocks=copy_blocks,
             prompt_plan=prompt_plan,
+            preflight_report=preflight_report,
+            director_brief=director_brief,
+            visual_review=visual_review,
+            retry_decisions=retry_decisions,
             qc_summary=qc_summary,
             images=images,
             export_zip_url=self._resolve_export_url(task.task_id, task_dir),
@@ -109,9 +121,15 @@ class DetailRuntimeService:
                 DetailPagePromptPlanItem(
                     page_id=page.page_id,
                     page_title=page.title,
+                    page_role=page.page_role,
+                    layout_mode=page.layout_mode,
+                    primary_headline_screen_id=page.primary_headline_screen_id,
                     global_style_anchor=plan.global_style_anchor,
                     screen_themes=[screen.theme for screen in page.screens],
                     layout_notes=[],
+                    title_copy="",
+                    subtitle_copy="",
+                    selling_points_for_render=[],
                     prompt="",
                     negative_prompt="",
                     references=[],
@@ -126,12 +144,14 @@ class DetailRuntimeService:
                         image_id=f"detail-{index:02d}",
                         page_id=item.page_id,
                         title=item.page_title,
+                        page_role=item.page_role,
                         status="completed",
                         file_name=render_row.relative_path,
                         image_url=self._build_url(task.task_id, render_row.relative_path),
                         width=render_row.width,
                         height=render_row.height,
                         reference_roles=render_row.reference_roles,
+                        retry_count=render_row.retry_count,
                     )
                 )
                 continue
@@ -141,21 +161,25 @@ class DetailRuntimeService:
                         image_id=f"detail-{index:02d}",
                         page_id=item.page_id,
                         title=item.page_title,
+                        page_role=item.page_role,
                         status="failed",
                         reference_roles=render_row.reference_roles,
                         error_message=render_row.error_message,
+                        retry_count=render_row.retry_count,
                     )
                 )
                 continue
             images.append(
-                    DetailPageRuntimeImage(
-                        image_id=f"detail-{index:02d}",
-                        page_id=item.page_id,
-                        title=item.page_title,
-                        status=self._resolve_placeholder_status(task.status, index, render_results),
-                        reference_roles=[ref.role for ref in item.references],
-                    )
+                DetailPageRuntimeImage(
+                    image_id=f"detail-{index:02d}",
+                    page_id=item.page_id,
+                    title=item.page_title,
+                    page_role=item.page_role,
+                    status=self._resolve_placeholder_status(task.status, index, render_results),
+                    reference_roles=[ref.role for ref in item.references],
+                    retry_count=0,
                 )
+            )
         return images
 
     def _resolve_placeholder_status(
@@ -164,13 +188,15 @@ class DetailRuntimeService:
         index: int,
         render_results: list[DetailPageRenderResult],
     ) -> str:
-        completed_count = sum(1 for item in render_results if item.status == "completed")
+        processed_count = len(render_results)
         if task_status == TaskStatus.CREATED:
             return "queued"
         if task_status == TaskStatus.RUNNING:
-            return "running" if index == completed_count + 1 else "queued"
+            return "running" if index == processed_count + 1 else "queued"
         if task_status == TaskStatus.FAILED:
-            return "failed" if index == completed_count + 1 else "queued"
+            return "failed" if index <= processed_count else "queued"
+        if task_status == TaskStatus.REVIEW_REQUIRED:
+            return "queued" if index > processed_count else "failed"
         return "completed"
 
     def _resolve_runtime_message(
@@ -190,11 +216,11 @@ class DetailRuntimeService:
                 return f"正在生成详情图（{generated_count}/{planned_count}）"
             return task.current_step_label or "详情图任务运行中"
         if task.status == TaskStatus.REVIEW_REQUIRED:
-            return "详情图已生成，存在 QC 项待复核。"
+            return f"详情图已生成 {generated_count}/{planned_count} 页，请复核 review 与 QC 结果。"
         if task.status == TaskStatus.COMPLETED:
             if task.current_step == "detail_generate_prompt" or planned_count == 0:
                 return "规划、文案与 Prompt 已完成。"
-            return f"详情图任务已完成，共生成 {generated_count} / {planned_count} 张 3:4 单屏图。"
+            return f"详情图任务已完成，共生成 {generated_count}/{planned_count} 张 3:4 单屏图。"
         return task.current_step_label or "详情图任务失败。"
 
     def _resolve_export_url(self, task_id: str, task_dir: Path) -> str:

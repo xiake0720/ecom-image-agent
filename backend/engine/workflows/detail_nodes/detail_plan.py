@@ -11,17 +11,26 @@ def detail_plan(state: DetailWorkflowState, deps: DetailWorkflowDependencies) ->
     """生成整套详情图规划并落盘。"""
 
     service = DetailPlannerService(template_root=get_settings().template_root)
+    payload = state["detail_payload"]
+    assets = state.get("detail_assets", [])
+    preflight_report = state.get("detail_preflight_report")
+    director_brief = service.build_director_brief(payload, assets, preflight_report=preflight_report)
     plan = service.build_plan(
-        state["detail_payload"],
-        state.get("detail_assets", []),
+        payload,
+        assets,
+        preflight_report=preflight_report,
+        director_brief=director_brief,
         planning_provider=deps.planning_provider,
     )
+    deps.storage.save_json_artifact(state["task"].task_id, "plan/director_brief.json", director_brief)
     deps.storage.save_json_artifact(state["task"].task_id, "plan/detail_plan.json", plan)
     return {
+        "detail_director_brief": director_brief,
         "detail_plan": plan,
         "logs": [
             *state.get("logs", []),
             f"[detail_plan] total_pages={plan.total_pages} total_screens={plan.total_screens}",
+            "[detail_plan] saved plan/director_brief.json",
             "[detail_plan] saved plan/detail_plan.json",
         ],
     }

@@ -8,6 +8,7 @@ from typing import Callable, TypedDict
 from backend.engine.core.config import ResolvedModelSelection, ResolvedProviderRoute
 from backend.engine.domain.task import Task, TaskStatus
 from backend.schemas.detail import (
+    DetailDirectorBrief,
     DetailPageAssetRef,
     DetailPageCopyBlock,
     DetailPageJobCreatePayload,
@@ -15,14 +16,17 @@ from backend.schemas.detail import (
     DetailPagePromptPlanItem,
     DetailPageQCSummary,
     DetailPageRenderResult,
+    DetailPreflightReport,
+    DetailRetryDecisionReport,
+    DetailVisualReviewReport,
 )
 
 DETAIL_STEP_PROGRESS: dict[str, tuple[int, str]] = {
     "detail_ingest_assets": (10, "正在接收详情图输入"),
-    "detail_plan": (28, "正在规划详情图叙事"),
-    "detail_generate_copy": (44, "正在生成详情图文案"),
+    "detail_plan": (28, "正在规划详情页叙事"),
+    "detail_generate_copy": (44, "正在生成详情页文案"),
     "detail_generate_prompt": (60, "正在生成渲染提示词"),
-    "detail_render_pages": (82, "正在渲染详情图"),
+    "detail_render_pages": (82, "正在渲染详情页"),
     "detail_run_qc": (92, "正在执行规则 QC"),
     "detail_finalize": (100, "正在打包与导出"),
 }
@@ -34,10 +38,14 @@ class DetailWorkflowState(TypedDict, total=False):
     task: Task
     detail_payload: DetailPageJobCreatePayload
     detail_assets: list[DetailPageAssetRef]
+    detail_preflight_report: DetailPreflightReport
+    detail_director_brief: DetailDirectorBrief
     detail_plan: DetailPagePlanPayload
     detail_copy_blocks: list[DetailPageCopyBlock]
     detail_prompt_plan: list[DetailPagePromptPlanItem]
     detail_render_results: list[DetailPageRenderResult]
+    detail_visual_review: DetailVisualReviewReport
+    detail_retry_decisions: DetailRetryDecisionReport
     detail_qc_summary: DetailPageQCSummary
     logs: list[str]
     error_message: str
@@ -154,6 +162,6 @@ def build_detail_render_progress_task(task: Task, *, completed_count: int, total
     return update_detail_task_progress(
         task,
         step="detail_render_pages",
-        step_label=f"正在渲染详情图（{safe_completed}/{safe_total}）",
+        step_label=f"正在渲染详情页（{safe_completed}/{safe_total}）",
         progress_percent=progress,
     )

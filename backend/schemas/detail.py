@@ -17,9 +17,40 @@ DetailAssetRole = Literal[
     "bg_ref",
 ]
 
+DetailPageRole = Literal[
+    "hero_opening",
+    "dry_leaf_evidence",
+    "tea_soup_evidence",
+    "parameter_and_closing",
+    "leaf_bottom_process_evidence",
+    "brand_trust",
+    "gift_openbox_portable",
+    "brewing_method_info",
+    "scene_value_story",
+    "packaging_structure_value",
+    "package_closeup_evidence",
+    "brand_closing",
+]
+
+DetailAssetStrategy = Literal[
+    "anchor_required",
+    "reference_preferred",
+    "ai_supplement_allowed",
+    "supplement_only",
+]
+
+DetailHeadlineLevel = Literal["primary"]
 DetailTaskStatus = Literal["created", "running", "completed", "review_required", "failed"]
 DetailRenderStatus = Literal["queued", "running", "completed", "failed"]
 DetailQCStatus = Literal["passed", "warning", "failed"]
+DetailVisualReviewStatus = Literal["passed", "warning", "failed"]
+DetailRetryStrategy = Literal[
+    "original_prompt_retry",
+    "text_density_reduction",
+    "reference_rebinding",
+    "packaging_emphasis",
+    "style_correction",
+]
 
 
 class DetailPageAssetRef(BaseModel):
@@ -44,6 +75,12 @@ class DetailPagePlanScreen(BaseModel):
     goal: str
     screen_type: Literal["visual", "info"] = "visual"
     suggested_asset_roles: list[DetailAssetRole] = Field(default_factory=list)
+    asset_strategy: DetailAssetStrategy = "reference_preferred"
+    anchor_roles: list[DetailAssetRole] = Field(default_factory=list)
+    supplement_roles: list[DetailAssetRole] = Field(default_factory=list)
+    allow_generated_supporting_materials: bool = False
+    material_focus: str = ""
+    notes: list[str] = Field(default_factory=list)
 
 
 class DetailPagePlanPage(BaseModel):
@@ -51,18 +88,29 @@ class DetailPagePlanPage(BaseModel):
 
     page_id: str
     title: str
+    page_role: DetailPageRole = "hero_opening"
+    layout_mode: str = "single_screen_vertical_poster"
+    primary_headline_screen_id: str = ""
     style_anchor: str = ""
     narrative_position: int = 1
+    asset_strategy: DetailAssetStrategy = "reference_preferred"
+    anchor_roles: list[DetailAssetRole] = Field(default_factory=list)
+    supplement_roles: list[DetailAssetRole] = Field(default_factory=list)
+    allow_generated_supporting_materials: bool = False
+    review_focus: list[str] = Field(default_factory=list)
     screens: list[DetailPagePlanScreen] = Field(default_factory=list)
 
 
 class DetailPagePlanPayload(BaseModel):
     """详情图规划结果。"""
 
-    template_name: str = "tea_tmall_premium_v1"
+    template_name: str = "tea_tmall_premium_v2"
     category: str = "tea"
     platform: str = "tmall"
     style_preset: str = "tea_tmall_premium_light"
+    canvas_aspect_ratio: str = "3:4"
+    screens_per_page: int = 1
+    layout_mode: str = "single_screen_vertical_poster"
     global_style_anchor: str
     narrative: list[str] = Field(default_factory=list)
     total_screens: int
@@ -75,6 +123,7 @@ class DetailPageCopyBlock(BaseModel):
 
     page_id: str
     screen_id: str
+    headline_level: DetailHeadlineLevel = "primary"
     headline: str
     subheadline: str = ""
     selling_points: list[str] = Field(default_factory=list)
@@ -95,6 +144,9 @@ class DetailPromptDraftItem(BaseModel):
 
     page_id: str
     page_title: str = ""
+    page_role: DetailPageRole = "hero_opening"
+    layout_mode: str = "single_screen_vertical_poster"
+    primary_headline_screen_id: str = ""
     screen_themes: list[str] = Field(default_factory=list)
     layout_notes: list[str] = Field(default_factory=list)
     prompt: str = ""
@@ -113,12 +165,24 @@ class DetailPagePromptPlanItem(BaseModel):
 
     page_id: str
     page_title: str
+    page_role: DetailPageRole = "hero_opening"
+    layout_mode: str = "single_screen_vertical_poster"
+    primary_headline_screen_id: str = ""
     global_style_anchor: str
     screen_themes: list[str] = Field(default_factory=list)
     layout_notes: list[str] = Field(default_factory=list)
+    title_copy: str = ""
+    subtitle_copy: str = ""
+    selling_points_for_render: list[str] = Field(default_factory=list)
     prompt: str
     negative_prompt: str
     references: list[DetailPageAssetRef] = Field(default_factory=list)
+    asset_strategy: DetailAssetStrategy = "reference_preferred"
+    allow_generated_supporting_materials: bool = False
+    copy_strategy: str = "strong"
+    text_density: str = "low"
+    should_render_text: bool = True
+    retryable: bool = True
     target_aspect_ratio: str = "3:4"
     target_width: int = 1536
     target_height: int = 2048
@@ -130,6 +194,7 @@ class DetailPageRenderResult(BaseModel):
     render_id: str
     page_id: str
     page_title: str
+    page_role: DetailPageRole = "hero_opening"
     status: DetailRenderStatus
     file_name: str = ""
     relative_path: str = ""
@@ -139,6 +204,8 @@ class DetailPageRenderResult(BaseModel):
     provider_name: str = ""
     model_name: str = ""
     error_message: str = ""
+    retry_count: int = 0
+    retry_strategies: list[DetailRetryStrategy] = Field(default_factory=list)
     started_at: str = ""
     completed_at: str = ""
 
@@ -159,6 +226,7 @@ class DetailPageQCPageSummary(BaseModel):
 
     page_id: str
     title: str = ""
+    page_role: DetailPageRole = "hero_opening"
     status: DetailQCStatus = "passed"
     issues: list[str] = Field(default_factory=list)
     reference_roles: list[str] = Field(default_factory=list)
@@ -185,6 +253,7 @@ class DetailPageRuntimeImage(BaseModel):
     image_id: str
     page_id: str
     title: str
+    page_role: DetailPageRole = "hero_opening"
     status: DetailRenderStatus
     file_name: str = ""
     image_url: str = ""
@@ -192,6 +261,83 @@ class DetailPageRuntimeImage(BaseModel):
     height: int | None = None
     reference_roles: list[str] = Field(default_factory=list)
     error_message: str = ""
+    retry_count: int = 0
+
+
+class DetailPreflightRoleSummary(BaseModel):
+    """单类素材的预检摘要。"""
+
+    role: DetailAssetRole
+    count: int = 0
+    file_names: list[str] = Field(default_factory=list)
+
+
+class DetailPreflightReport(BaseModel):
+    """详情图输入预检。"""
+
+    passed: bool = True
+    warnings: list[str] = Field(default_factory=list)
+    strong_anchor_roles: list[DetailAssetRole] = Field(default_factory=lambda: ["main_result", "packaging", "dry_leaf", "leaf_bottom"])
+    ai_supplement_roles: list[DetailAssetRole] = Field(default_factory=lambda: ["tea_soup", "scene_ref", "bg_ref"])
+    available_roles: list[DetailAssetRole] = Field(default_factory=list)
+    missing_required_roles: list[DetailAssetRole] = Field(default_factory=list)
+    missing_optional_roles: list[DetailAssetRole] = Field(default_factory=list)
+    asset_summary: list[DetailPreflightRoleSummary] = Field(default_factory=list)
+    recommended_page_roles: list[DetailPageRole] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+class DetailDirectorBrief(BaseModel):
+    """面向规划与提示词的导演简报。"""
+
+    template_name: str = "tea_tmall_premium_v2"
+    category: str = "tea"
+    platform: str = "tmall"
+    style_preset: str = "tea_tmall_premium_light"
+    global_style_anchor: str = ""
+    page_rhythm: list[str] = Field(default_factory=list)
+    anchor_priority: list[DetailAssetRole] = Field(default_factory=list)
+    required_page_roles: list[DetailPageRole] = Field(default_factory=list)
+    optional_page_roles: list[DetailPageRole] = Field(default_factory=list)
+    ai_supplement_page_roles: list[DetailPageRole] = Field(default_factory=list)
+    planning_notes: list[str] = Field(default_factory=list)
+    material_notes: list[str] = Field(default_factory=list)
+    constraints: list[str] = Field(default_factory=list)
+
+
+class DetailVisualReviewPage(BaseModel):
+    """单页视觉审查结果。"""
+
+    page_id: str
+    page_role: DetailPageRole = "hero_opening"
+    title: str = ""
+    status: DetailVisualReviewStatus = "passed"
+    findings: list[str] = Field(default_factory=list)
+    recommended_actions: list[str] = Field(default_factory=list)
+
+
+class DetailVisualReviewReport(BaseModel):
+    """生成结果视觉审查。"""
+
+    overall_status: DetailVisualReviewStatus = "passed"
+    summary: list[str] = Field(default_factory=list)
+    pages: list[DetailVisualReviewPage] = Field(default_factory=list)
+
+
+class DetailRetryDecisionItem(BaseModel):
+    """单页重试决策。"""
+
+    page_id: str
+    page_role: DetailPageRole = "hero_opening"
+    should_retry: bool = False
+    reason: str = ""
+    strategies: list[DetailRetryStrategy] = Field(default_factory=list)
+
+
+class DetailRetryDecisionReport(BaseModel):
+    """重试决策集合。"""
+
+    pages: list[DetailRetryDecisionItem] = Field(default_factory=list)
 
 
 class DetailPageRuntimePayload(BaseModel):
@@ -209,6 +355,10 @@ class DetailPageRuntimePayload(BaseModel):
     plan: DetailPagePlanPayload | None = None
     copy_blocks: list[DetailPageCopyBlock] = Field(default_factory=list)
     prompt_plan: list[DetailPagePromptPlanItem] = Field(default_factory=list)
+    preflight_report: DetailPreflightReport | None = None
+    director_brief: DetailDirectorBrief | None = None
+    visual_review: DetailVisualReviewReport | None = None
+    retry_decisions: DetailRetryDecisionReport | None = None
     qc_summary: DetailPageQCSummary = Field(default_factory=DetailPageQCSummary)
     images: list[DetailPageRuntimeImage] = Field(default_factory=list)
     export_zip_url: str = ""

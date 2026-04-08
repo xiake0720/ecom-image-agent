@@ -268,5 +268,5 @@ class DetailPageJobService:
         return asset_rows
 
     def _ensure_detail_dirs(self, task_dir: Path) -> None:
-        for name in ["inputs", "plan", "generated", "qc", "exports"]:
+        for name in ["inputs", "plan", "generated", "review", "qc", "exports"]:
             (task_dir / name).mkdir(parents=True, exist_ok=True)

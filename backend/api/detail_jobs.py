@@ -1,4 +1,4 @@
-"""详情图真实任务路由。"""
+"""详情图任务路由。"""
 
 from __future__ import annotations
 
@@ -217,6 +217,8 @@ def _safe_json_list(raw: str) -> list[str]:
 def _safe_json_dict(raw: str) -> dict[str, str]:
     try:
         parsed = json.loads(raw or "{}")
-        return parsed if isinstance(parsed, dict) else {}
+        if not isinstance(parsed, dict):
+            return {}
+        return {str(key): str(value) for key, value in parsed.items()}
     except json.JSONDecodeError:
         return {}

@@ -2,23 +2,29 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
 
+from backend.engine.workflows.detail_state import DetailWorkflowDependencies, DetailWorkflowState
 from backend.schemas.detail import (
     DetailPageQCCheck,
     DetailPageQCPageSummary,
     DetailPageQCSummary,
+    DetailRetryDecisionItem,
+    DetailRetryDecisionReport,
+    DetailVisualReviewPage,
+    DetailVisualReviewReport,
 )
-from backend.engine.workflows.detail_state import DetailWorkflowDependencies, DetailWorkflowState
 
 
 def detail_run_qc(state: DetailWorkflowState, deps: DetailWorkflowDependencies) -> dict:
-    """对详情图结果做规则型 QC，并为后续 selective retry 预留页级结构。"""
+    """对详情图结果执行规则 QC，并生成 visual_review / retry_decisions。"""
 
     plan = state.get("detail_plan")
     prompt_plan = state.get("detail_prompt_plan", [])
     copy_blocks = state.get("detail_copy_blocks", [])
     render_results = state.get("detail_render_results", [])
+    assets = state.get("detail_assets", [])
     if plan is None:
         raise RuntimeError("detail_run_qc requires detail_plan")
 
@@ -27,151 +33,289 @@ def detail_run_qc(state: DetailWorkflowState, deps: DetailWorkflowDependencies) 
     copy_map = {f"{item.page_id}:{item.screen_id}": item for item in copy_blocks}
     checks: list[DetailPageQCCheck] = []
     pages: list[DetailPageQCPageSummary] = []
+    visual_pages: list[DetailVisualReviewPage] = []
+    retry_pages: list[DetailRetryDecisionItem] = []
 
-    checks.append(
-        _build_check(
-            check_id="task-page-count",
-            check_name="page_count_match",
-            page_id="task",
-            passed=len(render_results) == plan.total_pages,
-            message="结果页数与计划页数一致" if len(render_results) == plan.total_pages else "结果页数与计划页数不一致",
-            details={"planned_count": plan.total_pages, "generated_count": len(render_results)},
+    generated_count = sum(1 for item in render_results if item.status == "completed")
+    if generated_count == 0:
+        checks.append(
+            _build_check(
+                check_id="task-generated-count",
+                check_name="generated_count",
+                page_id="task",
+                status="failed",
+                message="本次任务没有成功生成任何详情图",
+                details={"planned_count": plan.total_pages, "generated_count": generated_count},
+            )
         )
-    )
+    elif generated_count < plan.total_pages:
+        checks.append(
+            _build_check(
+                check_id="task-generated-count",
+                check_name="generated_count",
+                page_id="task",
+                status="warning",
+                message="详情图仅部分生成成功",
+                details={"planned_count": plan.total_pages, "generated_count": generated_count},
+            )
+        )
+    else:
+        checks.append(
+            _build_check(
+                check_id="task-generated-count",
+                check_name="generated_count",
+                page_id="task",
+                status="passed",
+                message="详情图页数与计划一致",
+                details={"planned_count": plan.total_pages, "generated_count": generated_count},
+            )
+        )
 
-    for page_index, page in enumerate(plan.pages, start=1):
+    packaging_asset_count = sum(1 for asset in assets if asset.role == "packaging")
+    used_packaging_files = [
+        ref.file_name
+        for item in prompt_plan
+        for ref in item.references
+        if ref.role == "packaging"
+    ]
+    if packaging_asset_count > 1:
+        unique_packaging_used = len(set(used_packaging_files))
+        status = "passed" if unique_packaging_used > 1 else "warning"
+        message = "包装参考已轮换使用" if status == "passed" else "包装参考过度复用单一图片"
+        checks.append(
+            _build_check(
+                check_id="task-packaging-reuse",
+                check_name="packaging_reference_diversity",
+                page_id="task",
+                status=status,
+                message=message,
+                details={
+                    "packaging_asset_count": packaging_asset_count,
+                    "used_packaging_files": list(dict.fromkeys(used_packaging_files)),
+                },
+            )
+        )
+
+    for page in plan.pages:
         prompt_item = prompt_map.get(page.page_id)
         render_item = render_map.get(page.page_id)
         page_issues: list[str] = []
+        page_warnings: list[str] = []
 
         has_copy_gap = any(
             not copy_map.get(f"{page.page_id}:{screen.screen_id}")
             or not (copy_map[f"{page.page_id}:{screen.screen_id}"].headline or "").strip()
             for screen in page.screens
         )
-        copy_check = _build_check(
-            check_id=f"{page.page_id}-copy",
-            check_name="copy_presence",
-            page_id=page.page_id,
-            passed=not has_copy_gap,
-            message="页面文案完整" if not has_copy_gap else "页面存在空文案",
-            details={"page_id": page.page_id},
+        checks.append(
+            _build_check(
+                check_id=f"{page.page_id}-copy",
+                check_name="copy_presence",
+                page_id=page.page_id,
+                status="failed" if has_copy_gap else "passed",
+                message="页面文案完整" if not has_copy_gap else "页面存在空文案",
+                details={"page_id": page.page_id},
+            )
         )
-        checks.append(copy_check)
-        if copy_check.status != "passed":
-            page_issues.append(copy_check.message)
+        if has_copy_gap:
+            page_issues.append("页面存在空文案")
 
-        has_prompt_refs = bool(prompt_item and prompt_item.references)
-        refs_check = _build_check(
-            check_id=f"{page.page_id}-references",
-            check_name="reference_binding",
-            page_id=page.page_id,
-            passed=has_prompt_refs,
-            message="页面已绑定参考图" if has_prompt_refs else "页面缺少 references",
-            details={"reference_roles": [ref.role for ref in prompt_item.references] if prompt_item else []},
-        )
-        checks.append(refs_check)
-        if refs_check.status != "passed":
-            page_issues.append(refs_check.message)
+        if prompt_item is None or not prompt_item.references:
+            page_issues.append("页面缺少 references")
+            checks.append(
+                _build_check(
+                    check_id=f"{page.page_id}-references",
+                    check_name="reference_binding",
+                    page_id=page.page_id,
+                    status="failed",
+                    message="页面缺少 references",
+                    details={},
+                )
+            )
+        else:
+            checks.append(
+                _build_check(
+                    check_id=f"{page.page_id}-references",
+                    check_name="reference_binding",
+                    page_id=page.page_id,
+                    status="passed",
+                    message="页面已绑定参考图",
+                    details={"reference_roles": [ref.role for ref in prompt_item.references]},
+                )
+            )
 
-        expected_roles = {role for screen in page.screens for role in screen.suggested_asset_roles}
+        expected_anchor_roles = set(page.anchor_roles)
         actual_roles = {ref.role for ref in (prompt_item.references if prompt_item else [])}
-        for role, check_name, label in [
-            ("dry_leaf", "dry_leaf_binding", "茶干页使用 dry_leaf"),
-            ("tea_soup", "tea_soup_binding", "茶汤页使用 tea_soup"),
-            ("leaf_bottom", "leaf_bottom_binding", "叶底页使用 leaf_bottom"),
-        ]:
-            if role not in expected_roles:
-                continue
-            role_check = _build_check(
-                check_id=f"{page.page_id}-{role}",
-                check_name=check_name,
-                page_id=page.page_id,
-                passed=role in actual_roles,
-                message=label if role in actual_roles else f"{label} 缺失",
-                details={"expected_roles": list(expected_roles), "actual_roles": list(actual_roles)},
+        missing_anchor_roles = [role for role in expected_anchor_roles if role not in actual_roles]
+        if missing_anchor_roles:
+            page_issues.append(f"缺少锚点素材：{', '.join(missing_anchor_roles)}")
+            checks.append(
+                _build_check(
+                    check_id=f"{page.page_id}-anchor",
+                    check_name="anchor_binding",
+                    page_id=page.page_id,
+                    status="failed",
+                    message="锚点素材绑定缺失",
+                    details={"expected_anchor_roles": list(expected_anchor_roles), "actual_roles": list(actual_roles)},
+                )
             )
-            checks.append(role_check)
-            if role_check.status != "passed":
-                page_issues.append(role_check.message)
+        else:
+            checks.append(
+                _build_check(
+                    check_id=f"{page.page_id}-anchor",
+                    check_name="anchor_binding",
+                    page_id=page.page_id,
+                    status="passed",
+                    message="锚点素材绑定正确",
+                    details={"expected_anchor_roles": list(expected_anchor_roles), "actual_roles": list(actual_roles)},
+                )
+            )
 
-        if page_index == 1:
-            first_screen_ok = bool(actual_roles.intersection({"packaging", "main_result"}))
-            first_screen_check = _build_check(
-                check_id="page-01-packaging",
-                check_name="first_screen_packaging_or_main_result",
-                page_id=page.page_id,
-                passed=first_screen_ok,
-                message="首屏已绑定 packaging/main_result" if first_screen_ok else "首屏缺少 packaging/main_result",
-                details={"actual_roles": list(actual_roles)},
-            )
-            checks.append(first_screen_check)
-            if first_screen_check.status != "passed":
-                page_issues.append(first_screen_check.message)
+        block = next((copy_map.get(f"{page.page_id}:{screen.screen_id}") for screen in page.screens), None)
+        if block is not None and len(block.headline) > 12:
+            page_warnings.append("标题长度超过 12 字")
+        if block is not None and len(block.subheadline) > 24:
+            page_warnings.append("副标题长度超过 24 字")
+        if block is not None and any(token in block.parameter_copy.lower() for token in ["tbd", "net_content", "origin"]):
+            page_issues.append("参数页存在占位值或英文键名")
+        if page.page_role in {"parameter_and_closing", "brewing_method_info"} and block is not None:
+            parameter_cards = [part.strip() for part in block.parameter_copy.split("/") if part.strip()]
+            if len(parameter_cards) < 3:
+                page_warnings.append("参数卡不足 3 组")
 
         file_exists = bool(render_item and render_item.relative_path and (Path(state["task"].task_dir) / render_item.relative_path).exists())
-        file_check = _build_check(
-            check_id=f"{page.page_id}-file",
-            check_name="result_file_exists",
-            page_id=page.page_id,
-            passed=file_exists,
-            message="结果文件存在" if file_exists else "结果文件不存在",
-            details={"relative_path": render_item.relative_path if render_item else ""},
-        )
-        checks.append(file_check)
-        if file_check.status != "passed":
-            page_issues.append(file_check.message)
+        if render_item is not None and render_item.status == "failed":
+            page_issues.append(render_item.error_message or "页面渲染失败")
+        if not file_exists:
+            checks.append(
+                _build_check(
+                    check_id=f"{page.page_id}-file",
+                    check_name="result_file_exists",
+                    page_id=page.page_id,
+                    status="failed",
+                    message="结果文件不存在",
+                    details={"relative_path": render_item.relative_path if render_item else ""},
+                )
+            )
+            if render_item is None or render_item.status != "failed":
+                page_issues.append("结果文件不存在")
+        else:
+            checks.append(
+                _build_check(
+                    check_id=f"{page.page_id}-file",
+                    check_name="result_file_exists",
+                    page_id=page.page_id,
+                    status="passed",
+                    message="结果文件存在",
+                    details={"relative_path": render_item.relative_path if render_item else ""},
+                )
+            )
 
         size_ok = bool(
             render_item
             and render_item.width
             and render_item.height
-            and abs((render_item.height / render_item.width) - (4 / 3)) < 0.15
+            and abs((render_item.height / render_item.width) - (4 / 3)) < 0.12
         )
-        size_check = _build_check(
-            check_id=f"{page.page_id}-size",
-            check_name="detail_image_size",
-            page_id=page.page_id,
-            passed=size_ok,
-            message="3:4 比例正确" if size_ok else "详情图尺寸或比例不正确",
-            details={"width": render_item.width if render_item else None, "height": render_item.height if render_item else None},
-        )
-        checks.append(size_check)
-        if size_check.status != "passed":
-            page_issues.append(size_check.message)
+        if not size_ok:
+            page_issues.append("详情图尺寸或比例不正确")
+            checks.append(
+                _build_check(
+                    check_id=f"{page.page_id}-size",
+                    check_name="detail_image_size",
+                    page_id=page.page_id,
+                    status="failed",
+                    message="详情图尺寸或比例不正确",
+                    details={"width": render_item.width if render_item else None, "height": render_item.height if render_item else None},
+                )
+            )
+        else:
+            checks.append(
+                _build_check(
+                    check_id=f"{page.page_id}-size",
+                    check_name="detail_image_size",
+                    page_id=page.page_id,
+                    status="passed",
+                    message="3:4 比例正确",
+                    details={"width": render_item.width if render_item else None, "height": render_item.height if render_item else None},
+                )
+            )
 
-        page_status = "failed" if any(check.page_id == page.page_id and check.status == "failed" for check in checks) else "warning" if page_issues else "passed"
+        for warning in page_warnings:
+            checks.append(
+                _build_check(
+                    check_id=f"{page.page_id}-{warning}",
+                    check_name="page_warning",
+                    page_id=page.page_id,
+                    status="warning",
+                    message=warning,
+                    details={},
+                )
+            )
+
+        page_status = "failed" if page_issues else "warning" if page_warnings else "passed"
         pages.append(
             DetailPageQCPageSummary(
                 page_id=page.page_id,
                 title=page.title,
+                page_role=page.page_role,
                 status=page_status,
-                issues=page_issues,
+                issues=[*page_issues, *page_warnings],
                 reference_roles=list(actual_roles),
                 file_name=render_item.file_name if render_item else "",
                 width=render_item.width if render_item else None,
                 height=render_item.height if render_item else None,
             )
         )
+        visual_pages.append(
+            DetailVisualReviewPage(
+                page_id=page.page_id,
+                page_role=page.page_role,
+                title=page.title,
+                status=page_status,
+                findings=[*page_issues, *page_warnings] or ["页面整体通过基础检查"],
+                recommended_actions=_resolve_recommended_actions(page.page_role, render_item.error_message if render_item else "", page_issues, page_warnings),
+            )
+        )
+        retry_pages.append(
+            DetailRetryDecisionItem(
+                page_id=page.page_id,
+                page_role=page.page_role,
+                should_retry=bool(page_issues),
+                reason="；".join(page_issues) if page_issues else "",
+                strategies=_resolve_retry_strategies(page.page_role, render_item.error_message if render_item else "", page_issues),
+            )
+        )
 
     warning_count = sum(1 for check in checks if check.status == "warning")
     failed_count = sum(1 for check in checks if check.status == "failed")
-    issues = [check.message for check in checks if check.status != "passed"]
     summary = DetailPageQCSummary(
-        passed=failed_count == 0,
+        passed=failed_count == 0 and generated_count > 0,
         review_required=warning_count > 0 or failed_count > 0,
         warning_count=warning_count,
         failed_count=failed_count,
-        issues=issues,
+        issues=[check.message for check in checks if check.status != "passed"],
         checks=checks,
         pages=pages,
     )
+    visual_review = DetailVisualReviewReport(
+        overall_status="failed" if failed_count > 0 else "warning" if warning_count > 0 else "passed",
+        summary=_build_visual_summary(generated_count, plan.total_pages, visual_pages),
+        pages=visual_pages,
+    )
+    retry_decisions = DetailRetryDecisionReport(pages=retry_pages)
+    deps.storage.save_json_artifact(state["task"].task_id, "review/visual_review.json", visual_review)
+    deps.storage.save_json_artifact(state["task"].task_id, "review/retry_decisions.json", retry_decisions)
     deps.storage.save_json_artifact(state["task"].task_id, "qc/detail_qc_report.json", summary)
     return {
+        "detail_visual_review": visual_review,
+        "detail_retry_decisions": retry_decisions,
         "detail_qc_summary": summary,
         "logs": [
             *state.get("logs", []),
             f"[detail_run_qc] warning_count={warning_count} failed_count={failed_count}",
+            "[detail_run_qc] saved review/visual_review.json",
+            "[detail_run_qc] saved review/retry_decisions.json",
             "[detail_run_qc] saved qc/detail_qc_report.json",
         ],
     }
@@ -182,7 +326,7 @@ def _build_check(
     check_id: str,
     check_name: str,
     page_id: str,
-    passed: bool,
+    status: str,
     message: str,
     details: dict[str, object],
 ) -> DetailPageQCCheck:
@@ -190,7 +334,68 @@ def _build_check(
         check_id=check_id,
         check_name=check_name,
         page_id=page_id,
-        status="passed" if passed else "failed",
+        status=status,
         message=message,
         details=details,
     )
+
+
+def _build_visual_summary(
+    generated_count: int,
+    planned_count: int,
+    visual_pages: list[DetailVisualReviewPage],
+) -> list[str]:
+    summary = [f"已生成 {generated_count}/{planned_count} 页。"]
+    failed_roles = [item.page_role for item in visual_pages if item.status == "failed"]
+    if failed_roles:
+        counter = Counter(failed_roles)
+        summary.append(f"失败页角色：{dict(counter)}")
+    warning_roles = [item.page_role for item in visual_pages if item.status == "warning"]
+    if warning_roles:
+        counter = Counter(warning_roles)
+        summary.append(f"警告页角色：{dict(counter)}")
+    return summary
+
+
+def _resolve_recommended_actions(
+    page_role: str,
+    error_message: str,
+    issues: list[str],
+    warnings: list[str],
+) -> list[str]:
+    actions: list[str] = []
+    normalized = error_message.lower()
+    if "json" in normalized or "500" in normalized:
+        actions.append("优先做 provider 抖动重试")
+    if any("锚点素材" in item for item in issues):
+        actions.append("重新绑定正确锚点素材")
+    if page_role in {"dry_leaf_evidence", "leaf_bottom_process_evidence"}:
+        actions.append("进一步强化形态忠实约束")
+    if any("标题长度" in item or "参数卡不足" in item for item in warnings):
+        actions.append("继续降低文本密度")
+    if not actions:
+        actions.append("当前页面无需额外处理")
+    return actions
+
+
+def _resolve_retry_strategies(
+    page_role: str,
+    error_message: str,
+    issues: list[str],
+) -> list[str]:
+    if not issues:
+        return []
+    normalized = error_message.lower()
+    strategies: list[str] = []
+    if "json" in normalized or "500" in normalized:
+        strategies.append("original_prompt_retry")
+        strategies.append("text_density_reduction")
+    if any("锚点素材" in item for item in issues):
+        strategies.append("reference_rebinding")
+    if page_role in {"hero_opening", "packaging_structure_value", "package_closeup_evidence"}:
+        strategies.append("packaging_emphasis")
+    if page_role in {"scene_value_story", "brand_trust", "gift_openbox_portable"}:
+        strategies.append("style_correction")
+    if page_role in {"dry_leaf_evidence", "leaf_bottom_process_evidence"}:
+        strategies.append("packaging_emphasis")
+    return list(dict.fromkeys(strategies))

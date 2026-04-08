@@ -14,21 +14,18 @@ from backend.engine.domain.asset import Asset, AssetType
 from backend.engine.domain.generation_result import GeneratedImage, GenerationResult
 from backend.engine.domain.image_prompt_plan import ImagePrompt, ImagePromptPlan
 from backend.engine.domain.prompt_plan_v2 import PromptPlanV2, PromptShot
-from backend.schemas.detail import DetailPageAssetRef, DetailPagePromptPlanItem, DetailPageRenderResult
+from backend.schemas.detail import (
+    DetailPageAssetRef,
+    DetailPagePromptPlanItem,
+    DetailPageRenderResult,
+    DetailRetryStrategy,
+)
 
 RenderProgressCallback = Callable[[int, int, list[DetailPageRenderResult]], None]
 
 
 class DetailRenderService:
-    """详情图正式渲染器。
-
-    职责只限于：
-    - 把 prompt plan 转成 provider 调用；
-    - 统一落盘真实模型结果或 mock provider 结果；
-    - 写出逐页 render report。
-
-    这里不做任何本地叠字、拼图或占位图合成。
-    """
+    """详情图正式渲染器。"""
 
     def render_pages(
         self,
@@ -49,59 +46,21 @@ class DetailRenderService:
         total_count = len(prompt_plan)
         for index, item in enumerate(prompt_plan, start=1):
             started_at = datetime.utcnow().isoformat()
-            try:
-                reference_assets, background_assets = self._build_assets(task_dir=task_dir, refs=item.references)
-                generated = self._render_single_page(
-                    provider=image_provider,
-                    prompt_plan_item=item,
-                    shot_id=item.page_id,
-                    image_size=image_size,
-                    output_dir=generated_dir,
-                    reference_assets=reference_assets,
-                    background_style_assets=background_assets,
-                )
-                target = generated_dir / f"{index:02d}_{item.page_id}.png"
-                source_path = Path(generated.image_path)
-                if source_path.resolve() != target.resolve():
-                    shutil.copyfile(source_path, target)
-                width, height = self._read_image_size(target)
-                render_results.append(
-                    DetailPageRenderResult(
-                        render_id=f"detail-render-{index:02d}",
-                        page_id=item.page_id,
-                        page_title=item.page_title,
-                        status="completed",
-                        file_name=target.name,
-                        relative_path=target.relative_to(task_dir).as_posix(),
-                        width=width,
-                        height=height,
-                        reference_roles=[ref.role for ref in item.references],
-                        provider_name=provider_name,
-                        model_name=model_name,
-                        started_at=started_at,
-                        completed_at=datetime.utcnow().isoformat(),
-                    )
-                )
-                self._write_render_report(task_dir=task_dir, rows=render_results)
-                if progress_callback is not None:
-                    progress_callback(index, total_count, list(render_results))
-            except Exception as exc:
-                render_results.append(
-                    DetailPageRenderResult(
-                        render_id=f"detail-render-{index:02d}",
-                        page_id=item.page_id,
-                        page_title=item.page_title,
-                        status="failed",
-                        reference_roles=[ref.role for ref in item.references],
-                        provider_name=provider_name,
-                        model_name=model_name,
-                        error_message=str(exc),
-                        started_at=started_at,
-                        completed_at=datetime.utcnow().isoformat(),
-                    )
-                )
-                self._write_render_report(task_dir=task_dir, rows=render_results)
-                raise RuntimeError(f"详情图第 {index} 张渲染失败：{exc}") from exc
+            page_result = self._render_with_retry(
+                task_dir=task_dir,
+                generated_dir=generated_dir,
+                index=index,
+                prompt_plan_item=item,
+                image_provider=image_provider,
+                provider_name=provider_name,
+                model_name=model_name,
+                image_size=image_size,
+                started_at=started_at,
+            )
+            render_results.append(page_result)
+            self._write_render_report(task_dir=task_dir, rows=render_results)
+            if progress_callback is not None:
+                progress_callback(index, total_count, list(render_results))
         return render_results
 
     def build_bundle(self, task_dir: Path) -> Path:
@@ -111,6 +70,129 @@ class DetailRenderService:
         exports_dir.mkdir(parents=True, exist_ok=True)
         archive = shutil.make_archive(str(exports_dir / "detail_bundle"), "zip", root_dir=task_dir)
         return Path(archive)
+
+    def _render_with_retry(
+        self,
+        *,
+        task_dir: Path,
+        generated_dir: Path,
+        index: int,
+        prompt_plan_item: DetailPagePromptPlanItem,
+        image_provider: object,
+        provider_name: str,
+        model_name: str,
+        image_size: str,
+        started_at: str,
+    ) -> DetailPageRenderResult:
+        attempts = self._build_attempt_items(prompt_plan_item)
+        applied_strategies: list[DetailRetryStrategy] = []
+        last_error = ""
+        for attempt_index, (strategy, attempt_item) in enumerate(attempts, start=1):
+            try:
+                reference_assets, background_assets = self._build_assets(task_dir=task_dir, refs=attempt_item.references)
+                generated = self._render_single_page(
+                    provider=image_provider,
+                    prompt_plan_item=attempt_item,
+                    shot_id=attempt_item.page_id,
+                    image_size=image_size,
+                    output_dir=generated_dir,
+                    reference_assets=reference_assets,
+                    background_style_assets=background_assets,
+                )
+                target = generated_dir / f"{index:02d}_{attempt_item.page_id}.png"
+                source_path = Path(generated.image_path)
+                if source_path.resolve() != target.resolve():
+                    shutil.copyfile(source_path, target)
+                width, height = self._read_image_size(target)
+                return DetailPageRenderResult(
+                    render_id=f"detail-render-{index:02d}",
+                    page_id=attempt_item.page_id,
+                    page_title=attempt_item.page_title,
+                    page_role=attempt_item.page_role,
+                    status="completed",
+                    file_name=target.name,
+                    relative_path=target.relative_to(task_dir).as_posix(),
+                    width=width,
+                    height=height,
+                    reference_roles=[ref.role for ref in attempt_item.references],
+                    provider_name=provider_name,
+                    model_name=model_name,
+                    retry_count=max(0, attempt_index - 1),
+                    retry_strategies=applied_strategies,
+                    started_at=started_at,
+                    completed_at=datetime.utcnow().isoformat(),
+                )
+            except Exception as exc:
+                last_error = str(exc)
+                if strategy != "original_prompt_retry":
+                    applied_strategies.append(strategy)
+                if attempt_index >= len(attempts):
+                    break
+                if not self._should_continue_retry(last_error, prompt_plan_item):
+                    break
+        return DetailPageRenderResult(
+            render_id=f"detail-render-{index:02d}",
+            page_id=prompt_plan_item.page_id,
+            page_title=prompt_plan_item.page_title,
+            page_role=prompt_plan_item.page_role,
+            status="failed",
+            reference_roles=[ref.role for ref in prompt_plan_item.references],
+            provider_name=provider_name,
+            model_name=model_name,
+            error_message=last_error,
+            retry_count=len(applied_strategies),
+            retry_strategies=applied_strategies,
+            started_at=started_at,
+            completed_at=datetime.utcnow().isoformat(),
+        )
+
+    def _build_attempt_items(
+        self,
+        item: DetailPagePromptPlanItem,
+    ) -> list[tuple[DetailRetryStrategy, DetailPagePromptPlanItem]]:
+        attempts: list[tuple[DetailRetryStrategy, DetailPagePromptPlanItem]] = [("original_prompt_retry", item)]
+        text_light_item = item.model_copy(
+            update={
+                "prompt": f"{item.prompt}\n重试策略：降低图中文字密度，只保留主标题和必要短标签。",
+                "subtitle_copy": "",
+                "selling_points_for_render": item.selling_points_for_render[:1],
+                "text_density": "none" if item.text_density == "low" else "low",
+                "copy_strategy": "light",
+            }
+        )
+        attempts.append(("text_density_reduction", text_light_item))
+        if item.page_role in {"scene_value_story", "brand_trust", "gift_openbox_portable", "tea_soup_evidence"}:
+            rebound_refs = [ref for ref in item.references if ref.role not in {"scene_ref", "bg_ref"}] or list(item.references)
+            rebound_item = item.model_copy(
+                update={
+                    "references": rebound_refs,
+                    "prompt": f"{item.prompt}\n重试策略：弱化场景参考，仅保留包装与证据锚点，减少非必要背景干扰。",
+                }
+            )
+            attempts.append(("reference_rebinding", rebound_item))
+        else:
+            packaging_item = item.model_copy(
+                update={
+                    "prompt": f"{item.prompt}\n重试策略：进一步强化包装保护和主体稳定，减少装饰元素。",
+                }
+            )
+            attempts.append(("packaging_emphasis", packaging_item))
+        return attempts
+
+    def _should_continue_retry(self, error_message: str, item: DetailPagePromptPlanItem) -> bool:
+        if not item.retryable:
+            return False
+        normalized = error_message.lower()
+        transient_markers = [
+            "bad_response_body",
+            "unexpected end of json input",
+            "response is not valid json",
+            "500",
+            "timed out",
+        ]
+        if any(marker in normalized for marker in transient_markers):
+            return True
+        return item.page_role in {"scene_value_story", "brand_trust", "gift_openbox_portable", "tea_soup_evidence"}
 
     def _render_single_page(
         self,
@@ -131,11 +213,14 @@ class DetailRenderService:
                     shots=[
                         PromptShot(
                             shot_id=shot_id,
-                            shot_role="detail_page",
+                            shot_role=prompt_plan_item.page_role,
                             render_prompt=prompt_plan_item.prompt,
-                            copy_strategy="strong",
-                            text_density="medium",
-                            should_render_text=True,
+                            copy_strategy=prompt_plan_item.copy_strategy,
+                            text_density=prompt_plan_item.text_density,
+                            should_render_text=prompt_plan_item.should_render_text,
+                            title_copy=prompt_plan_item.title_copy,
+                            subtitle_copy=prompt_plan_item.subtitle_copy,
+                            selling_points_for_render=prompt_plan_item.selling_points_for_render,
                             aspect_ratio=prompt_plan_item.target_aspect_ratio,
                             image_size=image_size,
                         )

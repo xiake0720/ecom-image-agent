@@ -22,10 +22,10 @@ def detail_render_pages(state: DetailWorkflowState, deps: DetailWorkflowDependen
     task = state["task"]
     service = DetailRenderService()
 
-    def on_progress(completed_count: int, total_count: int, render_results) -> None:
+    def on_progress(processed_count: int, total_count: int, render_results) -> None:
         if deps.progress_callback is None:
             return
-        progress_task = build_detail_render_progress_task(task, completed_count=completed_count, total_count=total_count)
+        progress_task = build_detail_render_progress_task(task, completed_count=processed_count, total_count=total_count)
         deps.progress_callback(
             {
                 **state,
@@ -47,11 +47,13 @@ def detail_render_pages(state: DetailWorkflowState, deps: DetailWorkflowDependen
         image_size=state["detail_payload"].image_size,
         progress_callback=on_progress,
     )
+    success_count = sum(1 for item in render_results if item.status == "completed")
+    failed_count = sum(1 for item in render_results if item.status == "failed")
     return {
         "detail_render_results": render_results,
         "logs": [
             *state.get("logs", []),
-            f"[detail_render_pages] rendered_count={len(render_results)}",
+            f"[detail_render_pages] completed={success_count} failed={failed_count}",
             "[detail_render_pages] saved generated/detail_render_report.json",
         ],
     }
