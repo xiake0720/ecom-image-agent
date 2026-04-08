@@ -1,0 +1,254 @@
+{
+  "template_name": "tea_tmall_premium_v2",
+  "platform": "tmall",
+  "category": "tea",
+  "canvas": {
+    "aspect_ratio": "3:4",
+    "screens_per_page": 1,
+    "layout_mode": "single_screen_vertical_poster"
+  },
+  "supported_style_presets": [
+    "tea_tmall_premium_light",
+    "tea_tmall_premium_dark"
+  ],
+  "default_style_preset": "tea_tmall_premium_light",
+  "recommended_page_count": {
+    "min": 8,
+    "max": 12
+  },
+  "global_style_anchor": "天猫高端茶叶详情图，3:4 单屏竖版海报，版式克制留白，蓝白与浅米纸感统一，中文信息层级清晰，包装主体稳定，质感真实，不做左右分屏和拼贴。",
+  "page_rhythm": [
+    "首屏建立品牌与包装锚点",
+    "中段用茶叶细节与场景价值支撑判断",
+    "尾段用参数与品牌信任收束购买心智"
+  ],
+  "density_limits": {
+    "headline_best_max": 8,
+    "headline_hard_max": 12,
+    "subheadline_best_max": 16,
+    "subheadline_hard_max": 24,
+    "selling_point_word_range": "2-6",
+    "selling_point_count_range": "2-4",
+    "supporting_copy_best_range": "20-40"
+  },
+  "page_sequences": {
+    "8": [
+      "hero_opening",
+      "dry_leaf_evidence",
+      "tea_soup_evidence",
+      "parameter_and_closing",
+      "leaf_bottom_process_evidence",
+      "brand_trust",
+      "gift_openbox_portable",
+      "scene_value_story"
+    ],
+    "9": [
+      "hero_opening",
+      "dry_leaf_evidence",
+      "tea_soup_evidence",
+      "parameter_and_closing",
+      "leaf_bottom_process_evidence",
+      "brand_trust",
+      "gift_openbox_portable",
+      "scene_value_story",
+      "brewing_method_info"
+    ],
+    "10": [
+      "hero_opening",
+      "dry_leaf_evidence",
+      "tea_soup_evidence",
+      "parameter_and_closing",
+      "leaf_bottom_process_evidence",
+      "brand_trust",
+      "gift_openbox_portable",
+      "scene_value_story",
+      "brewing_method_info",
+      "brand_closing"
+    ],
+    "11": [
+      "hero_opening",
+      "dry_leaf_evidence",
+      "tea_soup_evidence",
+      "parameter_and_closing",
+      "leaf_bottom_process_evidence",
+      "brand_trust",
+      "gift_openbox_portable",
+      "scene_value_story",
+      "brewing_method_info",
+      "packaging_structure_value",
+      "brand_closing"
+    ],
+    "12": [
+      "hero_opening",
+      "dry_leaf_evidence",
+      "tea_soup_evidence",
+      "parameter_and_closing",
+      "leaf_bottom_process_evidence",
+      "brand_trust",
+      "gift_openbox_portable",
+      "scene_value_story",
+      "brewing_method_info",
+      "packaging_structure_value",
+      "package_closeup_evidence",
+      "brand_closing"
+    ]
+  },
+  "page_blueprints": {
+    "hero_opening": {
+      "title": "品牌首屏",
+      "screen_type": "visual",
+      "screen_theme": "品牌与包装锚点",
+      "screen_goal": "突出包装主体、品牌识别和整体高级感，建立详情页首屏记忆点。",
+      "preferred_roles": ["main_result", "packaging"],
+      "anchor_roles": ["main_result", "packaging"],
+      "supplement_roles": ["bg_ref"],
+      "asset_strategy": "anchor_required",
+      "allow_generated_supporting_materials": true,
+      "review_focus": ["包装是否稳定", "标题是否只有一组", "首屏是否像单屏海报"],
+      "material_focus": "包装形态、品牌识别、主视觉中心稳定"
+    },
+    "dry_leaf_evidence": {
+      "title": "茶干条索",
+      "screen_type": "visual",
+      "screen_theme": "干茶证据页",
+      "screen_goal": "以干茶条索、色泽和纹理建立原料真实感，不退化成包装陈列页。",
+      "preferred_roles": ["dry_leaf", "packaging"],
+      "anchor_roles": ["dry_leaf"],
+      "supplement_roles": ["bg_ref"],
+      "asset_strategy": "anchor_required",
+      "allow_generated_supporting_materials": true,
+      "review_focus": ["干茶形态是否忠实", "是否误像其他茶类", "文本是否过密"],
+      "material_focus": "条索粗细、卷曲走向、颜色深浅、表面纹理"
+    },
+    "tea_soup_evidence": {
+      "title": "茶汤质感",
+      "screen_type": "visual",
+      "screen_theme": "茶汤证据页",
+      "screen_goal": "表现茶汤通透感、杯中观感和饮用欲望，可以在缺少茶汤图时允许 AI 补足。",
+      "preferred_roles": ["tea_soup", "packaging"],
+      "anchor_roles": ["packaging"],
+      "supplement_roles": ["tea_soup", "bg_ref"],
+      "asset_strategy": "ai_supplement_allowed",
+      "allow_generated_supporting_materials": true,
+      "review_focus": ["茶汤页是否仍像茶汤页", "包装是否没有被重绘", "版式是否保持单主标题"],
+      "material_focus": "茶汤通透、杯器质感、暖调氛围"
+    },
+    "parameter_and_closing": {
+      "title": "参数与收尾",
+      "screen_type": "info",
+      "screen_theme": "参数卡信息页",
+      "screen_goal": "用参数卡和少量 CTA 收束信息，不编造不存在的商品参数。",
+      "preferred_roles": ["packaging"],
+      "anchor_roles": ["packaging"],
+      "supplement_roles": [],
+      "asset_strategy": "reference_preferred",
+      "allow_generated_supporting_materials": false,
+      "review_focus": ["参数是否卡片化", "是否出现杜撰字段", "信息是否过长"],
+      "material_focus": "参数卡结构、信息层级、理性收尾"
+    },
+    "leaf_bottom_process_evidence": {
+      "title": "叶底与工艺",
+      "screen_type": "visual",
+      "screen_theme": "叶底证据页",
+      "screen_goal": "以叶底形态和工艺感说明原料可信度，不重复首屏包装海报。",
+      "preferred_roles": ["leaf_bottom", "packaging"],
+      "anchor_roles": ["leaf_bottom"],
+      "supplement_roles": ["bg_ref", "scene_ref"],
+      "asset_strategy": "anchor_required",
+      "allow_generated_supporting_materials": true,
+      "review_focus": ["叶底形态是否忠实", "是否误生成其他茶类叶底", "工艺表达是否克制"],
+      "material_focus": "叶片舒展状态、颜色层次、叶脉与边缘细节"
+    },
+    "brand_trust": {
+      "title": "品牌信任",
+      "screen_type": "info",
+      "screen_theme": "品牌与信任页",
+      "screen_goal": "表达品牌气质、礼赠感或可信背书，但不虚构产地证书和奖项。",
+      "preferred_roles": ["packaging", "scene_ref"],
+      "anchor_roles": ["packaging"],
+      "supplement_roles": ["scene_ref", "bg_ref"],
+      "asset_strategy": "ai_supplement_allowed",
+      "allow_generated_supporting_materials": true,
+      "review_focus": ["是否出现虚构背书", "品牌页是否保持统一风格", "包装有无漂移"],
+      "material_focus": "品牌信任、礼赠氛围、理性信息"
+    },
+    "gift_openbox_portable": {
+      "title": "礼赠与开盒",
+      "screen_type": "visual",
+      "screen_theme": "礼赠场景页",
+      "screen_goal": "表达礼赠价值、开盒体验或便携感，仍需围绕真实包装结构展开。",
+      "preferred_roles": ["packaging", "scene_ref"],
+      "anchor_roles": ["packaging"],
+      "supplement_roles": ["scene_ref", "bg_ref"],
+      "asset_strategy": "ai_supplement_allowed",
+      "allow_generated_supporting_materials": true,
+      "review_focus": ["是否只是重复包装摆拍", "是否有结构价值补充", "场景是否自然"],
+      "material_focus": "开盒层次、礼赠氛围、便携或收纳感"
+    },
+    "scene_value_story": {
+      "title": "场景价值",
+      "screen_type": "visual",
+      "screen_theme": "场景与氛围页",
+      "screen_goal": "表达茶席、茶园或饮用氛围，允许 AI 补足场景，但不能破坏包装识别。",
+      "preferred_roles": ["scene_ref", "packaging"],
+      "anchor_roles": ["packaging"],
+      "supplement_roles": ["scene_ref", "bg_ref"],
+      "asset_strategy": "ai_supplement_allowed",
+      "allow_generated_supporting_materials": true,
+      "review_focus": ["场景是否与茶类匹配", "氛围是否自然", "包装是否稳定"],
+      "material_focus": "茶席氛围、茶园气息、生活化价值感"
+    },
+    "brewing_method_info": {
+      "title": "冲泡建议",
+      "screen_type": "info",
+      "screen_theme": "冲泡信息页",
+      "screen_goal": "只使用输入里明确提供的冲泡建议，不猜测温度和时长。",
+      "preferred_roles": ["packaging", "tea_soup"],
+      "anchor_roles": ["packaging"],
+      "supplement_roles": ["tea_soup", "bg_ref"],
+      "asset_strategy": "ai_supplement_allowed",
+      "allow_generated_supporting_materials": true,
+      "review_focus": ["冲泡信息是否真实来源于输入", "是否误写水温时长", "文本是否克制"],
+      "material_focus": "简明冲泡卡、少量茶汤氛围"
+    },
+    "packaging_structure_value": {
+      "title": "包装结构",
+      "screen_type": "visual",
+      "screen_theme": "包装结构页",
+      "screen_goal": "补充包装细节、结构层次和触感价值，不改变包装文本和花纹。",
+      "preferred_roles": ["packaging"],
+      "anchor_roles": ["packaging"],
+      "supplement_roles": ["bg_ref"],
+      "asset_strategy": "anchor_required",
+      "allow_generated_supporting_materials": true,
+      "review_focus": ["包装结构是否稳定", "是否出现改字改花纹", "近景是否真实"],
+      "material_focus": "结构细节、材质触感、近景包装"
+    },
+    "package_closeup_evidence": {
+      "title": "包装近景",
+      "screen_type": "visual",
+      "screen_theme": "包装近景证据页",
+      "screen_goal": "做局部近景与材质证据补充，避免整页回到首屏大包装海报。",
+      "preferred_roles": ["packaging"],
+      "anchor_roles": ["packaging"],
+      "supplement_roles": ["bg_ref"],
+      "asset_strategy": "anchor_required",
+      "allow_generated_supporting_materials": true,
+      "review_focus": ["是否近景可信", "是否重复首屏构图", "文字是否控制在合理范围"],
+      "material_focus": "包装局部、标签工艺、材质纹理"
+    },
+    "brand_closing": {
+      "title": "品牌收尾",
+      "screen_type": "info",
+      "screen_theme": "品牌收尾页",
+      "screen_goal": "在统一风格下完成视觉收束和购买记忆点，不添加虚构承诺。",
+      "preferred_roles": ["packaging", "bg_ref"],
+      "anchor_roles": ["packaging"],
+      "supplement_roles": ["bg_ref"],
+      "asset_strategy": "reference_preferred",
+      "allow_generated_supporting_materials": true,
+      "review_focus": ["收尾页是否稳定", "是否跳出整套风格", "是否出现虚构政策"],
+      "material_focus": "风格收束、品牌记忆点、克制 CTA"
+    }
+  }
+}

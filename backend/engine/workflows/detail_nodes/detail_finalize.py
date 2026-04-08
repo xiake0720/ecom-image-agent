@@ -10,7 +10,7 @@ from backend.services.detail_render_service import DetailRenderService
 
 
 def detail_finalize(state: DetailWorkflowState, deps: DetailWorkflowDependencies) -> dict:
-    """汇总结、打包 ZIP、写最终 manifest。"""
+    """汇总结果、打包 ZIP，并写入最终 manifest。"""
 
     task = state["task"]
     qc_summary = state.get("detail_qc_summary")
@@ -43,8 +43,9 @@ def detail_finalize(state: DetailWorkflowState, deps: DetailWorkflowDependencies
     )
     deps.storage.save_task_manifest(updated_task)
 
-    task_dir = Path(task.task_dir)
-    bundle_path = DetailRenderService().build_bundle(task_dir)
+    task_dir = Path(task.task_dir).resolve()
+    bundle_path = DetailRenderService().build_bundle(task_dir).resolve()
+    bundle_relative_path = bundle_path.relative_to(task_dir).as_posix()
     manifest = {
         "task_id": updated_task.task_id,
         "status": updated_task.status.value,
@@ -57,7 +58,7 @@ def detail_finalize(state: DetailWorkflowState, deps: DetailWorkflowDependencies
         "visual_review_path": "review/visual_review.json",
         "retry_decisions_path": "review/retry_decisions.json",
         "qc_report_path": "qc/detail_qc_report.json",
-        "bundle_path": str(bundle_path.relative_to(task_dir).as_posix()),
+        "bundle_path": bundle_relative_path,
         "completed_page_count": success_count,
         "planned_page_count": len(render_results),
     }
@@ -67,7 +68,7 @@ def detail_finalize(state: DetailWorkflowState, deps: DetailWorkflowDependencies
         "logs": [
             *state.get("logs", []),
             f"[detail_finalize] task_status={updated_task.status.value}",
-            f"[detail_finalize] bundle={bundle_path}",
+            f"[detail_finalize] bundle={bundle_relative_path}",
             "[detail_finalize] saved detail_manifest.json",
         ],
     }

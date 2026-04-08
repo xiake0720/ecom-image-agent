@@ -8,10 +8,12 @@ import zipfile
 from PIL import Image
 
 from backend.engine.core.config import Settings
+from backend.engine.domain.asset import Asset, AssetType
 from backend.engine.domain.generation_result import GeneratedImage, GenerationResult
 from backend.engine.domain.prompt_plan_v2 import PromptPlanV2, PromptShot
 from backend.engine.domain.qc_report import QCReport
 from backend.engine.domain.task import Task, TaskStatus
+from backend.engine.providers.image.banana2_image import Banana2ImageProvider
 from backend.engine.providers.image.runapi_gemini31_image import RunApiGemini31ImageProvider
 from backend.engine.services.rendering.text_renderer import TextRenderer
 from backend.engine.workflows.nodes.finalize import finalize
@@ -263,7 +265,7 @@ def test_runapi_gemini31_request_disables_environment_proxy(monkeypatch) -> None
     provider = RunApiGemini31ImageProvider(
         Settings(
             image_provider_mode="real",
-            runapi_api_key="test-key",
+            ECOM_IMAGE_AGENT_RUNAPI_API_KEY="test-key",
             runapi_image_model="gemini-3.1-flash-image-preview",
         )
     )
@@ -343,7 +345,7 @@ def test_runapi_gemini31_supports_file_data_uri_response(monkeypatch) -> None:
     provider = RunApiGemini31ImageProvider(
         Settings(
             image_provider_mode="real",
-            runapi_api_key="test-key",
+            ECOM_IMAGE_AGENT_RUNAPI_API_KEY="test-key",
             runapi_image_model="gemini-3.1-flash-image-preview",
         )
     )
@@ -367,6 +369,149 @@ def test_runapi_gemini31_supports_file_data_uri_response(monkeypatch) -> None:
     assert sessions[0].proxies == {}
     assert sessions[1].proxies == {}
     assert session_state["download_headers"]["Authorization"].startswith("Bearer ")
+
+
+def test_banana2_google_official_sdk_uses_genai_client(monkeypatch, tmp_path: Path) -> None:
+    from google.genai import types
+
+    sdk_state: dict[str, object] = {}
+
+    class FakeInlineData:
+        def __init__(self, data: bytes) -> None:
+            self.data = data
+
+    class FakePart:
+        def __init__(self, data: bytes) -> None:
+            self.inline_data = FakeInlineData(data)
+
+        def as_image(self):
+            raise AssertionError("inline_data branch should be used first")
+
+    class FakeResponse:
+        parts = [FakePart(b"google-sdk-image-bytes")]
+
+    class FakeModels:
+        def generate_content(self, *, model, contents, config):
+            sdk_state["model"] = model
+            sdk_state["contents"] = contents
+            sdk_state["config"] = config
+            return FakeResponse()
+
+    class FakeClient:
+        def __init__(self, *, api_key, http_options=None):
+            sdk_state["api_key"] = api_key
+            sdk_state["http_options"] = http_options
+            self.models = FakeModels()
+
+    monkeypatch.setattr("backend.engine.providers.image.banana2_image.genai.Client", FakeClient)
+
+    asset_path = tmp_path / "reference.png"
+    Image.new("RGB", (8, 8), color=(200, 30, 30)).save(asset_path)
+    asset = Asset(
+        asset_id="asset_01",
+        filename="reference.png",
+        local_path=str(asset_path),
+        mime_type="image/png",
+        asset_type=AssetType.PRODUCT,
+    )
+    provider = Banana2ImageProvider(
+        Settings(
+            image_provider_mode="real",
+            ECOM_IMAGE_AGENT_GOOGLE_API_KEY="google-test-key",
+            ECOM_IMAGE_AGENT_RUNAPI_API_KEY="",
+            banana2_model="gemini-3.1-flash-image-preview",
+        )
+    )
+
+    result = provider._generate_single(
+        shot_id="shot_google_01",
+        prompt_text="test prompt",
+        reference_assets=[asset],
+        background_style_assets=[],
+        aspect_ratio="3:4",
+        image_size="2K",
+    )
+
+    assert result == b"google-sdk-image-bytes"
+    assert sdk_state["api_key"] == "google-test-key"
+    assert sdk_state["model"] == "gemini-3.1-flash-image-preview"
+    assert provider.last_request_payloads["shot_google_01"]["transport"] == "google_official_sdk"
+    assert sdk_state["config"].response_modalities == ["IMAGE"]
+    assert sdk_state["config"].image_config.aspect_ratio == "3:4"
+    assert sdk_state["config"].image_config.image_size == "2K"
+    assert sdk_state["http_options"].api_version == "v1beta"
+    assert sdk_state["http_options"].client_args["trust_env"] is False
+    assert sdk_state["http_options"].timeout == 600000
+    assert sdk_state["contents"][0] == "test prompt"
+    assert any(isinstance(item, types.Part) for item in sdk_state["contents"])
+
+
+def test_banana2_falls_back_to_runapi_when_google_key_missing(monkeypatch) -> None:
+    session_state: dict[str, object] = {}
+
+    class FakeResponse:
+        status_code = 200
+        text = '{"ok":true}'
+
+        def json(self) -> dict[str, object]:
+            return {
+                "candidates": [
+                    {
+                        "content": {
+                            "parts": [
+                                {
+                                    "inlineData": {
+                                        "data": base64.b64encode(b"runapi-fallback-image").decode("utf-8"),
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+
+    class FakeSession:
+        def __init__(self) -> None:
+            self.trust_env = True
+            self.proxies = {"http": "http://proxy.local", "https": "http://proxy.local"}
+
+        def __enter__(self):
+            session_state["session"] = self
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def post(self, *args, **kwargs):
+            session_state["post_args"] = args
+            session_state["post_kwargs"] = kwargs
+            return FakeResponse()
+
+    monkeypatch.setattr("backend.engine.providers.image.banana2_image.requests.Session", FakeSession)
+    provider = Banana2ImageProvider(
+        Settings(
+            image_provider_mode="real",
+            ECOM_IMAGE_AGENT_GOOGLE_API_KEY="",
+            ECOM_IMAGE_AGENT_RUNAPI_API_KEY="runapi-test-key",
+            banana2_model="gemini-3.1-flash-image-preview",
+        )
+    )
+
+    result = provider._generate_single(
+        shot_id="shot_runapi_01",
+        prompt_text="fallback prompt",
+        reference_assets=[],
+        background_style_assets=[],
+        aspect_ratio="1:1",
+        image_size="2K",
+    )
+
+    fake_session = session_state["session"]
+    assert result == b"runapi-fallback-image"
+    assert provider.last_request_payloads["shot_runapi_01"]["generationConfig"]["imageConfig"]["aspectRatio"] == "1:1"
+    assert fake_session.trust_env is False
+    assert fake_session.proxies == {}
+    assert session_state["post_kwargs"]["headers"]["Authorization"].startswith("Bearer ")
 
 
 def _compat_plan_for_test(shot_id: str):

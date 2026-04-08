@@ -272,7 +272,7 @@ class Settings(BaseSettings):
         if "gpt-5-nano" in normalized:
             return "GPT-5-Nano"
         if "gemini-3.1-flash-image-preview" in normalized:
-            return "Banana2 / Gemini 3.1 Flash Image Preview"
+            return "Google Official / Gemini 3.1 Flash Image Preview"
         return model_id
 
 

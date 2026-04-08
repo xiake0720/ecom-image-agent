@@ -77,7 +77,7 @@ npm run dev
 - `ECOM_IMAGE_AGENT_IMAGE_PROVIDER_MODE`：`mock` / `real`
 - `ECOM_IMAGE_AGENT_TEXT_PROVIDER`：当前支持 `runapi_openai`
 - `ECOM_IMAGE_AGENT_IMAGE_PROVIDER`：当前默认 `banana2`
-- `ECOM_IMAGE_AGENT_GOOGLE_API_KEY`：Banana2 官方 Gemini API Key
+- `ECOM_IMAGE_AGENT_GOOGLE_API_KEY`：Google 官方 Gemini API Key
 - `ECOM_IMAGE_AGENT_RUNAPI_API_KEY`：RunAPI 通道 Key
 - `ECOM_IMAGE_AGENT_RUNAPI_TEXT_API_KEY`：文本专用 RunAPI Key
 - `ECOM_IMAGE_AGENT_BANANA2_MODEL`：默认 `gemini-3.1-flash-image-preview`
@@ -127,7 +127,7 @@ detail 不再单独维护一套 mock 开关，直接复用主图同一套 provid
   - `plan/detail_plan.json`
   - `plan/detail_copy_plan.json`
   - `plan/detail_prompt_plan.json`
-- detail 正式渲染统一通过 Banana2 provider，结果落盘到 `generated/*.png`
+- detail 正式渲染统一通过 `banana2` 图片路由；当前优先使用 Google 官方 `google.genai` SDK，缺失 Google Key 时回退到 RunAPI，结果落盘到 `generated/*.png`
 - detail QC 输出：
   - `qc/detail_qc_report.json`
 - detail 最终导出：

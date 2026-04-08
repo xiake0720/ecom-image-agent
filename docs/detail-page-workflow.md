@@ -80,10 +80,19 @@
 - 不再递归拼接 `Prompt 草案=`
 - `negative_prompt` 统一去重
 - `title_copy / subtitle_copy / selling_points_for_render` 会随 prompt 一起下发
+- 图内可见文字仅使用 `title_copy / subtitle_copy / selling_points_for_render`
+- `body_copy / notes / 规则说明` 只用于规划与预览，不再写进 render prompt
+- 首屏和包装主视觉页会显式补强接地感、接触阴影、环境遮蔽与统一光向
 - 渲染阶段支持页级重试：
   - 原 prompt 重试
   - 降低文本密度
   - 参考重绑或强化包装保护
+
+## QC 补充规则
+- 拦截规则句、提示词或系统说明混入用户可见 copy
+- 拦截参数卡中的英文 key 与 `snake_case`
+- 检查首屏 prompt 是否具备接地感关键词
+- 仍保留页数、参考绑定、锚点素材、比例等基础检查
 
 ## 运行时
 轮询接口：

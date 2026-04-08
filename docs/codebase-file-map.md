@@ -47,7 +47,7 @@
 
 ### 5.2 provider/router
 - [`backend/engine/providers/router.py`](/D:/python/ecom-image-agent/backend/engine/providers/router.py)：统一 capability 路由
-- [`backend/engine/providers/image/banana2_image.py`](/D:/python/ecom-image-agent/backend/engine/providers/image/banana2_image.py)：Banana2 图片 provider
+- [`backend/engine/providers/image/banana2_image.py`](/D:/python/ecom-image-agent/backend/engine/providers/image/banana2_image.py)：默认图片 provider，优先走 Google 官方 `google.genai` SDK，缺失 Google Key 时回退到 RunAPI
 - [`backend/engine/providers/image/gemini_image.py`](/D:/python/ecom-image-agent/backend/engine/providers/image/gemini_image.py)：mock Banana2 图片 provider
 - [`backend/engine/providers/image/runapi_gemini31_image.py`](/D:/python/ecom-image-agent/backend/engine/providers/image/runapi_gemini31_image.py)：保留的旧图片 provider
 - [`backend/engine/providers/llm/gemini_text.py`](/D:/python/ecom-image-agent/backend/engine/providers/llm/gemini_text.py)：mock text provider

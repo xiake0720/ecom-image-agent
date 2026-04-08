@@ -4,16 +4,53 @@ from __future__ import annotations
 
 from collections import Counter
 from pathlib import Path
+import re
 
 from backend.engine.workflows.detail_state import DetailWorkflowDependencies, DetailWorkflowState
 from backend.schemas.detail import (
+    DetailPageCopyBlock,
     DetailPageQCCheck,
     DetailPageQCPageSummary,
     DetailPageQCSummary,
+    DetailPagePromptPlanItem,
     DetailRetryDecisionItem,
     DetailRetryDecisionReport,
     DetailVisualReviewPage,
     DetailVisualReviewReport,
+)
+
+_INSTRUCTION_TOKENS = (
+    "只做",
+    "不虚构",
+    "允许",
+    "保持稳定",
+    "可由模型",
+    "不要",
+    "只保留",
+)
+_PROMPT_LEAK_LABELS = (
+    "主标题：",
+    "副标题：",
+    "卖点标签：",
+    "参数卡：",
+    "辅助说明：",
+    "CTA：",
+)
+_ENGLISH_PARAM_TOKENS = (
+    "net_content",
+    "origin",
+    "ingredients",
+    "shelf_life",
+    "storage",
+    "net_",
+)
+_SNAKE_CASE_RE = re.compile(r"\b[a-z]{2,}(?:_[a-z0-9]+)+\b")
+_HERO_GROUNDING_TOKENS = (
+    "resting on surface",
+    "contact shadow",
+    "ambient occlusion",
+    "soft directional light",
+    "coherent perspective",
 )
 
 
@@ -96,17 +133,15 @@ def detail_run_qc(state: DetailWorkflowState, deps: DetailWorkflowDependencies) 
             )
         )
 
+    task_dir = Path(state["task"].task_dir).resolve()
     for page in plan.pages:
         prompt_item = prompt_map.get(page.page_id)
         render_item = render_map.get(page.page_id)
         page_issues: list[str] = []
         page_warnings: list[str] = []
 
-        has_copy_gap = any(
-            not copy_map.get(f"{page.page_id}:{screen.screen_id}")
-            or not (copy_map[f"{page.page_id}:{screen.screen_id}"].headline or "").strip()
-            for screen in page.screens
-        )
+        block = next((copy_map.get(f"{page.page_id}:{screen.screen_id}") for screen in page.screens), None)
+        has_copy_gap = block is None or not (block.headline or "").strip()
         checks.append(
             _build_check(
                 check_id=f"{page.page_id}-copy",
@@ -171,19 +206,57 @@ def detail_run_qc(state: DetailWorkflowState, deps: DetailWorkflowDependencies) 
                 )
             )
 
-        block = next((copy_map.get(f"{page.page_id}:{screen.screen_id}") for screen in page.screens), None)
-        if block is not None and len(block.headline) > 12:
-            page_warnings.append("标题长度超过 12 字")
-        if block is not None and len(block.subheadline) > 24:
-            page_warnings.append("副标题长度超过 24 字")
-        if block is not None and any(token in block.parameter_copy.lower() for token in ["tbd", "net_content", "origin"]):
-            page_issues.append("参数页存在占位值或英文键名")
-        if page.page_role in {"parameter_and_closing", "brewing_method_info"} and block is not None:
-            parameter_cards = [part.strip() for part in block.parameter_copy.split("/") if part.strip()]
-            if len(parameter_cards) < 3:
-                page_warnings.append("参数卡不足 3 组")
+        if block is not None:
+            if len(block.headline) > 12:
+                page_warnings.append("标题长度超过 12 字")
+            if len(block.subheadline) > 24:
+                page_warnings.append("副标题长度超过 24 字")
+            instruction_findings = _find_instruction_copy(block)
+            if instruction_findings:
+                page_issues.append(f"文案包含规则句或提示词：{', '.join(instruction_findings)}")
+            english_key_findings = _find_english_key_leaks(block.parameter_copy)
+            if english_key_findings:
+                page_issues.append(f"参数文案包含英文 key 或 snake_case：{', '.join(english_key_findings)}")
+            if page.page_role in {"parameter_and_closing", "brewing_method_info"}:
+                parameter_cards = [part.strip() for part in block.parameter_copy.split("/") if part.strip()]
+                if len(parameter_cards) < 3:
+                    page_warnings.append("参数卡不足 3 组")
 
-        file_exists = bool(render_item and render_item.relative_path and (Path(state["task"].task_dir) / render_item.relative_path).exists())
+        if prompt_item is not None:
+            prompt_leaks = _find_prompt_copy_leaks(prompt_item.prompt)
+            if prompt_leaks:
+                page_issues.append(f"render prompt 混入可见文案标签：{', '.join(prompt_leaks)}")
+            if page.page_role == "hero_opening":
+                missing_grounding = _find_missing_hero_grounding(prompt_item)
+                if missing_grounding:
+                    page_warnings.append("首屏缺少明确接地感与阴影约束")
+                    checks.append(
+                        _build_check(
+                            check_id=f"{page.page_id}-grounding",
+                            check_name="hero_grounding_prompt",
+                            page_id=page.page_id,
+                            status="warning",
+                            message="首屏 prompt 缺少完整接地感约束",
+                            details={"missing_tokens": missing_grounding},
+                        )
+                    )
+                else:
+                    checks.append(
+                        _build_check(
+                            check_id=f"{page.page_id}-grounding",
+                            check_name="hero_grounding_prompt",
+                            page_id=page.page_id,
+                            status="passed",
+                            message="首屏 prompt 已包含接地感约束",
+                            details={"required_tokens": list(_HERO_GROUNDING_TOKENS)},
+                        )
+                    )
+
+        file_exists = bool(
+            render_item
+            and render_item.relative_path
+            and (task_dir / render_item.relative_path).exists()
+        )
         if render_item is not None and render_item.status == "failed":
             page_issues.append(render_item.error_message or "页面渲染失败")
         if not file_exists:
@@ -274,7 +347,12 @@ def detail_run_qc(state: DetailWorkflowState, deps: DetailWorkflowDependencies) 
                 title=page.title,
                 status=page_status,
                 findings=[*page_issues, *page_warnings] or ["页面整体通过基础检查"],
-                recommended_actions=_resolve_recommended_actions(page.page_role, render_item.error_message if render_item else "", page_issues, page_warnings),
+                recommended_actions=_resolve_recommended_actions(
+                    page.page_role,
+                    render_item.error_message if render_item else "",
+                    page_issues,
+                    page_warnings,
+                ),
             )
         )
         retry_pages.append(
@@ -283,7 +361,7 @@ def detail_run_qc(state: DetailWorkflowState, deps: DetailWorkflowDependencies) 
                 page_role=page.page_role,
                 should_retry=bool(page_issues),
                 reason="；".join(page_issues) if page_issues else "",
-                strategies=_resolve_retry_strategies(page.page_role, render_item.error_message if render_item else "", page_issues),
+                strategies=_resolve_retry_strategies(page.page_role, render_item.error_message if render_item else "", page_issues, page_warnings),
             )
         )
 
@@ -330,6 +408,8 @@ def _build_check(
     message: str,
     details: dict[str, object],
 ) -> DetailPageQCCheck:
+    """创建单条 QC 检查结果。"""
+
     return DetailPageQCCheck(
         check_id=check_id,
         check_name=check_name,
@@ -345,15 +425,15 @@ def _build_visual_summary(
     planned_count: int,
     visual_pages: list[DetailVisualReviewPage],
 ) -> list[str]:
+    """生成 visual_review 的总览摘要。"""
+
     summary = [f"已生成 {generated_count}/{planned_count} 页。"]
     failed_roles = [item.page_role for item in visual_pages if item.status == "failed"]
     if failed_roles:
-        counter = Counter(failed_roles)
-        summary.append(f"失败页角色：{dict(counter)}")
+        summary.append(f"失败页角色：{dict(Counter(failed_roles))}")
     warning_roles = [item.page_role for item in visual_pages if item.status == "warning"]
     if warning_roles:
-        counter = Counter(warning_roles)
-        summary.append(f"警告页角色：{dict(counter)}")
+        summary.append(f"警告页角色：{dict(Counter(warning_roles))}")
     return summary
 
 
@@ -363,35 +443,51 @@ def _resolve_recommended_actions(
     issues: list[str],
     warnings: list[str],
 ) -> list[str]:
+    """给 visual_review 输出建议动作。"""
+
     actions: list[str] = []
     normalized = error_message.lower()
     if "json" in normalized or "500" in normalized:
         actions.append("优先做 provider 抖动重试")
     if any("锚点素材" in item for item in issues):
         actions.append("重新绑定正确锚点素材")
+    if any("规则句" in item or "提示词" in item or "文案标签" in item for item in issues):
+        actions.append("拆分可见文案与隐藏渲染指令")
+    if any("英文 key" in item or "snake_case" in item for item in issues):
+        actions.append("把 specs 字段映射成中文参数卡")
+    if any("接地感" in item for item in warnings):
+        actions.append("补强接触阴影、承托面和光影方向约束")
     if page_role in {"dry_leaf_evidence", "leaf_bottom_process_evidence"}:
         actions.append("进一步强化形态忠实约束")
     if any("标题长度" in item or "参数卡不足" in item for item in warnings):
         actions.append("继续降低文本密度")
     if not actions:
         actions.append("当前页面无需额外处理")
-    return actions
+    return list(dict.fromkeys(actions))
 
 
 def _resolve_retry_strategies(
     page_role: str,
     error_message: str,
     issues: list[str],
+    warnings: list[str],
 ) -> list[str]:
+    """给 selective retry 输出建议策略。"""
+
     if not issues:
         return []
     normalized = error_message.lower()
     strategies: list[str] = []
     if "json" in normalized or "500" in normalized:
-        strategies.append("original_prompt_retry")
-        strategies.append("text_density_reduction")
+        strategies.extend(["original_prompt_retry", "text_density_reduction"])
     if any("锚点素材" in item for item in issues):
         strategies.append("reference_rebinding")
+    if any("规则句" in item or "提示词" in item or "文案标签" in item for item in issues):
+        strategies.extend(["text_density_reduction", "style_correction"])
+    if any("英文 key" in item or "snake_case" in item for item in issues):
+        strategies.append("text_density_reduction")
+    if any("接地感" in item for item in warnings):
+        strategies.append("packaging_emphasis")
     if page_role in {"hero_opening", "packaging_structure_value", "package_closeup_evidence"}:
         strategies.append("packaging_emphasis")
     if page_role in {"scene_value_story", "brand_trust", "gift_openbox_portable"}:
@@ -399,3 +495,50 @@ def _resolve_retry_strategies(
     if page_role in {"dry_leaf_evidence", "leaf_bottom_process_evidence"}:
         strategies.append("packaging_emphasis")
     return list(dict.fromkeys(strategies))
+
+
+def _find_instruction_copy(block: DetailPageCopyBlock) -> list[str]:
+    """识别用户可见文案里混入的规则句。"""
+
+    findings: list[str] = []
+    fields = {
+        "headline": block.headline,
+        "subheadline": block.subheadline,
+        "selling_points": " / ".join(block.selling_points),
+        "body_copy": block.body_copy,
+        "parameter_copy": block.parameter_copy,
+        "cta_copy": block.cta_copy,
+    }
+    for field_name, text in fields.items():
+        normalized = str(text or "").strip()
+        if not normalized:
+            continue
+        for token in _INSTRUCTION_TOKENS:
+            if token in normalized:
+                findings.append(f"{field_name}:{token}")
+    return list(dict.fromkeys(findings))
+
+
+def _find_english_key_leaks(text: str) -> list[str]:
+    """识别参数文案里的英文 key 或 snake_case。"""
+
+    normalized = str(text or "").strip().lower()
+    if not normalized:
+        return []
+    findings = [token for token in _ENGLISH_PARAM_TOKENS if token in normalized]
+    findings.extend(_SNAKE_CASE_RE.findall(normalized))
+    return list(dict.fromkeys(findings))
+
+
+def _find_prompt_copy_leaks(prompt: str) -> list[str]:
+    """识别 render prompt 中混入的旧式可见文案标签。"""
+
+    normalized = str(prompt or "")
+    return [label for label in _PROMPT_LEAK_LABELS if label in normalized]
+
+
+def _find_missing_hero_grounding(prompt_item: DetailPagePromptPlanItem) -> list[str]:
+    """检查首屏 prompt 是否具备接地感关键词。"""
+
+    normalized = (prompt_item.prompt or "").lower()
+    return [token for token in _HERO_GROUNDING_TOKENS if token not in normalized]

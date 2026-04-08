@@ -8,7 +8,10 @@ from io import BytesIO
 import logging
 from pathlib import Path
 from time import perf_counter
+from urllib.parse import urlparse
 
+from google import genai
+from google.genai import types
 from PIL import Image
 import requests
 
@@ -38,10 +41,10 @@ class Banana2GenerationContext:
 
 
 class Banana2ImageProvider(BaseImageProvider):
-    """通过统一 provider/router 接入 Banana2。
+    """统一图片 provider。
 
-    真实调用优先使用官方 Gemini API；若未配置 Google API Key，则回退到
-    现有 RunAPI 转发通道，保持主图与详情图共用同一套 provider 体系。
+    当前 real 模式优先通过 Google 官方 `google.genai` SDK 调用 Gemini 图片模型。
+    若未配置 Google API Key，则回退到现有 RunAPI 转发通道。
     """
 
     provider_alias = "banana2"
@@ -52,6 +55,7 @@ class Banana2ImageProvider(BaseImageProvider):
         self.last_request_payloads: dict[str, dict[str, object]] = {}
         self.last_reference_asset_ids: list[str] = []
         self.last_background_style_asset_ids: list[str] = []
+        self._google_client: genai.Client | None = None
 
     def resolve_generation_context(
         self,
@@ -163,30 +167,110 @@ class Banana2ImageProvider(BaseImageProvider):
         aspect_ratio: str,
         image_size: str,
     ) -> bytes:
-        """执行单次 Banana2 请求。"""
+        """执行单次图片请求。"""
 
         transport = self._resolve_transport()
-        payload = self._build_request_payload(
-            prompt_text=prompt_text,
-            reference_assets=reference_assets,
-            background_style_assets=background_style_assets,
-            aspect_ratio=aspect_ratio,
-            image_size=image_size,
-        )
-        self.last_request_payloads[shot_id] = payload
-        url, headers = self._resolve_request_target(transport)
         started_at = perf_counter()
         logger.info(
-            "发送 Banana2 图片请求，shot_id=%s transport=%s url=%s aspect_ratio=%s image_size=%s reference_count=%s background_style_count=%s proxy=%s",
+            "发送 Banana2 图片请求，shot_id=%s transport=%s model=%s aspect_ratio=%s image_size=%s reference_count=%s background_style_count=%s proxy=%s",
             shot_id,
             transport,
-            url,
+            self.model_id,
             aspect_ratio,
             image_size,
             len(reference_assets),
             len(background_style_assets),
             describe_proxy_status(),
         )
+        if transport == "google_official_sdk":
+            payload = self._build_google_request_payload(
+                prompt_text=prompt_text,
+                reference_assets=reference_assets,
+                background_style_assets=background_style_assets,
+                aspect_ratio=aspect_ratio,
+                image_size=image_size,
+            )
+            self.last_request_payloads[shot_id] = payload
+            try:
+                image_bytes = self._generate_single_via_google_sdk(
+                    prompt_text=prompt_text,
+                    reference_assets=reference_assets,
+                    background_style_assets=background_style_assets,
+                    aspect_ratio=aspect_ratio,
+                    image_size=image_size,
+                )
+            except Exception as exc:
+                logger.exception("Google 官方图片请求失败，shot_id=%s error=%s", shot_id, exc)
+                raise RuntimeError(f"Google official image request failed for {shot_id}: {exc}") from exc
+        else:
+            payload = self._build_runapi_request_payload(
+                prompt_text=prompt_text,
+                reference_assets=reference_assets,
+                background_style_assets=background_style_assets,
+                aspect_ratio=aspect_ratio,
+                image_size=image_size,
+            )
+            self.last_request_payloads[shot_id] = payload
+            try:
+                image_bytes = self._generate_single_via_runapi(
+                    shot_id=shot_id,
+                    payload=payload,
+                    aspect_ratio=aspect_ratio,
+                    image_size=image_size,
+                )
+            except Exception as exc:
+                logger.exception("RunAPI 图片请求失败，shot_id=%s error=%s", shot_id, exc)
+                raise RuntimeError(f"RunAPI image request failed for {shot_id}: {exc}") from exc
+        logger.info(
+            "Banana2 图片请求成功，shot_id=%s transport=%s elapsed_ms=%s",
+            shot_id,
+            transport,
+            int((perf_counter() - started_at) * 1000),
+        )
+        return image_bytes
+
+    def _generate_single_via_google_sdk(
+        self,
+        *,
+        prompt_text: str,
+        reference_assets: list[Asset],
+        background_style_assets: list[Asset],
+        aspect_ratio: str,
+        image_size: str,
+    ) -> bytes:
+        """通过 Google 官方 SDK 调用图片模型。"""
+
+        client = self._get_google_client()
+        response = client.models.generate_content(
+            model=self.model_id,
+            contents=self._build_google_contents(
+                prompt_text=prompt_text,
+                reference_assets=reference_assets,
+                background_style_assets=background_style_assets,
+            ),
+            config=types.GenerateContentConfig(
+                response_modalities=["IMAGE"],
+                image_config=types.ImageConfig(
+                    aspect_ratio=aspect_ratio or self.settings.default_image_aspect_ratio,
+                    image_size=image_size or self.settings.default_image_size,
+                ),
+            ),
+        )
+        return self._extract_google_image_bytes(response)
+
+    def _generate_single_via_runapi(
+        self,
+        *,
+        shot_id: str,
+        payload: dict[str, object],
+        aspect_ratio: str,
+        image_size: str,
+    ) -> bytes:
+        """通过 RunAPI 转发通道调用图片模型。"""
+
+        if not self.settings.runapi_api_key:
+            raise RuntimeError("ECOM_IMAGE_AGENT_RUNAPI_API_KEY is required when using RunAPI transport.")
+        url, headers = self._resolve_runapi_request_target()
         try:
             with requests.Session() as session:
                 session.trust_env = False
@@ -198,58 +282,71 @@ class Banana2ImageProvider(BaseImageProvider):
                     timeout=self.settings.provider_timeout_seconds,
                 )
         except requests.RequestException as exc:
-            logger.exception("Banana2 请求失败，shot_id=%s transport=%s error=%s", shot_id, transport, exc)
-            raise RuntimeError(f"Banana2 request failed for {shot_id}: {exc}") from exc
+            raise RuntimeError(f"RunAPI image request failed for {shot_id}: {exc}") from exc
 
         if response.status_code >= 400:
             logger.error(
-                "Banana2 请求失败，shot_id=%s transport=%s status_code=%s response=%s",
+                "RunAPI 图片请求失败，shot_id=%s status_code=%s response=%s aspect_ratio=%s image_size=%s",
                 shot_id,
-                transport,
                 response.status_code,
                 summarize_text(response.text, limit=320),
+                aspect_ratio,
+                image_size,
             )
-            raise RuntimeError(f"Banana2 request failed: {response.status_code} {response.text[:1200]}")
+            raise RuntimeError(f"RunAPI image request failed: {response.status_code} {response.text[:1200]}")
 
         try:
             data = response.json()
         except ValueError as exc:
-            raise RuntimeError(f"Banana2 response is not valid JSON: {response.text[:1200]}") from exc
-
-        logger.info(
-            "Banana2 请求成功，shot_id=%s transport=%s elapsed_ms=%s",
-            shot_id,
-            transport,
-            int((perf_counter() - started_at) * 1000),
-        )
-        return self._extract_image_bytes(data, transport=transport)
+            raise RuntimeError(f"RunAPI response is not valid JSON: {response.text[:1200]}") from exc
+        return self._extract_runapi_image_bytes(data)
 
     def _resolve_transport(self) -> str:
-        """优先使用官方 API，缺失时回退到 RunAPI 转发。"""
+        """优先使用 Google 官方 SDK，缺失时回退到 RunAPI。"""
 
         if self.settings.google_api_key:
-            return "google"
+            return "google_official_sdk"
         if self.settings.runapi_api_key:
             return "runapi"
         raise RuntimeError(
             "Banana2 real mode requires ECOM_IMAGE_AGENT_GOOGLE_API_KEY or ECOM_IMAGE_AGENT_RUNAPI_API_KEY."
         )
 
-    def _resolve_request_target(self, transport: str) -> tuple[str, dict[str, str]]:
-        if transport == "google":
-            return (
-                f"{self.settings.google_image_base_url.rstrip('/')}/models/{self.model_id}:generateContent?key={self.settings.google_api_key}",
-                {"Content-Type": "application/json"},
-            )
-        return (
-            f"{self.settings.runapi_image_base_url.rstrip('/')}/v1/models/{self.model_id}:generateContent",
-            {
-                "Authorization": f"Bearer {self.settings.runapi_api_key}",
-                "Content-Type": "application/json",
-            },
-        )
+    def _get_google_client(self) -> genai.Client:
+        """懒加载 Google 官方 SDK client。"""
 
-    def _build_request_payload(
+        if not self.settings.google_api_key:
+            raise RuntimeError("ECOM_IMAGE_AGENT_GOOGLE_API_KEY is required for Google official SDK transport.")
+        if self._google_client is None:
+            self._google_client = genai.Client(
+                api_key=self.settings.google_api_key,
+                http_options=self._build_google_http_options(),
+            )
+        return self._google_client
+
+    def _build_google_http_options(self) -> types.HttpOptions:
+        """把现有配置映射到 Google 官方 SDK 的 http options。"""
+
+        configured_url = str(self.settings.google_image_base_url or "").strip()
+        default_root = "https://generativelanguage.googleapis.com"
+        options: dict[str, object] = {
+            "timeout": self.settings.provider_timeout_seconds * 1000,
+            "client_args": {"trust_env": False},
+        }
+        if configured_url:
+            parsed = urlparse(configured_url)
+            segments = [segment for segment in parsed.path.split("/") if segment]
+            if segments and segments[-1].startswith("v"):
+                options["api_version"] = segments[-1]
+                segments = segments[:-1]
+            if parsed.scheme and parsed.netloc:
+                root_path = "/" + "/".join(segments) if segments else ""
+                root_url = f"{parsed.scheme}://{parsed.netloc}{root_path}"
+                if root_url.rstrip("/") != default_root:
+                    options["base_url"] = root_url.rstrip("/")
+        return types.HttpOptions(**options)
+
+    def _build_google_request_payload(
         self,
         *,
         prompt_text: str,
@@ -258,15 +355,121 @@ class Banana2ImageProvider(BaseImageProvider):
         aspect_ratio: str,
         image_size: str,
     ) -> dict[str, object]:
-        """构造 generateContent 请求体。"""
+        """构造仅用于调试落盘的 Google SDK 请求摘要。"""
+
+        contents = [{"type": "text", "text": prompt_text}]
+        if reference_assets:
+            contents.append({"type": "text", "text": "Product reference images for package identity only."})
+            contents.extend(
+                {
+                    "type": "image_part",
+                    "asset_id": asset.asset_id,
+                    "filename": asset.filename,
+                    "mime_type": asset.mime_type or self._guess_mime_type(Path(asset.local_path)),
+                }
+                for asset in reference_assets
+            )
+        if background_style_assets:
+            contents.append({"type": "text", "text": "Background and style reference images for atmosphere only."})
+            contents.extend(
+                {
+                    "type": "image_part",
+                    "asset_id": asset.asset_id,
+                    "filename": asset.filename,
+                    "mime_type": asset.mime_type or self._guess_mime_type(Path(asset.local_path)),
+                }
+                for asset in background_style_assets
+            )
+        return {
+            "transport": "google_official_sdk",
+            "model": self.model_id,
+            "contents": contents,
+            "config": {
+                "response_modalities": ["IMAGE"],
+                "image_config": {
+                    "aspect_ratio": aspect_ratio or self.settings.default_image_aspect_ratio,
+                    "image_size": image_size or self.settings.default_image_size,
+                },
+            },
+        }
+
+    def _build_google_contents(
+        self,
+        *,
+        prompt_text: str,
+        reference_assets: list[Asset],
+        background_style_assets: list[Asset],
+    ) -> list[str | types.Part]:
+        """组装 Google 官方 SDK 的 contents。"""
+
+        contents: list[str | types.Part] = [prompt_text]
+        if reference_assets:
+            contents.append(
+                "Product reference images: keep package structure, material, color, label placement and brand identity stable. Do not rewrite visible package text."
+            )
+            self._append_google_asset_parts(contents, reference_assets)
+        if background_style_assets:
+            contents.append(
+                "Background and scene reference images: learn atmosphere, palette and spatial language only. Do not replace the product subject."
+            )
+            self._append_google_asset_parts(contents, background_style_assets)
+        return contents
+
+    def _append_google_asset_parts(
+        self,
+        contents: list[str | types.Part],
+        assets: list[Asset],
+    ) -> None:
+        """把本地参考图转成 SDK 的多模态 Part。"""
+
+        for asset in assets:
+            asset_path = Path(asset.local_path)
+            if not asset.local_path or not asset_path.exists():
+                continue
+            contents.append(
+                types.Part.from_bytes(
+                    data=asset_path.read_bytes(),
+                    mime_type=asset.mime_type or self._guess_mime_type(asset_path),
+                )
+            )
+
+    def _resolve_runapi_request_target(self) -> tuple[str, dict[str, str]]:
+        """返回 RunAPI 转发通道地址。"""
+
+        return (
+            f"{self.settings.runapi_image_base_url.rstrip('/')}/v1/models/{self.model_id}:generateContent",
+            {
+                "Authorization": f"Bearer {self.settings.runapi_api_key}",
+                "Content-Type": "application/json",
+            },
+        )
+
+    def _build_runapi_request_payload(
+        self,
+        *,
+        prompt_text: str,
+        reference_assets: list[Asset],
+        background_style_assets: list[Asset],
+        aspect_ratio: str,
+        image_size: str,
+    ) -> dict[str, object]:
+        """构造 RunAPI generateContent 请求体。"""
 
         parts: list[dict[str, object]] = [{"text": prompt_text}]
         if reference_assets:
-            parts.append({"text": "以下是产品参考图，只能用于保持包装结构、材质、颜色与品牌识别一致，不得转写其中可见文字。"})
-            self._append_inline_assets(parts, reference_assets)
+            parts.append(
+                {
+                    "text": "以下是产品参考图，只能用于保持包装结构、材质、颜色与品牌识别一致，不得转写其中可见文字。"
+                }
+            )
+            self._append_runapi_inline_assets(parts, reference_assets)
         if background_style_assets:
-            parts.append({"text": "以下是背景与场景参考图，只能用于学习氛围、色调与空间语言，不得替换产品主体。"})
-            self._append_inline_assets(parts, background_style_assets)
+            parts.append(
+                {
+                    "text": "以下是背景与场景参考图，只能用于学习氛围、色调与空间语言，不得替换产品主体。"
+                }
+            )
+            self._append_runapi_inline_assets(parts, background_style_assets)
         return {
             "contents": [{"role": "user", "parts": parts}],
             "generationConfig": {
@@ -278,7 +481,9 @@ class Banana2ImageProvider(BaseImageProvider):
             },
         }
 
-    def _append_inline_assets(self, parts: list[dict[str, object]], assets: list[Asset]) -> None:
+    def _append_runapi_inline_assets(self, parts: list[dict[str, object]], assets: list[Asset]) -> None:
+        """把本地资产编码成 RunAPI inlineData。"""
+
         for asset in assets:
             asset_path = Path(asset.local_path)
             if not asset.local_path or not asset_path.exists():
@@ -292,7 +497,30 @@ class Banana2ImageProvider(BaseImageProvider):
                 }
             )
 
-    def _extract_image_bytes(self, response_json: dict[str, object], *, transport: str) -> bytes:
+    def _extract_google_image_bytes(self, response: types.GenerateContentResponse) -> bytes:
+        """从 Google 官方 SDK 响应中提取图片字节。"""
+
+        for part in response.parts or []:
+            inline_data = getattr(part, "inline_data", None)
+            if inline_data is not None and getattr(inline_data, "data", None):
+                data = inline_data.data
+                if isinstance(data, bytes):
+                    return data
+                if isinstance(data, str):
+                    return base64.b64decode(data)
+                return bytes(data)
+            try:
+                image = part.as_image()
+            except Exception:
+                continue
+            buffer = BytesIO()
+            image.save(buffer, format="PNG")
+            return buffer.getvalue()
+        raise RuntimeError(f"Google official response did not contain image data: {response}")
+
+    def _extract_runapi_image_bytes(self, response_json: dict[str, object]) -> bytes:
+        """从 RunAPI 响应中提取图片字节。"""
+
         for candidate in response_json.get("candidates", []):
             content = candidate.get("content", {})
             for part in content.get("parts", []):
@@ -303,12 +531,14 @@ class Banana2ImageProvider(BaseImageProvider):
                 if file_data:
                     file_uri = file_data.get("fileUri") or file_data.get("file_uri")
                     if file_uri:
-                        return self._download_generated_file(str(file_uri), transport=transport)
-        raise RuntimeError(f"Banana2 response did not contain image data: {response_json}")
+                        return self._download_generated_file(str(file_uri))
+        raise RuntimeError(f"RunAPI response did not contain image data: {response_json}")
 
-    def _download_generated_file(self, file_uri: str, *, transport: str) -> bytes:
+    def _download_generated_file(self, file_uri: str) -> bytes:
+        """下载 RunAPI fileUri。"""
+
         headers: dict[str, str] = {}
-        if transport == "runapi" and self.settings.runapi_api_key:
+        if self.settings.runapi_api_key:
             headers["Authorization"] = f"Bearer {self.settings.runapi_api_key}"
         try:
             with requests.Session() as session:
@@ -316,16 +546,18 @@ class Banana2ImageProvider(BaseImageProvider):
                 session.proxies.clear()
                 response = session.get(file_uri, headers=headers, timeout=self.settings.provider_timeout_seconds)
         except requests.RequestException as exc:
-            logger.exception("Banana2 fileUri 下载失败，url=%s error=%s", file_uri, exc)
-            raise RuntimeError(f"Banana2 file download failed: {exc}") from exc
+            logger.exception("RunAPI fileUri 下载失败，url=%s error=%s", file_uri, exc)
+            raise RuntimeError(f"RunAPI file download failed: {exc}") from exc
 
         if response.status_code >= 400:
-            raise RuntimeError(f"Banana2 file download failed: {response.status_code} {response.text[:1200]}")
+            raise RuntimeError(f"RunAPI file download failed: {response.status_code} {response.text[:1200]}")
         if not response.content:
-            raise RuntimeError(f"Banana2 file download returned empty body: {file_uri}")
+            raise RuntimeError(f"RunAPI file download returned empty body: {file_uri}")
         return response.content
 
     def _write_generated_image(self, *, index: int, shot_id: str, image_bytes: bytes, output_dir: Path) -> GeneratedImage:
+        """把生成结果保存为任务图片。"""
+
         output_path = output_dir / f"{index:02d}_{shot_id}.png"
         output_path.write_bytes(image_bytes)
         with Image.open(BytesIO(image_bytes)) as image:
@@ -339,7 +571,7 @@ class Banana2ImageProvider(BaseImageProvider):
         )
 
     def _prepare_reference_assets(self, reference_assets: list[Asset] | None) -> list[Asset]:
-        """Banana2 detail 页允许同时绑定更多产品参考图。"""
+        """detail 页允许同时绑定更多产品参考图。"""
 
         prepared: list[Asset] = []
         for asset in reference_assets or []:
@@ -351,6 +583,8 @@ class Banana2ImageProvider(BaseImageProvider):
         return prepared
 
     def _prepare_background_style_assets(self, background_style_assets: list[Asset] | None) -> list[Asset]:
+        """限制背景风格图数量。"""
+
         prepared: list[Asset] = []
         for asset in background_style_assets or []:
             if not asset.local_path:
@@ -361,6 +595,8 @@ class Banana2ImageProvider(BaseImageProvider):
         return prepared
 
     def _guess_mime_type(self, path: Path) -> str:
+        """按文件后缀推断 MIME。"""
+
         suffix = path.suffix.lower()
         if suffix in {".jpg", ".jpeg"}:
             return "image/jpeg"

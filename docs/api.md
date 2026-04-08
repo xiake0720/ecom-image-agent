@@ -308,7 +308,9 @@ plan-only 链路：
 
 说明：
 - 文本规划继续走统一 planning provider/router
-- 图片渲染默认走 Banana2 provider
+- 图片渲染默认走 `banana2` provider/router
+- `banana2` 在 real 模式下优先通过 Google 官方 `google.genai` SDK 调用 `gemini-3.1-flash-image-preview`
+- 若未配置 `ECOM_IMAGE_AGENT_GOOGLE_API_KEY`，则回退到现有 RunAPI 通道
 - 当 provider 抖动或单页失败时，detail 渲染会做页级重试，不再因为单页异常直接中断整条任务
 
 ## 7. 错误处理

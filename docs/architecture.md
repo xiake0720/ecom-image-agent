@@ -115,7 +115,8 @@
 
 ### 4.4 Banana2
 - provider 文件：[`backend/engine/providers/image/banana2_image.py`](/D:/python/ecom-image-agent/backend/engine/providers/image/banana2_image.py)
-- 真实模式优先使用 Google Gemini API
+- 真实模式优先使用 Google 官方 `google.genai` SDK
+- 当前默认模型：`gemini-3.1-flash-image-preview`
 - 若未配置 Google API Key，则回退到现有 RunAPI 通道
 
 ## 5. mock mode 设计

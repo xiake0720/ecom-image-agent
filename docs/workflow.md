@@ -61,6 +61,9 @@ plan-only 模式停在第 4 步，并把任务状态收口为 `completed`。
 - 缺失 `dry_leaf / leaf_bottom` 时不伪造证据页
 - 缺失 `tea_soup / scene_ref / bg_ref` 时允许 AI 在页内补足辅助素材
 - prompt 按页职责生成，不再递归拼接 `Prompt 草案=`
+- 图内可见文案只来自 `title_copy / subtitle_copy / selling_points_for_render`
+- `body_copy / notes / 合规说明` 不再混入 render prompt
+- 首屏与包装主视觉页会补充接地感、接触阴影、环境遮蔽与统一光向约束
 - packaging / main_result 会按页轮换绑定，避免所有页面都复用同一张包装图
 
 ### 2.5 渲染与容错
@@ -88,12 +91,16 @@ plan-only 模式停在第 4 步，并把任务状态收口为 `completed`。
 - 锚点素材是否绑定正确
 - 比例是否满足 `3:4`
 - 标题/参数页是否过密或出现占位值
+- 用户可见 copy 是否混入规则句或提示词
+- 参数卡是否出现英文 key 或 `snake_case`
+- 首屏 prompt 是否具备接地感关键词
 
 ### 2.7 收尾与导出
 `detail_finalize` 会：
 1. 根据成功页数和 QC 状态决定任务状态
 2. 写入 `detail_manifest.json`
 3. 打包 `exports/detail_bundle.zip`
+4. 统一以任务绝对目录计算 bundle 相对路径，避免已生成 ZIP 却把任务误判为失败
 
 状态规则：
 - 全部通过：`completed`
