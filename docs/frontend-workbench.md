@@ -127,3 +127,6 @@
 - 强化图卡选中态、hover/focus 与错误提示
 - 把 plan/copy/prompt/result 明确拆段展示
 - 右栏只做导演控制台，不做前端拼图或本地合成详情图
+> 2026-04 update:
+> - Detail page visuals are aligned with the main workbench theme.
+> - Imported main-image cards, generated result cards, and preview modal use a `3:4` display ratio.

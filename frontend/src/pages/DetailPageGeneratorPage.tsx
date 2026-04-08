@@ -293,6 +293,7 @@ export function DetailPageGeneratorPage() {
 
   return (
     <PageShell activeKey="detail-pages">
+      <div className="detail-page">
       <PageHeader
         title="茶叶详情图工作台"
         subtitle="导演 Agent 负责规划、文案与 Prompt，生产 Graph 负责执行、QC、导出与 runtime 轮询。"
@@ -459,6 +460,7 @@ export function DetailPageGeneratorPage() {
             <DetailRuntimeSidebar runtime={runtime} fallbackTaskId={detailTaskId} message={message} pageError={pageError} />
           </SectionCard>
         </aside>
+      </div>
       </div>
 
       {previewImage ? (

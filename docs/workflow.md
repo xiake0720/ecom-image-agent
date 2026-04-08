@@ -119,3 +119,5 @@ detail 失败时：
 - 中栏错误横幅
 - 右栏 runtime 侧栏
 - 规划 / 文案 / Prompt / 结果图
+> 2026-04 update:
+> - Frontend detail-page preview surfaces now display imported cards, result cards, and modal previews in `3:4` to match backend output.
