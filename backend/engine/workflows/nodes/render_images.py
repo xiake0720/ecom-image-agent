@@ -22,6 +22,7 @@ from backend.engine.core.paths import get_task_final_dir, get_task_generated_dir
 from backend.engine.domain.generation_result import GeneratedImage, GenerationResult
 from backend.engine.domain.image_prompt_plan import ImagePrompt, ImagePromptPlan
 from backend.engine.domain.prompt_plan_v2 import PromptPlanV2, PromptShot
+from backend.engine.domain.usage import resolve_provider_usage_snapshot
 from backend.engine.services.assets.reference_selector import select_reference_bundle
 from backend.engine.workflows.state import (
     WorkflowDependencies,
@@ -29,6 +30,7 @@ from backend.engine.workflows.state import (
     build_render_progress_task,
     format_connected_contract_logs,
 )
+from backend.services.task_usage_service import TaskUsageService
 
 
 def render_images(state: WorkflowState, deps: WorkflowDependencies) -> dict:
@@ -60,6 +62,7 @@ def render_images(state: WorkflowState, deps: WorkflowDependencies) -> dict:
         f"[render_images] background_style_asset_ids={generation_context['background_style_asset_ids']}",
         f"[render_images] overlay_fallback_enabled={str(settings.enable_overlay_fallback).lower()}",
     ]
+    usage_service = TaskUsageService()
 
     final_images: list[GeneratedImage] = []
     text_render_reports: dict[str, dict[str, object]] = {}
@@ -75,6 +78,9 @@ def render_images(state: WorkflowState, deps: WorkflowDependencies) -> dict:
             background_style_assets=selection.background_style_assets,
             deps=deps,
             overlay_fallback_enabled=settings.enable_overlay_fallback,
+            usage_service=usage_service,
+            task_id=task.task_id,
+            stage_label=state.get("current_step_label", ""),
         )
         final_images.append(generated_image)
         text_render_reports[shot.shot_id] = report
@@ -122,6 +128,9 @@ def _render_single_shot(
     background_style_assets: list,
     deps: WorkflowDependencies,
     overlay_fallback_enabled: bool,
+    usage_service: TaskUsageService,
+    task_id: str,
+    stage_label: str,
 ) -> tuple[GeneratedImage, dict[str, object], bool]:
     """执行单张图生成，并在失败时回退到 Pillow 贴字。"""
 
@@ -140,8 +149,38 @@ def _render_single_shot(
                 reference_assets=reference_assets,
                 background_style_assets=background_style_assets,
             )
+            if deps.image_provider_mode == "real":
+                usage_service.record_usage(
+                    task_id=task_id,
+                    task_type="main_image",
+                    stage_name="render_images",
+                    stage_label=stage_label,
+                    provider_type="image",
+                    provider_name=deps.image_route.alias if deps.image_route is not None else deps.image_provider_name,
+                    model_id=deps.image_model_selection.model_id if deps.image_model_selection is not None else "",
+                    usage=raw_result.usage,
+                    success=True,
+                    attempt=1,
+                    item_id=shot.shot_id,
+                    metadata={"request_mode": "generate_images_v2"},
+                )
             raw_image = _first_image(raw_result, shot.shot_id)
         except Exception:
+            if deps.image_provider_mode == "real":
+                usage_service.record_usage(
+                    task_id=task_id,
+                    task_type="main_image",
+                    stage_name="render_images",
+                    stage_label=stage_label,
+                    provider_type="image",
+                    provider_name=deps.image_route.alias if deps.image_route is not None else deps.image_provider_name,
+                    model_id=deps.image_model_selection.model_id if deps.image_model_selection is not None else "",
+                    usage=resolve_provider_usage_snapshot(provider, default_request_count=1),
+                    success=False,
+                    attempt=1,
+                    item_id=shot.shot_id,
+                    metadata={"request_mode": "generate_images_v2"},
+                )
             fallback_reason = "v2_generation_failed"
             if not overlay_fallback_enabled:
                 raise
@@ -149,12 +188,45 @@ def _render_single_shot(
         fallback_reason = "provider_without_v2"
     if raw_image is None:
         used_fallback = True
-        raw_result = provider.generate_images(
-            _build_compatibility_plan(execution_shot),
-            output_dir=generated_dir,
-            reference_assets=reference_assets,
-            background_style_assets=background_style_assets,
-        )
+        try:
+            raw_result = provider.generate_images(
+                _build_compatibility_plan(execution_shot),
+                output_dir=generated_dir,
+                reference_assets=reference_assets,
+                background_style_assets=background_style_assets,
+            )
+            if deps.image_provider_mode == "real":
+                usage_service.record_usage(
+                    task_id=task_id,
+                    task_type="main_image",
+                    stage_name="render_images",
+                    stage_label=stage_label,
+                    provider_type="image",
+                    provider_name=deps.image_route.alias if deps.image_route is not None else deps.image_provider_name,
+                    model_id=deps.image_model_selection.model_id if deps.image_model_selection is not None else "",
+                    usage=raw_result.usage,
+                    success=True,
+                    attempt=2,
+                    item_id=shot.shot_id,
+                    metadata={"request_mode": "generate_images_fallback"},
+                )
+        except Exception:
+            if deps.image_provider_mode == "real":
+                usage_service.record_usage(
+                    task_id=task_id,
+                    task_type="main_image",
+                    stage_name="render_images",
+                    stage_label=stage_label,
+                    provider_type="image",
+                    provider_name=deps.image_route.alias if deps.image_route is not None else deps.image_provider_name,
+                    model_id=deps.image_model_selection.model_id if deps.image_model_selection is not None else "",
+                    usage=resolve_provider_usage_snapshot(provider, default_request_count=1),
+                    success=False,
+                    attempt=2,
+                    item_id=shot.shot_id,
+                    metadata={"request_mode": "generate_images_fallback"},
+                )
+            raise
         raw_image = _first_image(raw_result, shot.shot_id)
 
     if raw_image is None:

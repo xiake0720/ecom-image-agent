@@ -1,13 +1,4 @@
-"""本地存储服务。
-
-文件位置：
-- `src/services/storage/local_storage.py`
-
-职责：
-- 管理任务目录与输入输出落盘
-- 保存上传素材并补齐最小资产清单
-- 提供节点缓存与导出能力
-"""
+﻿"""本地存储服务。"""
 
 from __future__ import annotations
 
@@ -22,6 +13,7 @@ from PIL import Image
 from backend.engine.core.paths import ensure_task_dirs, get_cache_dir
 from backend.engine.domain.asset import Asset, AssetType
 from backend.engine.domain.task import Task
+from backend.engine.domain.usage import UsageEvent, UsageSummary, summarize_usage_events
 
 ModelT = TypeVar("ModelT")
 
@@ -76,6 +68,41 @@ class LocalStorageService:
         content = self._serialize_payload(payload)
         task_path.write_text(json.dumps(content, ensure_ascii=False, indent=2), encoding="utf-8")
         return task_path
+
+    def append_usage_event(self, task_id: str, event: UsageEvent) -> Path:
+        """向任务 usage JSONL 追加一条模型调用事件，并同步汇总文件。"""
+
+        usage_dir = ensure_task_dirs(task_id)["task"] / "usage"
+        usage_dir.mkdir(parents=True, exist_ok=True)
+        events_path = usage_dir / "usage_events.jsonl"
+        with events_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event.model_dump(mode="json"), ensure_ascii=False) + "\n")
+        summary = summarize_usage_events(self.load_usage_events(task_id))
+        summary_path = usage_dir / "usage_summary.json"
+        summary_path.write_text(summary.model_dump_json(indent=2), encoding="utf-8")
+        return events_path
+
+    def load_usage_events(self, task_id: str) -> list[UsageEvent]:
+        """读取任务 usage 事件流。"""
+
+        events_path = ensure_task_dirs(task_id)["task"] / "usage" / "usage_events.jsonl"
+        if not events_path.exists():
+            return []
+        rows: list[UsageEvent] = []
+        for line in events_path.read_text(encoding="utf-8").splitlines():
+            payload = line.strip()
+            if not payload:
+                continue
+            rows.append(UsageEvent.model_validate_json(payload))
+        return rows
+
+    def load_usage_summary(self, task_id: str) -> UsageSummary | None:
+        """读取任务 usage 汇总。"""
+
+        summary_path = ensure_task_dirs(task_id)["task"] / "usage" / "usage_summary.json"
+        if not summary_path.exists():
+            return None
+        return UsageSummary.model_validate_json(summary_path.read_text(encoding="utf-8"))
 
     def create_preview(self, image_path: str, preview_path: Path, max_side: int = 480) -> Path:
         """生成统一尺寸的预览图。"""

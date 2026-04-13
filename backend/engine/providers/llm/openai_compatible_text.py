@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import json
@@ -11,6 +11,7 @@ import requests
 
 from backend.engine.core.config import Settings
 from backend.engine.core.logging import describe_proxy_status, summarize_text
+from backend.engine.domain.usage import ProviderUsageSnapshot, normalize_usage_snapshot
 from backend.engine.providers.llm.base import BaseTextProvider, StructuredModel
 
 logger = logging.getLogger(__name__)
@@ -145,7 +146,7 @@ class OpenAICompatibleChatClient:
         last_exception: Exception | None = None
 
         logger.info(
-            "准备发送文本模型请求，provider=%s，model=%s，base_url=%s，代理状态=%s，timeout=(connect=%s, read=%s)，requests_session.trust_env=False",
+            "鍑嗗鍙戦€佹枃鏈ā鍨嬭姹傦紝provider=%s锛宮odel=%s锛宐ase_url=%s锛屼唬鐞嗙姸鎬?%s锛宼imeout=(connect=%s, read=%s)锛宺equests_session.trust_env=False",
             self.provider_name,
             model_id,
             url,
@@ -159,7 +160,7 @@ class OpenAICompatibleChatClient:
                 started_at = time.time()
                 try:
                     logger.info(
-                        "文本模型请求开始，第 %s/%s 次，provider=%s，model=%s",
+                        "鏂囨湰妯″瀷璇锋眰寮€濮嬶紝绗?%s/%s 娆★紝provider=%s锛宮odel=%s",
                         attempt,
                         max_attempts,
                         self.provider_name,
@@ -168,7 +169,7 @@ class OpenAICompatibleChatClient:
                     response = session.post(url, headers=headers, json=payload, timeout=timeout)
                     response._ecom_elapsed_seconds = time.time() - started_at
                     logger.info(
-                        "文本模型请求已返回，第 %s/%s 次，provider=%s，model=%s，status_code=%s，elapsed=%.2fs",
+                        "鏂囨湰妯″瀷璇锋眰宸茶繑鍥烇紝绗?%s/%s 娆★紝provider=%s锛宮odel=%s锛宻tatus_code=%s锛宔lapsed=%.2fs",
                         attempt,
                         max_attempts,
                         self.provider_name,
@@ -188,7 +189,7 @@ class OpenAICompatibleChatClient:
                             f"elapsed_seconds={elapsed_seconds:.2f}, error={exc}"
                         ) from exc
                     logger.warning(
-                        "文本模型请求异常，准备重试，provider=%s，model=%s，第 %s/%s 次，elapsed=%.2fs，error=%s",
+                        "鏂囨湰妯″瀷璇锋眰寮傚父锛屽噯澶囬噸璇曪紝provider=%s锛宮odel=%s锛岀 %s/%s 娆★紝elapsed=%.2fs锛宔rror=%s",
                         self.provider_name,
                         model_id,
                         attempt,
@@ -215,6 +216,7 @@ class OpenAICompatibleStructuredTextProvider(BaseTextProvider, ABC):
         self.model_selection = settings.resolve_text_model_selection()
         self.last_response_status_code: int | None = None
         self.last_response_metadata: dict[str, Any] = {}
+        self.last_usage: ProviderUsageSnapshot | None = None
 
     def generate_structured(
         self,
@@ -223,8 +225,9 @@ class OpenAICompatibleStructuredTextProvider(BaseTextProvider, ABC):
         *,
         system_prompt: str | None = None,
     ) -> StructuredModel:
+        self.last_usage = ProviderUsageSnapshot.unavailable(request_count=1)
         logger.info(
-            "开始调用文本模型，provider=%s，mode=%s，模型标签=%s，model=%s，schema=%s，prompt摘要=%s",
+            "寮€濮嬭皟鐢ㄦ枃鏈ā鍨嬶紝provider=%s锛宮ode=%s锛屾ā鍨嬫爣绛?%s锛宮odel=%s锛宻chema=%s锛宲rompt鎽樿=%s",
             self.provider_display_name,
             self._resolve_route_mode(),
             self.model_selection.label,
@@ -260,8 +263,10 @@ class OpenAICompatibleStructuredTextProvider(BaseTextProvider, ABC):
             "status_code": response.status_code,
         }
         elapsed_seconds = getattr(response, "_ecom_elapsed_seconds", None)
+        elapsed_ms = int(elapsed_seconds * 1000) if isinstance(elapsed_seconds, (int, float)) else 0
         elapsed_text = f"{elapsed_seconds:.2f}" if isinstance(elapsed_seconds, (int, float)) else "unknown"
         if response.status_code >= 400:
+            self.last_usage = ProviderUsageSnapshot.unavailable(request_count=1, latency_ms=elapsed_ms)
             logger.error(
                 "%s text request failed. model=%s, status_code=%s, elapsed_seconds=%s, response_summary=%s",
                 self.provider_display_name,
@@ -277,6 +282,11 @@ class OpenAICompatibleStructuredTextProvider(BaseTextProvider, ABC):
             )
 
         data = client.parse_response_json(response, model_id=self.model_selection.model_id)
+        self.last_usage = normalize_usage_snapshot(
+            data.get("usage"),
+            latency_ms=elapsed_ms,
+            request_count=1,
+        )
         content = client.extract_message_content(data, model_id=self.model_selection.model_id)
         parsed = parse_structured_output_content(
             provider_name=self.provider_display_name,
@@ -300,7 +310,7 @@ class OpenAICompatibleStructuredTextProvider(BaseTextProvider, ABC):
             ) from exc
 
         logger.info(
-            "文本模型调用成功，provider=%s，模型标签=%s，model=%s，耗时=%ss",
+            "鏂囨湰妯″瀷璋冪敤鎴愬姛锛宲rovider=%s锛屾ā鍨嬫爣绛?%s锛宮odel=%s锛岃€楁椂=%ss",
             self.provider_display_name,
             self.model_selection.label,
             self.model_selection.model_id,
@@ -355,3 +365,5 @@ class OpenAICompatibleStructuredTextProvider(BaseTextProvider, ABC):
     @abstractmethod
     def _missing_api_key_message(self) -> str:
         raise NotImplementedError
+
+

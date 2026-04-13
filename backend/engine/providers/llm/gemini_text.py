@@ -1,8 +1,9 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import logging
 from typing import Any
 
+from backend.engine.domain.usage import ProviderUsageSnapshot
 from backend.engine.providers.llm.base import BaseTextProvider, StructuredModel
 
 logger = logging.getLogger(__name__)
@@ -19,7 +20,8 @@ class GeminiTextProvider(BaseTextProvider):
         *,
         system_prompt: str | None = None,
     ) -> StructuredModel:
-        logger.info("当前文本 provider 模式为 mock，返回本地结构化占位数据，schema=%s", response_model.__name__)
+        self.last_usage = ProviderUsageSnapshot.empty()
+        logger.info("当前文本 provider 处于 mock 模式，返回本地结构化占位数据，schema=%s", response_model.__name__)
         # TODO: Replace this mock-only implementation with a real Gemini API call after MVP approval.
         return self._mock_response(response_model)
 
@@ -211,7 +213,7 @@ class GeminiTextProvider(BaseTextProvider):
                         "page_title": "品牌与产品主视觉",
                         "screen_themes": ["品牌与产品主体"],
                         "layout_notes": ["单屏构图，包装正面保留完整识别", "主体与文案分区清晰"],
-                        "prompt": "高级茶叶电商详情单屏图，包装主体稳定，留白大气，材质真实，中文排版清晰。",
+                        "prompt": "高端茶叶电商详情单屏图，包装主体稳定，留白大气，材质真实，中文排版清晰。",
                         "negative_prompt": "garbled Chinese text, deformed packaging, replaced logo, cluttered layout",
                         "reference_roles": ["main_result", "packaging"],
                     }

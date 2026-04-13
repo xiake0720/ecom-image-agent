@@ -44,6 +44,11 @@ def detail_render_pages(state: DetailWorkflowState, deps: DetailWorkflowDependen
         image_provider=deps.image_generation_provider,
         provider_name=deps.image_provider_name,
         model_name=deps.image_model_selection.label if deps.image_model_selection else "",
+        usage_provider_name=deps.image_route.alias if deps.image_route is not None else deps.image_provider_name,
+        usage_model_id=deps.image_model_selection.model_id if deps.image_model_selection is not None else "",
+        usage_enabled=bool(deps.image_route is not None and deps.image_route.mode == "real"),
+        task_id=task.task_id,
+        stage_label=state.get("current_step_label", ""),
         image_size=state["detail_payload"].image_size,
         progress_callback=on_progress,
     )

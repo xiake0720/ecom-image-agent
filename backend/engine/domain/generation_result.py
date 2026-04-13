@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from backend.engine.domain.usage import ProviderUsageSnapshot
+
 
 class GeneratedImage(BaseModel):
     shot_id: str
@@ -16,4 +18,5 @@ class GeneratedImage(BaseModel):
 
 class GenerationResult(BaseModel):
     images: list[GeneratedImage] = Field(default_factory=list)
+    usage: ProviderUsageSnapshot = Field(default_factory=ProviderUsageSnapshot.empty)
 

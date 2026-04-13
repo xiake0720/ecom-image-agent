@@ -15,6 +15,7 @@ from backend.engine.core.config import get_settings
 from backend.engine.domain.director_output import DirectorOutput, DirectorShot
 from backend.engine.domain.prompt_plan_v2 import PromptPlanV2, PromptShot
 from backend.engine.domain.task import Task
+from backend.engine.domain.usage import resolve_provider_usage_snapshot
 from backend.engine.workflows.nodes.cache_utils import (
     build_node_cache_key,
     hash_state_payload,
@@ -24,6 +25,7 @@ from backend.engine.workflows.nodes.cache_utils import (
 )
 from backend.engine.workflows.nodes.prompt_utils import describe_prompt_source, dump_pretty, load_prompt_text
 from backend.engine.workflows.state import WorkflowDependencies, WorkflowState, format_connected_contract_logs
+from backend.services.task_usage_service import TaskUsageService
 
 TITLE_FALLBACKS: dict[str, str] = {
     "hero": "东方茶礼",
@@ -101,10 +103,38 @@ def prompt_refine_v2(state: WorkflowState, deps: WorkflowDependencies) -> dict:
 
     if deps.text_provider_mode == "real":
         prompt = _build_prompt(task=task, director_output=director_output, fallback_plan=fallback_plan)
-        prompt_plan = deps.planning_provider.generate_structured(
-            prompt,
-            PromptPlanV2,
-            system_prompt=load_prompt_text("prompt_refine_v2.md"),
+        usage_service = TaskUsageService()
+        try:
+            prompt_plan = deps.planning_provider.generate_structured(
+                prompt,
+                PromptPlanV2,
+                system_prompt=load_prompt_text("prompt_refine_v2.md"),
+            )
+        except Exception:
+            usage_service.record_usage(
+                task_id=task.task_id,
+                task_type="main_image",
+                stage_name="prompt_refine_v2",
+                stage_label=state.get("current_step_label", ""),
+                provider_type="text",
+                provider_name=deps.planning_route.alias if deps.planning_route is not None else deps.planning_provider_name,
+                model_id=deps.planning_model_selection.model_id if deps.planning_model_selection is not None else provider_model_id,
+                usage=resolve_provider_usage_snapshot(deps.planning_provider, default_request_count=1),
+                success=False,
+                metadata={"schema": "PromptPlanV2"},
+            )
+            raise
+        usage_service.record_usage(
+            task_id=task.task_id,
+            task_type="main_image",
+            stage_name="prompt_refine_v2",
+            stage_label=state.get("current_step_label", ""),
+            provider_type="text",
+            provider_name=deps.planning_route.alias if deps.planning_route is not None else deps.planning_provider_name,
+            model_id=deps.planning_model_selection.model_id if deps.planning_model_selection is not None else provider_model_id,
+            usage=resolve_provider_usage_snapshot(deps.planning_provider, default_request_count=1),
+            success=True,
+            metadata={"schema": "PromptPlanV2"},
         )
         prompt_plan = _normalize_prompt_plan(prompt_plan, fallback_plan, task=task)
     else:

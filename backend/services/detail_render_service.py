@@ -1,4 +1,4 @@
-"""详情图渲染与导出服务。"""
+﻿"""详情图渲染与导出服务。"""
 
 from __future__ import annotations
 
@@ -14,12 +14,14 @@ from backend.engine.domain.asset import Asset, AssetType
 from backend.engine.domain.generation_result import GeneratedImage, GenerationResult
 from backend.engine.domain.image_prompt_plan import ImagePrompt, ImagePromptPlan
 from backend.engine.domain.prompt_plan_v2 import PromptPlanV2, PromptShot
+from backend.engine.domain.usage import resolve_provider_usage_snapshot
 from backend.schemas.detail import (
     DetailPageAssetRef,
     DetailPagePromptPlanItem,
     DetailPageRenderResult,
     DetailRetryStrategy,
 )
+from backend.services.task_usage_service import TaskUsageService
 
 RenderProgressCallback = Callable[[int, int, list[DetailPageRenderResult]], None]
 
@@ -35,6 +37,11 @@ class DetailRenderService:
         image_provider: object,
         provider_name: str,
         model_name: str,
+        usage_provider_name: str,
+        usage_model_id: str,
+        usage_enabled: bool,
+        task_id: str,
+        stage_label: str,
         image_size: str,
         progress_callback: RenderProgressCallback | None = None,
     ) -> list[DetailPageRenderResult]:
@@ -44,6 +51,7 @@ class DetailRenderService:
         generated_dir.mkdir(parents=True, exist_ok=True)
         render_results: list[DetailPageRenderResult] = []
         total_count = len(prompt_plan)
+        usage_service = TaskUsageService()
         for index, item in enumerate(prompt_plan, start=1):
             started_at = datetime.utcnow().isoformat()
             page_result = self._render_with_retry(
@@ -54,6 +62,12 @@ class DetailRenderService:
                 image_provider=image_provider,
                 provider_name=provider_name,
                 model_name=model_name,
+                usage_provider_name=usage_provider_name,
+                usage_model_id=usage_model_id,
+                usage_enabled=usage_enabled,
+                task_id=task_id,
+                stage_label=stage_label,
+                usage_service=usage_service,
                 image_size=image_size,
                 started_at=started_at,
             )
@@ -81,16 +95,25 @@ class DetailRenderService:
         image_provider: object,
         provider_name: str,
         model_name: str,
+        usage_provider_name: str,
+        usage_model_id: str,
+        usage_enabled: bool,
+        task_id: str,
+        stage_label: str,
+        usage_service: TaskUsageService,
         image_size: str,
         started_at: str,
     ) -> DetailPageRenderResult:
+        """按页执行 provider 调用，并在失败时应用页级重试策略。"""
+
         attempts = self._build_attempt_items(prompt_plan_item)
         applied_strategies: list[DetailRetryStrategy] = []
         last_error = ""
+        request_mode = "generate_images_v2" if hasattr(image_provider, "generate_images_v2") else "generate_images"
         for attempt_index, (strategy, attempt_item) in enumerate(attempts, start=1):
             try:
                 reference_assets, background_assets = self._build_assets(task_dir=task_dir, refs=attempt_item.references)
-                generated = self._render_single_page(
+                generated, result = self._render_single_page(
                     provider=image_provider,
                     prompt_plan_item=attempt_item,
                     shot_id=attempt_item.page_id,
@@ -99,6 +122,21 @@ class DetailRenderService:
                     reference_assets=reference_assets,
                     background_style_assets=background_assets,
                 )
+                if usage_enabled:
+                    usage_service.record_usage(
+                        task_id=task_id,
+                        task_type="detail_page_v2",
+                        stage_name="detail_render_pages",
+                        stage_label=stage_label,
+                        provider_type="image",
+                        provider_name=usage_provider_name,
+                        model_id=usage_model_id,
+                        usage=result.usage,
+                        success=True,
+                        attempt=attempt_index,
+                        item_id=attempt_item.page_id,
+                        metadata={"retry_strategy": strategy, "request_mode": request_mode},
+                    )
                 target = generated_dir / f"{index:02d}_{attempt_item.page_id}.png"
                 source_path = Path(generated.image_path)
                 if source_path.resolve() != target.resolve():
@@ -123,6 +161,21 @@ class DetailRenderService:
                     completed_at=datetime.utcnow().isoformat(),
                 )
             except Exception as exc:
+                if usage_enabled:
+                    usage_service.record_usage(
+                        task_id=task_id,
+                        task_type="detail_page_v2",
+                        stage_name="detail_render_pages",
+                        stage_label=stage_label,
+                        provider_type="image",
+                        provider_name=usage_provider_name,
+                        model_id=usage_model_id,
+                        usage=resolve_provider_usage_snapshot(image_provider, default_request_count=1),
+                        success=False,
+                        attempt=attempt_index,
+                        item_id=attempt_item.page_id,
+                        metadata={"retry_strategy": strategy, "request_mode": request_mode},
+                    )
                 last_error = str(exc)
                 if strategy != "original_prompt_retry":
                     applied_strategies.append(strategy)
@@ -150,6 +203,8 @@ class DetailRenderService:
         self,
         item: DetailPagePromptPlanItem,
     ) -> list[tuple[DetailRetryStrategy, DetailPagePromptPlanItem]]:
+        """为单页构造原始请求与重试变体。"""
+
         attempts: list[tuple[DetailRetryStrategy, DetailPagePromptPlanItem]] = [("original_prompt_retry", item)]
         text_light_item = item.model_copy(
             update={
@@ -180,6 +235,8 @@ class DetailRenderService:
         return attempts
 
     def _should_continue_retry(self, error_message: str, item: DetailPagePromptPlanItem) -> bool:
+        """根据错误类型和页面职责决定是否继续重试。"""
+
         if not item.retryable:
             return False
         normalized = error_message.lower()
@@ -197,15 +254,15 @@ class DetailRenderService:
     def _render_single_page(
         self,
         *,
-        provider,
+        provider: object,
         prompt_plan_item: DetailPagePromptPlanItem,
         shot_id: str,
         image_size: str,
         output_dir: Path,
         reference_assets: list[Asset],
         background_style_assets: list[Asset],
-    ) -> GeneratedImage:
-        """执行单页模型渲染，并返回 provider 原始结果图。"""
+    ) -> tuple[GeneratedImage, GenerationResult]:
+        """执行单页模型渲染，并返回 provider 原始结果。"""
 
         if hasattr(provider, "generate_images_v2"):
             result = provider.generate_images_v2(
@@ -246,9 +303,11 @@ class DetailRenderService:
                 reference_assets=reference_assets,
                 background_style_assets=background_style_assets,
             )
-        return self._first_image(result, shot_id)
+        return self._first_image(result, shot_id), result
 
     def _first_image(self, result: GenerationResult, shot_id: str) -> GeneratedImage:
+        """提取 provider 返回的首张图。"""
+
         if not result.images:
             raise RuntimeError(f"详情图页 {shot_id} 未返回任何图片")
         image = result.images[0]
@@ -287,6 +346,8 @@ class DetailRenderService:
         return product_assets, background_assets
 
     def _write_render_report(self, *, task_dir: Path, rows: list[DetailPageRenderResult]) -> None:
+        """持续刷新详情图 render report。"""
+
         report_path = task_dir / "generated" / "detail_render_report.json"
         report_path.write_text(
             json.dumps([item.model_dump(mode="json") for item in rows], ensure_ascii=False, indent=2),
@@ -294,6 +355,8 @@ class DetailRenderService:
         )
 
     def _read_image_size(self, path: Path) -> tuple[int | None, int | None]:
+        """读取图片尺寸。"""
+
         try:
             with Image.open(path) as image:
                 return image.size
@@ -301,6 +364,8 @@ class DetailRenderService:
             return None, None
 
     def _guess_mime_type(self, path: Path) -> str:
+        """根据后缀推断最小可用 mime type。"""
+
         suffix = path.suffix.lower()
         if suffix in {".jpg", ".jpeg"}:
             return "image/jpeg"

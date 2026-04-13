@@ -1,4 +1,4 @@
-"""详情图任务相关 Schema。"""
+﻿"""璇︽儏鍥句换鍔＄浉鍏?Schema銆?""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+from backend.engine.domain.usage import RuntimeUsageSummary
 
 DetailAssetRole = Literal[
     "main_result",
@@ -54,7 +55,7 @@ DetailRetryStrategy = Literal[
 
 
 class DetailPageAssetRef(BaseModel):
-    """详情图素材引用。"""
+    """璇︽儏鍥剧礌鏉愬紩鐢ㄣ€?""
 
     asset_id: str
     role: DetailAssetRole
@@ -68,7 +69,7 @@ class DetailPageAssetRef(BaseModel):
 
 
 class DetailPagePlanScreen(BaseModel):
-    """详情图单屏规划。"""
+    """璇︽儏鍥惧崟灞忚鍒掋€?""
 
     screen_id: str
     theme: str
@@ -84,7 +85,7 @@ class DetailPagePlanScreen(BaseModel):
 
 
 class DetailPagePlanPage(BaseModel):
-    """单张 3:4 详情图规划。"""
+    """鍗曞紶 3:4 璇︽儏鍥捐鍒掋€?""
 
     page_id: str
     title: str
@@ -102,7 +103,7 @@ class DetailPagePlanPage(BaseModel):
 
 
 class DetailPagePlanPayload(BaseModel):
-    """详情图规划结果。"""
+    """璇︽儏鍥捐鍒掔粨鏋溿€?""
 
     template_name: str = "tea_tmall_premium_v2"
     category: str = "tea"
@@ -119,7 +120,7 @@ class DetailPagePlanPayload(BaseModel):
 
 
 class DetailPageCopyBlock(BaseModel):
-    """详情图屏级文案结构。"""
+    """璇︽儏鍥惧睆绾ф枃妗堢粨鏋勩€?""
 
     page_id: str
     screen_id: str
@@ -134,13 +135,13 @@ class DetailPageCopyBlock(BaseModel):
 
 
 class DetailCopyPlanResult(BaseModel):
-    """文案模型输出容器。"""
+    """鏂囨妯″瀷杈撳嚭瀹瑰櫒銆?""
 
     items: list[DetailPageCopyBlock] = Field(default_factory=list)
 
 
 class DetailPromptDraftItem(BaseModel):
-    """Prompt 草案结构。"""
+    """Prompt 鑽夋缁撴瀯銆?""
 
     page_id: str
     page_title: str = ""
@@ -155,13 +156,13 @@ class DetailPromptDraftItem(BaseModel):
 
 
 class DetailPromptPlanResult(BaseModel):
-    """Prompt 规划模型输出容器。"""
+    """Prompt 瑙勫垝妯″瀷杈撳嚭瀹瑰櫒銆?""
 
     items: list[DetailPromptDraftItem] = Field(default_factory=list)
 
 
 class DetailPagePromptPlanItem(BaseModel):
-    """单张详情图最终渲染 prompt 规划。"""
+    """鍗曞紶璇︽儏鍥炬渶缁堟覆鏌?prompt 瑙勫垝銆?""
 
     page_id: str
     page_title: str
@@ -189,7 +190,7 @@ class DetailPagePromptPlanItem(BaseModel):
 
 
 class DetailPageRenderResult(BaseModel):
-    """单页渲染结果。"""
+    """鍗曢〉娓叉煋缁撴灉銆?""
 
     render_id: str
     page_id: str
@@ -211,7 +212,7 @@ class DetailPageRenderResult(BaseModel):
 
 
 class DetailPageQCCheck(BaseModel):
-    """规则型 QC 单项检查。"""
+    """瑙勫垯鍨?QC 鍗曢」妫€鏌ャ€?""
 
     check_id: str
     check_name: str
@@ -222,7 +223,7 @@ class DetailPageQCCheck(BaseModel):
 
 
 class DetailPageQCPageSummary(BaseModel):
-    """页面级 QC 摘要。"""
+    """椤甸潰绾?QC 鎽樿銆?""
 
     page_id: str
     title: str = ""
@@ -236,7 +237,7 @@ class DetailPageQCPageSummary(BaseModel):
 
 
 class DetailPageQCSummary(BaseModel):
-    """详情图任务级 QC 摘要。"""
+    """璇︽儏鍥句换鍔＄骇 QC 鎽樿銆?""
 
     passed: bool = False
     review_required: bool = False
@@ -248,7 +249,7 @@ class DetailPageQCSummary(BaseModel):
 
 
 class DetailPageRuntimeImage(BaseModel):
-    """详情图运行时结果图。"""
+    """璇︽儏鍥捐繍琛屾椂缁撴灉鍥俱€?""
 
     image_id: str
     page_id: str
@@ -265,7 +266,7 @@ class DetailPageRuntimeImage(BaseModel):
 
 
 class DetailPreflightRoleSummary(BaseModel):
-    """单类素材的预检摘要。"""
+    """鍗曠被绱犳潗鐨勯妫€鎽樿銆?""
 
     role: DetailAssetRole
     count: int = 0
@@ -273,7 +274,7 @@ class DetailPreflightRoleSummary(BaseModel):
 
 
 class DetailPreflightReport(BaseModel):
-    """详情图输入预检。"""
+    """璇︽儏鍥捐緭鍏ラ妫€銆?""
 
     passed: bool = True
     warnings: list[str] = Field(default_factory=list)
@@ -288,7 +289,7 @@ class DetailPreflightReport(BaseModel):
 
 
 class DetailDirectorBrief(BaseModel):
-    """面向规划与提示词的导演简报。"""
+    """闈㈠悜瑙勫垝涓庢彁绀鸿瘝鐨勫婕旂畝鎶ャ€?""
 
     template_name: str = "tea_tmall_premium_v2"
     category: str = "tea"
@@ -306,7 +307,7 @@ class DetailDirectorBrief(BaseModel):
 
 
 class DetailVisualReviewPage(BaseModel):
-    """单页视觉审查结果。"""
+    """鍗曢〉瑙嗚瀹℃煡缁撴灉銆?""
 
     page_id: str
     page_role: DetailPageRole = "hero_opening"
@@ -317,7 +318,7 @@ class DetailVisualReviewPage(BaseModel):
 
 
 class DetailVisualReviewReport(BaseModel):
-    """生成结果视觉审查。"""
+    """鐢熸垚缁撴灉瑙嗚瀹℃煡銆?""
 
     overall_status: DetailVisualReviewStatus = "passed"
     summary: list[str] = Field(default_factory=list)
@@ -325,7 +326,7 @@ class DetailVisualReviewReport(BaseModel):
 
 
 class DetailRetryDecisionItem(BaseModel):
-    """单页重试决策。"""
+    """鍗曢〉閲嶈瘯鍐崇瓥銆?""
 
     page_id: str
     page_role: DetailPageRole = "hero_opening"
@@ -335,13 +336,13 @@ class DetailRetryDecisionItem(BaseModel):
 
 
 class DetailRetryDecisionReport(BaseModel):
-    """重试决策集合。"""
+    """閲嶈瘯鍐崇瓥闆嗗悎銆?""
 
     pages: list[DetailRetryDecisionItem] = Field(default_factory=list)
 
 
 class DetailPageRuntimePayload(BaseModel):
-    """详情图任务运行时聚合。"""
+    """璇︽儏鍥句换鍔¤繍琛屾椂鑱氬悎銆?""
 
     task_id: str
     status: DetailTaskStatus
@@ -359,13 +360,14 @@ class DetailPageRuntimePayload(BaseModel):
     director_brief: DetailDirectorBrief | None = None
     visual_review: DetailVisualReviewReport | None = None
     retry_decisions: DetailRetryDecisionReport | None = None
+    usage_summary: RuntimeUsageSummary = Field(default_factory=RuntimeUsageSummary)
     qc_summary: DetailPageQCSummary = Field(default_factory=DetailPageQCSummary)
     images: list[DetailPageRuntimeImage] = Field(default_factory=list)
     export_zip_url: str = ""
 
 
 class DetailPageJobSummary(BaseModel):
-    """详情图任务摘要。"""
+    """璇︽儏鍥句换鍔℃憳瑕併€?""
 
     task_id: str
     task_type: str = "detail_page_v2"
@@ -380,11 +382,11 @@ class DetailPageJobSummary(BaseModel):
 
 
 class DetailPageJobCreatePayload(BaseModel):
-    """详情图任务创建参数。"""
+    """璇︽儏鍥句换鍔″垱寤哄弬鏁般€?""
 
     brand_name: str = ""
     product_name: str = ""
-    tea_type: str = "乌龙茶"
+    tea_type: str = "涔岄緳鑼?
     category: str = "tea"
     platform: str = "tmall"
     style_preset: str = "tea_tmall_premium_light"
@@ -402,7 +404,7 @@ class DetailPageJobCreatePayload(BaseModel):
 
 
 class DetailPageJobCreateResult(BaseModel):
-    """详情图任务创建结果。"""
+    """璇︽儏鍥句换鍔″垱寤虹粨鏋溿€?""
 
     task_id: str
     status: DetailTaskStatus

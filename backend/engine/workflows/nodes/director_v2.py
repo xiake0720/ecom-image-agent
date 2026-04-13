@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from backend.engine.domain.director_output import DirectorOutput, DirectorShot
 from backend.engine.domain.task import Task
+from backend.engine.domain.usage import resolve_provider_usage_snapshot
 from backend.engine.services.assets.reference_selector import ReferenceSelection, select_reference_bundle
 from backend.engine.workflows.nodes.cache_utils import (
     build_node_cache_key,
@@ -23,6 +24,7 @@ from backend.engine.workflows.nodes.cache_utils import (
 )
 from backend.engine.workflows.nodes.prompt_utils import describe_prompt_source, dump_pretty, load_prompt_text
 from backend.engine.workflows.state import WorkflowDependencies, WorkflowState, format_connected_contract_logs
+from backend.services.task_usage_service import TaskUsageService
 
 DIRECTOR_ROLES: tuple[str, ...] = (
     "hero",
@@ -151,10 +153,38 @@ def director_v2(state: WorkflowState, deps: WorkflowDependencies) -> dict:
 
     if deps.text_provider_mode == "real":
         prompt = _build_director_prompt(task=task, selection=selection, fallback_output=fallback_output)
-        director_output = deps.planning_provider.generate_structured(
-            prompt,
-            DirectorOutput,
-            system_prompt=load_prompt_text("director_v2.md"),
+        usage_service = TaskUsageService()
+        try:
+            director_output = deps.planning_provider.generate_structured(
+                prompt,
+                DirectorOutput,
+                system_prompt=load_prompt_text("director_v2.md"),
+            )
+        except Exception:
+            usage_service.record_usage(
+                task_id=task.task_id,
+                task_type="main_image",
+                stage_name="director_v2",
+                stage_label=state.get("current_step_label", ""),
+                provider_type="text",
+                provider_name=deps.planning_route.alias if deps.planning_route is not None else deps.planning_provider_name,
+                model_id=deps.planning_model_selection.model_id if deps.planning_model_selection is not None else provider_model_id,
+                usage=resolve_provider_usage_snapshot(deps.planning_provider, default_request_count=1),
+                success=False,
+                metadata={"schema": "DirectorOutput"},
+            )
+            raise
+        usage_service.record_usage(
+            task_id=task.task_id,
+            task_type="main_image",
+            stage_name="director_v2",
+            stage_label=state.get("current_step_label", ""),
+            provider_type="text",
+            provider_name=deps.planning_route.alias if deps.planning_route is not None else deps.planning_provider_name,
+            model_id=deps.planning_model_selection.model_id if deps.planning_model_selection is not None else provider_model_id,
+            usage=resolve_provider_usage_snapshot(deps.planning_provider, default_request_count=1),
+            success=True,
+            metadata={"schema": "DirectorOutput"},
         )
         director_output = _normalize_director_output(director_output, fallback_output)
     else:

@@ -7,6 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from backend.engine.domain.usage import RuntimeUsageSummary
+
 
 class MainImageGeneratePayload(BaseModel):
     """主图生成文本参数。"""
@@ -87,6 +89,7 @@ class TaskRuntimePayload(BaseModel):
     result_count_total: int = 0
     export_zip_url: str = ""
     full_bundle_zip_url: str = ""
+    usage_summary: RuntimeUsageSummary = Field(default_factory=RuntimeUsageSummary)
     qc_summary: TaskRuntimeQCSummary = Field(default_factory=TaskRuntimeQCSummary)
     results: list[TaskRuntimeImage] = Field(default_factory=list)
 

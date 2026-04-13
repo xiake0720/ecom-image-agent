@@ -13,6 +13,7 @@ from backend.schemas.detail import (
     DetailCopyPlanResult,
     DetailDirectorBrief,
     DetailPageCopyBlock,
+    DetailPageJobCreatePayload,
     DetailPagePlanPayload,
     DetailPagePromptPlanItem,
     DetailPageQCSummary,
@@ -24,10 +25,14 @@ from backend.schemas.detail import (
     DetailVisualReviewReport,
 )
 from backend.schemas.task import TaskSummary
+from backend.services.task_usage_service import TaskUsageService
 
 
 class DetailRuntimeService:
     """读取 detail graph 产物并组装 runtime。"""
+
+    def __init__(self) -> None:
+        self.usage_service = TaskUsageService()
 
     def get_runtime(self, summary: TaskSummary) -> DetailPageRuntimePayload:
         """返回详情图 runtime 聚合。"""
@@ -38,6 +43,7 @@ class DetailRuntimeService:
         copy_wrapper = self._load_json(task_dir / "plan" / "detail_copy_plan.json", DetailCopyPlanResult)
         copy_blocks = copy_wrapper.items if copy_wrapper is not None else []
         prompt_plan = self._load_json_list(task_dir / "plan" / "detail_prompt_plan.json", DetailPagePromptPlanItem)
+        request_payload = self._load_json(task_dir / "inputs" / "request_payload.json", DetailPageJobCreatePayload)
         preflight_report = self._load_json(task_dir / "inputs" / "preflight_report.json", DetailPreflightReport)
         director_brief = self._load_json(task_dir / "plan" / "director_brief.json", DetailDirectorBrief)
         visual_review = self._load_json(task_dir / "review" / "visual_review.json", DetailVisualReviewReport)
@@ -48,6 +54,10 @@ class DetailRuntimeService:
         planned_count = plan.total_pages if plan else len(prompt_plan)
         generated_count = sum(1 for image in images if image.status == "completed")
         error_message = task.error_message or self._load_error_message_from_render_results(render_results)
+        usage_summary = self.usage_service.build_runtime_usage_summary(
+            task.task_id,
+            upstream_task_id=request_payload.main_image_task_id if request_payload is not None else "",
+        )
         return DetailPageRuntimePayload(
             task_id=task.task_id,
             status=task.status.value,
@@ -65,6 +75,7 @@ class DetailRuntimeService:
             director_brief=director_brief,
             visual_review=visual_review,
             retry_decisions=retry_decisions,
+            usage_summary=usage_summary,
             qc_summary=qc_summary,
             images=images,
             export_zip_url=self._resolve_export_url(task.task_id, task_dir),

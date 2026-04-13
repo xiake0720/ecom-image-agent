@@ -20,6 +20,7 @@ from backend.engine.domain.task import Task, TaskStatus
 from backend.repositories.task_repository import TaskRepository
 from backend.schemas.task import TaskRuntimeImage, TaskRuntimePayload, TaskRuntimeQCSummary
 from backend.services.task_queue_service import main_image_task_queue
+from backend.services.task_usage_service import TaskUsageService
 
 
 class TaskRuntimeService:
@@ -27,6 +28,7 @@ class TaskRuntimeService:
 
     def __init__(self) -> None:
         self.repo = TaskRepository()
+        self.usage_service = TaskUsageService()
 
     def get_runtime(self, task_id: str) -> TaskRuntimePayload:
         """返回当前任务的运行时状态与结果列表。"""
@@ -39,6 +41,7 @@ class TaskRuntimeService:
         queue_snapshot = main_image_task_queue.get_snapshot(task_id)
         export_zip_url, full_bundle_zip_url = self._resolve_export_urls(task.task_id)
         qc_summary = self._build_qc_summary(task.task_id)
+        usage_summary = self.usage_service.build_runtime_usage_summary(task.task_id)
         settings = get_settings()
         provider_label = summary.provider_label if summary is not None and summary.provider_label else settings.resolve_image_provider_route().label
         model_label = summary.model_label if summary is not None and summary.model_label else settings.resolve_image_model_selection().label
@@ -64,6 +67,7 @@ class TaskRuntimeService:
             result_count_total=result_count_total,
             export_zip_url=export_zip_url,
             full_bundle_zip_url=full_bundle_zip_url,
+            usage_summary=usage_summary,
             qc_summary=qc_summary,
             results=results,
         )

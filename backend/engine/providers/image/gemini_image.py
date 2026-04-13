@@ -11,6 +11,7 @@ from backend.engine.domain.asset import Asset
 from backend.engine.domain.generation_result import GeneratedImage, GenerationResult
 from backend.engine.domain.image_prompt_plan import ImagePromptPlan
 from backend.engine.domain.prompt_plan_v2 import PromptPlanV2
+from backend.engine.domain.usage import ProviderUsageSnapshot
 from backend.engine.providers.image.base import BaseImageProvider
 
 MOCK_IMAGE_ROOT = Path("assets/mock/banana2")
@@ -39,6 +40,7 @@ class MockBanana2ImageProvider(BaseImageProvider):
         del reference_assets, background_style_assets
         output_dir.mkdir(parents=True, exist_ok=True)
         images: list[GeneratedImage] = []
+        self.last_usage = ProviderUsageSnapshot.empty()
         settings = get_settings()
         for index, prompt in enumerate(plan.prompts, start=1):
             sample = self._resolve_sample_path(index=index)
@@ -58,7 +60,7 @@ class MockBanana2ImageProvider(BaseImageProvider):
                     height=height,
                 )
             )
-        return GenerationResult(images=images)
+        return GenerationResult(images=images, usage=ProviderUsageSnapshot.empty())
 
     def generate_images_v2(
         self,
@@ -73,6 +75,7 @@ class MockBanana2ImageProvider(BaseImageProvider):
         del reference_assets, background_style_assets
         output_dir.mkdir(parents=True, exist_ok=True)
         images: list[GeneratedImage] = []
+        self.last_usage = ProviderUsageSnapshot.empty()
         for index, shot in enumerate(prompt_plan.shots, start=1):
             sample = self._resolve_sample_path(index=index)
             output_path = output_dir / f"{index:02d}_{shot.shot_id}.png"
@@ -86,7 +89,7 @@ class MockBanana2ImageProvider(BaseImageProvider):
                     height=height,
                 )
             )
-        return GenerationResult(images=images)
+        return GenerationResult(images=images, usage=ProviderUsageSnapshot.empty())
 
     def resolve_generation_context(
         self,
