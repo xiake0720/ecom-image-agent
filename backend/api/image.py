@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, File, Form, Request, UploadFile
+from typing import Annotated
 
+from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi import Depends
+
+from backend.api.dependencies import get_current_user_optional
 from backend.core.response import success_response
+from backend.db.models.user import User
 from backend.schemas.task import MainImageGeneratePayload
 from backend.services.main_image_service import MainImageService
 from backend.services.task_queue_service import main_image_task_queue
@@ -28,6 +33,7 @@ async def generate_main_image(
     shot_count: int = Form(default=8),
     aspect_ratio: str = Form(default="1:1"),
     image_size: str = Form(default="2K"),
+    current_user: Annotated[User | None, Depends(get_current_user_optional)] = None,
 ) -> dict[str, object]:
     """接收主图任务并立即返回 task_id，再由进程内队列后台执行。"""
 
@@ -47,6 +53,7 @@ async def generate_main_image(
         white_bg=white_bg,
         detail_files=detail_files,
         bg_files=bg_files,
+        current_user=current_user,
     )
     main_image_task_queue.enqueue(prepared, service.run_prepared_task)
     return success_response(prepared.summary.model_dump(mode="json"), request.state.request_id, message="主图任务已提交")

@@ -1,4 +1,4 @@
-"""详情图任务服务。"""
+﻿"""详情图任务服务。"""
 
 from __future__ import annotations
 
@@ -10,18 +10,17 @@ from threading import Lock, Thread
 
 from fastapi import UploadFile
 
+from backend.db.enums import TaskType
+from backend.db.models.user import User
 from backend.engine.core.config import get_settings
 from backend.engine.core.paths import ensure_task_dirs, get_task_dir
 from backend.engine.domain.task import Task, TaskStatus
 from backend.engine.services.storage.local_storage import LocalStorageService
 from backend.engine.workflows.detail_graph import run_detail_workflow
-from backend.engine.workflows.detail_state import (
-    DetailWorkflowExecutionError,
-    DetailWorkflowState,
-    format_detail_workflow_log,
-)
+from backend.engine.workflows.detail_state import DetailWorkflowExecutionError, DetailWorkflowState, format_detail_workflow_log
 from backend.repositories.task_repository import TaskRepository
 from backend.schemas.detail import DetailPageAssetRef, DetailPageJobCreatePayload, DetailPageJobCreateResult
+from backend.services.task_db_mirror_service import TaskDbMirrorService
 
 
 @dataclass
@@ -77,11 +76,12 @@ detail_task_queue = _DetailTaskQueue()
 
 
 class DetailPageJobService:
-    """负责创建详情图任务并触发 detail graph。"""
+    """负责创建详情图任务，并触发 detail graph。"""
 
     def __init__(self) -> None:
         self.storage = LocalStorageService()
         self.repo = TaskRepository()
+        self.db_mirror = TaskDbMirrorService()
 
     async def create_job(
         self,
@@ -94,8 +94,9 @@ class DetailPageJobService:
         scene_ref_files: list[UploadFile],
         bg_ref_files: list[UploadFile],
         plan_only: bool,
+        current_user: User | None,
     ) -> DetailPageJobCreateResult:
-        """创建详情图任务，并根据模式立即执行或入队。"""
+        """创建详情图任务，根据模式立即执行或入队。"""
 
         settings = get_settings()
         task_id = self.storage.create_task_id()
@@ -158,6 +159,23 @@ class DetailPageJobService:
             model_label=model_label,
         )
         self.repo.save_task(summary)
+        await self.db_mirror.create_task_record(
+            task_id=task_id,
+            current_user=current_user,
+            task_type=TaskType.DETAIL_PAGE,
+            title=task.product_name,
+            platform=payload.platform,
+            input_summary={
+                "plan_only": plan_only,
+                "main_image_task_id": payload.main_image_task_id,
+                "selected_main_result_count": len(payload.selected_main_result_ids),
+                "selling_point_count": len(payload.selling_points),
+            },
+            params=payload.model_dump(mode="json"),
+            source_task_id=payload.main_image_task_id or None,
+            assets=self.db_mirror.build_detail_asset_inputs(task_id, assets),
+            created_at=task.created_at,
+        )
 
         prepared = PreparedDetailTask(
             task_id=task_id,
@@ -172,7 +190,7 @@ class DetailPageJobService:
         return DetailPageJobCreateResult(task_id=task_id, status="created")
 
     def run_prepared(self, prepared: PreparedDetailTask) -> None:
-        """执行 detail graph，并持续把运行时状态写回索引。"""
+        """执行 detail graph，并持续把运行态回写到 JSON 和数据库。"""
 
         initial_state = prepared.initial_state
         task = initial_state["task"]
@@ -181,6 +199,7 @@ class DetailPageJobService:
             progress_task = progress_state.get("task")
             if progress_task is not None:
                 self.repo.save_runtime_task(progress_task, task_type="detail_page_v2")
+                self.db_mirror.sync_runtime_from_local_sync(task_id=progress_task.task_id, task_type=TaskType.DETAIL_PAGE)
 
         try:
             result = run_detail_workflow(
@@ -190,11 +209,13 @@ class DetailPageJobService:
             )
             result_task = result["task"]
             self.repo.save_runtime_task(result_task, task_type="detail_page_v2")
+            self.db_mirror.sync_runtime_from_local_sync(task_id=result_task.task_id, task_type=TaskType.DETAIL_PAGE)
         except DetailWorkflowExecutionError as exc:
             failed_state = exc.task_state or {}
             failed_task = failed_state.get("task") if isinstance(failed_state, dict) else None
             if failed_task is not None:
                 self.repo.save_runtime_task(failed_task, task_type="detail_page_v2")
+                self.db_mirror.sync_runtime_from_local_sync(task_id=failed_task.task_id, task_type=TaskType.DETAIL_PAGE)
         except Exception as exc:  # pragma: no cover - 兜底保护
             failed_task = task.model_copy(
                 update={
@@ -206,6 +227,7 @@ class DetailPageJobService:
             )
             self.storage.save_task_manifest(failed_task)
             self.repo.save_runtime_task(failed_task, task_type="detail_page_v2")
+            self.db_mirror.sync_runtime_from_local_sync(task_id=failed_task.task_id, task_type=TaskType.DETAIL_PAGE)
 
     async def _persist_assets(
         self,

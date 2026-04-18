@@ -1,13 +1,13 @@
-import type { ReactNode } from "react";
+﻿import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { topNavItems } from "../../mocks/sharedMock";
+import { V1_TOP_NAV_ITEMS } from "../../config/v1Scope";
 
 interface AppTopBarProps {
   activeKey: string;
   rightSlot?: ReactNode;
 }
 
-/** 统一顶部任务栏：保证全站导航、状态和用户入口一致。 */
+/** 统一顶部栏：仅暴露一期冻结后的工作台入口。 */
 export function AppTopBar({ activeKey, rightSlot }: AppTopBarProps) {
   return (
     <header className="app-topbar">
@@ -19,17 +19,15 @@ export function AppTopBar({ activeKey, rightSlot }: AppTopBarProps) {
         </div>
       </div>
       <nav className="topbar-nav" aria-label="主导航">
-        {topNavItems.map((item) => (
+        {V1_TOP_NAV_ITEMS.map((item) => (
           <Link key={item.key} to={item.path} className={activeKey === item.key ? "active" : ""}>
             {item.label}
           </Link>
         ))}
       </nav>
       <div className="topbar-actions">
-        <span className="status-pill">任务队列 2</span>
-        <Link to="/dashboard">数据中心</Link>
-        <Link to="/assets-library">资源库</Link>
-        <Link to="/settings">系统设置</Link>
+        <span className="status-pill">V1 Freeze</span>
+        <Link to="/login">账号入口</Link>
         <span className="avatar">AI</span>
         {rightSlot}
       </div>

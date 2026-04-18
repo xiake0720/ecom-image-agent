@@ -62,6 +62,8 @@ function extractApiErrorMessage(error: unknown): string {
 export function DetailPageGeneratorPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const routeMainTaskId = searchParams.get("main_task_id") ?? "";
+  const routeDetailTaskId = searchParams.get("task_id") ?? "";
 
   const [brandName, setBrandName] = useState("");
   const [productName, setProductName] = useState("");
@@ -78,14 +80,14 @@ export function DetailPageGeneratorPage() {
   const [specForm, setSpecForm] = useState<SpecForm>(emptySpec);
   const [fileBuckets, setFileBuckets] = useState<FileBucket>(emptyBuckets);
 
-  const [mainTaskId, setMainTaskId] = useState(searchParams.get("main_task_id") ?? "");
+  const [mainTaskId, setMainTaskId] = useState(routeMainTaskId);
   const [selectedMainResults, setSelectedMainResults] = useState<string[]>([]);
   const [mainTaskOptions, setMainTaskOptions] = useState<TaskSummary[]>([]);
   const [mainTaskResults, setMainTaskResults] = useState<TaskRuntimeResult[]>([]);
   const [mainSourceState, setMainSourceState] = useState<"idle" | "loading" | "error" | "empty" | "ready">("idle");
   const [mainSourceMessage, setMainSourceMessage] = useState("选择主图任务后，可导入 completed 结果作为详情图参考。");
 
-  const [detailTaskId, setDetailTaskId] = useState("");
+  const [detailTaskId, setDetailTaskId] = useState(routeDetailTaskId);
   const [runtime, setRuntime] = useState<DetailPageRuntimePayload | null>(null);
   const [message, setMessage] = useState("先配置素材与商品信息，再生成规划或完整详情图。");
   const [pageError, setPageError] = useState("");
@@ -101,6 +103,23 @@ export function DetailPageGeneratorPage() {
         setPageError(`主图任务列表加载失败：${extractApiErrorMessage(error)}`);
       });
   }, []);
+
+  useEffect(() => {
+    if (!routeMainTaskId) {
+      return;
+    }
+    setMainTaskId((current) => (current === routeMainTaskId ? current : routeMainTaskId));
+  }, [routeMainTaskId]);
+
+  useEffect(() => {
+    if (!routeDetailTaskId) {
+      return;
+    }
+    setDetailTaskId((current) => (current === routeDetailTaskId ? current : routeDetailTaskId));
+    setRuntime(null);
+    setPageError("");
+    setMessage("正在读取历史详情图任务...");
+  }, [routeDetailTaskId]);
 
   useEffect(() => {
     if (!mainTaskId) {

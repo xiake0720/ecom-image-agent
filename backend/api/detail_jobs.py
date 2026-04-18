@@ -1,14 +1,17 @@
-"""详情图任务路由。"""
+﻿"""详情图任务路由。"""
 
 from __future__ import annotations
 
 import json
+from typing import Annotated
 
-from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse
 
+from backend.api.dependencies import get_current_user_optional
 from backend.core.exceptions import AppException
 from backend.core.response import success_response
+from backend.db.models.user import User
 from backend.repositories.task_repository import TaskRepository
 from backend.schemas.detail import DetailPageJobCreatePayload
 from backend.services.detail_page_job_service import DetailPageJobService
@@ -45,8 +48,9 @@ async def create_detail_job(
     brew_suggestion: str = Form(default=""),
     extra_requirements: str = Form(default=""),
     prefer_main_result_first: bool = Form(default=True),
+    current_user: Annotated[User | None, Depends(get_current_user_optional)] = None,
 ) -> dict[str, object]:
-    """创建详情图任务并执行完整 graph。"""
+    """创建详情图任务并执行完整 detail graph。"""
 
     payload = _build_payload(
         brand_name=brand_name,
@@ -75,6 +79,7 @@ async def create_detail_job(
         scene_ref_files=scene_ref_files,
         bg_ref_files=bg_ref_files,
         plan_only=False,
+        current_user=current_user,
     )
     return success_response(result.model_dump(mode="json"), request.state.request_id, message="详情图任务已提交")
 
@@ -104,6 +109,7 @@ async def create_detail_plan(
     brew_suggestion: str = Form(default=""),
     extra_requirements: str = Form(default=""),
     prefer_main_result_first: bool = Form(default=True),
+    current_user: Annotated[User | None, Depends(get_current_user_optional)] = None,
 ) -> dict[str, object]:
     """只生成规划、文案和 prompt，不执行渲染。"""
 
@@ -134,6 +140,7 @@ async def create_detail_plan(
         scene_ref_files=scene_ref_files,
         bg_ref_files=bg_ref_files,
         plan_only=True,
+        current_user=current_user,
     )
     return success_response(result.model_dump(mode="json"), request.state.request_id, message="详情图规划任务已完成")
 
@@ -144,7 +151,7 @@ def get_detail_job(task_id: str, request: Request) -> dict[str, object]:
 
     summary = repo.get_task(task_id)
     if summary is None or summary.task_type != "detail_page_v2":
-        raise AppException(f"详情图任务 {task_id} 不存在", code=4044)
+        raise AppException(f"详情图任务 {task_id} 不存在", code=4044, status_code=404)
     return success_response(summary.model_dump(mode="json"), request.state.request_id)
 
 
@@ -154,7 +161,7 @@ def get_detail_runtime(task_id: str, request: Request) -> dict[str, object]:
 
     summary = repo.get_task(task_id)
     if summary is None or summary.task_type != "detail_page_v2":
-        raise AppException(f"详情图任务 {task_id} 不存在", code=4044)
+        raise AppException(f"详情图任务 {task_id} 不存在", code=4044, status_code=404)
     runtime = runtime_service.get_runtime(summary)
     return success_response(runtime.model_dump(mode="json"), request.state.request_id)
 

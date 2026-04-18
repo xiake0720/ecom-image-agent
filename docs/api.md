@@ -1,7 +1,7 @@
-# API 文档
+﻿# API 文档
 
 ## 1. 统一响应结构
-除文件流接口外，统一返回 envelope：
+除文件流接口外，后端统一返回 envelope：
 
 ```json
 {
@@ -12,312 +12,236 @@
 }
 ```
 
-## 2. 主图接口
+错误时：
+- `code`：业务错误码
+- `message`：可直接展示的错误摘要
+- `requestId`：用于日志排查
 
-### 2.1 `POST /api/image/generate-main`
-- `Content-Type`：`multipart/form-data`
-- 文件字段：
-  - `white_bg`
-  - `detail_files[]`
-  - `bg_files[]`
-- 文本字段：
-  - `brand_name`
-  - `product_name`
-  - `category`
-  - `platform`
-  - `style_type`
-  - `style_notes`
-  - `shot_count`
-  - `aspect_ratio`
-  - `image_size`
+## 2. API v1 规范
+当前正式 v1 模块：
+- `POST /api/v1/auth/register`
+- `POST /api/v1/auth/login`
+- `POST /api/v1/auth/refresh`
+- `POST /api/v1/auth/logout`
+- `GET /api/v1/auth/me`
+- `GET /api/v1/tasks`
+- `GET /api/v1/tasks/{task_id}`
+- `GET /api/v1/tasks/{task_id}/runtime`
+- `GET /api/v1/tasks/{task_id}/results`
 
-### 2.2 `GET /api/tasks`
-- 返回任务摘要列表。
+v1 任务接口约束：
+- 必须携带 `Authorization: Bearer <access_token>`
+- 任务查询严格按当前登录用户隔离
+- v1 任务接口读取 PostgreSQL 中的任务镜像数据
+- runtime 聚合仍会优先复用本地 `task.json` 和任务目录产物
 
-### 2.3 `GET /api/tasks/{task_id}`
-- 返回单个主图任务摘要。
+## 3. 认证 API
+### 3.1 登录态约定
+- Access token：JWT，放在响应体，由前端通过 `Authorization: Bearer <token>` 发送。
+- Refresh token：放在 HttpOnly cookie，默认 cookie 名为 `ecom_refresh_token`。
+- `POST /api/v1/auth/refresh` 和 `POST /api/v1/auth/logout` 依赖 refresh cookie。
+- Refresh token 持久化只保存哈希，不保存明文。
 
-### 2.4 `GET /api/tasks/{task_id}/runtime`
-- 返回主图 runtime 聚合：
-  - `status`
-  - `progress_percent`
-  - `current_step`
-  - `current_step_label`
-  - `message`
-  - `queue_position`
-  - `queue_size`
-  - `provider_label`
-  - `model_label`
-  - `result_count_completed`
-  - `result_count_total`
-  - `export_zip_url`
-  - `full_bundle_zip_url`
-  - `qc_summary`
-  - `results[]`
+### 3.2 `POST /api/v1/auth/register`
+用途：注册用户，并立即签发登录态。
 
-### 2.5 `GET /api/tasks/{task_id}/files/{file_name}`
-- 下载主图任务文件。
-
-## 3. 详情图接口
-
-### 3.1 `POST /api/detail/jobs`
-- 作用：执行完整 detail graph。
-- `Content-Type`：`multipart/form-data`
-- 文件字段：
-  - `packaging_files[]`
-  - `dry_leaf_files[]`
-  - `tea_soup_files[]`
-  - `leaf_bottom_files[]`
-  - `scene_ref_files[]`
-  - `bg_ref_files[]`
-- 文本字段：
-  - `brand_name`
-  - `product_name`
-  - `tea_type`
-  - `platform`
-  - `style_preset`
-  - `price_band`
-  - `target_slice_count`
-  - `image_size`
-  - `main_image_task_id`
-  - `selected_main_result_ids`
-  - `selling_points_json`
-  - `specs_json`
-  - `style_notes`
-  - `brew_suggestion`
-  - `extra_requirements`
-  - `prefer_main_result_first`
-
-返回：
-
+请求体：
 ```json
 {
-  "task_id": "detail_xxx",
-  "status": "created"
+  "email": "user@example.com",
+  "password": "StrongPass123",
+  "nickname": "测试用户"
 }
 ```
 
-### 3.2 `POST /api/detail/jobs/plan`
-- 作用：只执行到 `detail_generate_prompt`。
-- 不执行：
-  - `detail_render_pages`
-  - `detail_run_qc`
-  - `detail_finalize`
+### 3.3 `POST /api/v1/auth/login`
+用途：邮箱密码登录。
 
-### 3.3 `GET /api/detail/jobs/{task_id}`
-- 返回详情图任务摘要。
+常见错误：
+- `401 / code=4011`：邮箱或密码错误
+- `403 / code=4032`：用户状态不可用
 
-### 3.4 `GET /api/detail/jobs/{task_id}/runtime`
-- 返回 detail runtime 聚合。
+### 3.4 `POST /api/v1/auth/refresh`
+用途：基于 HttpOnly refresh cookie 轮换登录态。
 
-核心字段：
+常见错误：
+- `401 / code=4012`：缺少 refresh token
+- `401 / code=4013`：refresh token 无效、已撤销或已过期
+
+### 3.5 `POST /api/v1/auth/logout`
+用途：撤销当前 refresh token，并清理 cookie。
+
+### 3.6 `GET /api/v1/auth/me`
+用途：读取当前 access token 对应的用户信息。
+
+常见错误：
+- `401 / code=4014`：缺少 access token
+- `401 / code=4010`：token 无效或已过期
+
+## 4. v1 任务 API
+### 4.1 枚举约束
+`task_type`：
+- `main_image`
+- `detail_page`
+- `image_edit`
+
+`status`：
+- `pending`
+- `queued`
+- `running`
+- `succeeded`
+- `failed`
+- `partial_failed`
+- `cancelled`
+
+### 4.2 `GET /api/v1/tasks`
+用途：分页查询当前用户的任务历史。
+
+查询参数：
+- `page`：默认 `1`
+- `page_size`：默认 `20`，最大 `100`
+- `task_type`：可选
+- `status`：可选
+
+返回字段摘要：
+- `items[]`
+  - `task_id`
+  - `task_type`
+  - `status`
+  - `title`
+  - `platform`
+  - `current_step`
+  - `progress_percent`
+  - `result_count`
+  - `created_at`
+  - `updated_at`
+- `page`
+- `page_size`
+- `total`
+
+### 4.3 `GET /api/v1/tasks/{task_id}`
+用途：返回当前用户可访问的单任务详情。
+
+返回字段摘要：
 - `task_id`
+- `task_type`
 - `status`
-- `progress_percent`
-- `current_stage`
-- `current_stage_label`
-- `message`
+- `source_task_id`
+- `parent_task_id`
+- `input_summary`
+- `params`
+- `runtime_snapshot`
+- `result_summary`
+- `error_code`
 - `error_message`
-- `generated_count`
-- `planned_count`
-- `plan`
-- `copy_blocks`
-- `prompt_plan`
-- `preflight_report`
-- `director_brief`
-- `visual_review`
-- `retry_decisions`
-- `qc_summary`
-- `images`
-- `export_zip_url`
+- `created_at` / `updated_at` / `started_at` / `finished_at`
 
-`plan` 关键字段：
-- `template_name`
-- `canvas_aspect_ratio`
-- `screens_per_page`
-- `layout_mode`
-- `global_style_anchor`
-- `narrative`
-- `total_pages`
-- `pages[]`
+### 4.4 `GET /api/v1/tasks/{task_id}/runtime`
+用途：返回当前用户任务的 runtime 聚合。
 
-`pages[]` 关键字段：
-- `page_id`
-- `title`
-- `page_role`
-- `layout_mode`
-- `primary_headline_screen_id`
-- `asset_strategy`
-- `anchor_roles`
-- `supplement_roles`
-- `allow_generated_supporting_materials`
-- `review_focus`
-- `screens[]`
+返回结构：
+- `task`：数据库任务详情摘要
+- `runtime`：优先来自旧 runtime 聚合服务；失败时回退 `tasks.runtime_snapshot`
+- `events[]`：`task_events` 中的关键状态变化记录
 
-`copy_blocks[]` 关键字段：
-- `page_id`
-- `screen_id`
-- `headline_level`
-- `headline`
-- `subheadline`
-- `selling_points`
-- `body_copy`
-- `parameter_copy`
-- `cta_copy`
-- `notes`
+### 4.5 `GET /api/v1/tasks/{task_id}/results`
+用途：返回当前用户任务的结果摘要列表。
 
-`prompt_plan[]` 关键字段：
-- `page_id`
-- `page_title`
-- `page_role`
-- `layout_mode`
-- `primary_headline_screen_id`
-- `title_copy`
-- `subtitle_copy`
-- `selling_points_for_render`
-- `layout_notes`
-- `prompt`
-- `negative_prompt`
-- `references[]`
-- `asset_strategy`
-- `allow_generated_supporting_materials`
-- `copy_strategy`
-- `text_density`
-- `should_render_text`
-- `retryable`
-- `target_aspect_ratio`
-- `target_width`
-- `target_height`
-
-`preflight_report` 关键字段：
-- `passed`
-- `warnings`
-- `available_roles`
-- `missing_required_roles`
-- `missing_optional_roles`
-- `asset_summary`
-- `recommended_page_roles`
-- `notes`
-
-`director_brief` 关键字段：
-- `template_name`
-- `global_style_anchor`
-- `page_rhythm`
-- `anchor_priority`
-- `required_page_roles`
-- `optional_page_roles`
-- `ai_supplement_page_roles`
-- `planning_notes`
-- `material_notes`
-- `constraints`
-
-`visual_review` 关键字段：
-- `overall_status`
-- `summary`
-- `pages[]`
-
-`retry_decisions` 关键字段：
-- `pages[]`
-  - `page_id`
-  - `page_role`
-  - `should_retry`
-  - `reason`
-  - `strategies`
-
-`qc_summary` 关键字段：
-- `passed`
-- `review_required`
-- `warning_count`
-- `failed_count`
-- `issues[]`
-- `checks[]`
-- `pages[]`
-
-`images[]` 关键字段：
-- `image_id`
-- `page_id`
-- `title`
-- `page_role`
-- `status`
-- `file_name`
-- `image_url`
-- `width`
-- `height`
-- `reference_roles`
-- `error_message`
-- `retry_count`
-
-当前 detail V2 约束：
-- 成品固定为 `3:4`
-- 每页固定为 `single_screen_vertical_poster`
-- 缺失 `tea_soup / scene_ref / bg_ref` 时允许 AI 在页内补足辅助素材
-- 缺失 `dry_leaf / leaf_bottom` 时不会伪造证据页，而是改用其他页职责补位
-- 渲染阶段允许单页失败并继续后续页面，最终结果可能是部分成功
-
-### 3.5 `GET /api/detail/jobs/{task_id}/files/{file_name}`
-- 下载详情图任务文件。
-
-## 4. detail graph 节点链路
-完整链路：
-1. `detail_ingest_assets`
-2. `detail_plan`
-3. `detail_generate_copy`
-4. `detail_generate_prompt`
-5. `detail_render_pages`
-6. `detail_run_qc`
-7. `detail_finalize`
-
-plan-only 链路：
-1. `detail_ingest_assets`
-2. `detail_plan`
-3. `detail_generate_copy`
-4. `detail_generate_prompt`
-
-## 5. detail 落盘结构
-完整任务当前至少包含：
-- `inputs/request_payload.json`
-- `inputs/asset_manifest.json`
-- `inputs/preflight_report.json`
-- `plan/director_brief.json`
-- `plan/detail_plan.json`
-- `plan/detail_copy_plan.json`
-- `plan/detail_prompt_plan.json`
-- `generated/*.png`
-- `generated/detail_render_report.json`
-- `review/visual_review.json`
-- `review/retry_decisions.json`
-- `qc/detail_qc_report.json`
-- `detail_manifest.json`
-- `exports/detail_bundle.zip`
-
-## 6. mock / real 模式
-
-### 6.1 mock
-- `ECOM_IMAGE_AGENT_TEXT_PROVIDER_MODE=mock`
-- `ECOM_IMAGE_AGENT_IMAGE_PROVIDER_MODE=mock`
+返回字段摘要：
+- `task_id`
+- `items[]`
+  - `result_id`
+  - `result_type`
+  - `page_no`
+  - `shot_no`
+  - `version_no`
+  - `status`
+  - `cos_key`
+  - `mime_type`
+  - `size_bytes`
+  - `sha256`
+  - `width`
+  - `height`
+  - `file_url`
+  - `created_at`
+  - `updated_at`
 
 说明：
-- mock text provider 返回稳定结构化 plan/copy/prompt
-- mock image provider 复制预置样张到 `generated/`
-- runtime、预览、下载、ZIP 仍走真实 detail graph 链路
+- 当前阶段未接入 COS，`cos_key` 实际保存任务目录内的相对路径。
+- `file_url` 继续复用旧文件下载接口：
+  - 主图：`/api/tasks/{task_id}/files/{file_name}`
+  - 详情图：`/api/detail/jobs/{task_id}/files/{file_name}`
 
-### 6.2 real
-- `ECOM_IMAGE_AGENT_TEXT_PROVIDER_MODE=real`
-- `ECOM_IMAGE_AGENT_IMAGE_PROVIDER_MODE=real`
-- `ECOM_IMAGE_AGENT_IMAGE_PROVIDER=banana2`
+## 5. 当前正式生成 API
+### 5.1 健康检查
+- `GET /api/health`
 
-说明：
-- 文本规划继续走统一 planning provider/router
-- 图片渲染默认走 `banana2` provider/router
-- `banana2` 在 real 模式下优先通过 Google 官方 `google.genai` SDK 调用 `gemini-3.1-flash-image-preview`
-- 若未配置 `ECOM_IMAGE_AGENT_GOOGLE_API_KEY`，则回退到现有 RunAPI 通道
-- 当 provider 抖动或单页失败时，detail 渲染会做页级重试，不再因为单页异常直接中断整条任务
+### 5.2 主图生成
+- `POST /api/image/generate-main`
+  - `Content-Type: multipart/form-data`
+  - 文件字段：
+    - `white_bg`
+    - `detail_files[]`
+    - `bg_files[]`
+  - 文本字段：
+    - `brand_name`
+    - `product_name`
+    - `category`
+    - `platform`
+    - `style_type`
+    - `style_notes`
+    - `shot_count`
+    - `aspect_ratio`
+    - `image_size`
 
-## 7. 错误处理
+### 5.3 详情图 V2
+- `POST /api/detail/jobs`
+- `POST /api/detail/jobs/plan`
+- `GET /api/detail/jobs/{task_id}`
+- `GET /api/detail/jobs/{task_id}/runtime`
+- `GET /api/detail/jobs/{task_id}/files/{file_name}`
+
+### 5.4 旧任务查询接口
+以下接口继续保留，当前前端仍在使用：
+- `GET /api/tasks`
+- `GET /api/tasks/{task_id}`
+- `GET /api/tasks/{task_id}/runtime`
+- `GET /api/tasks/{task_id}/files/{file_name}`
+
+## 6. 任务兼容写入说明
+- 主图和详情图创建任务时，会同时写入本地 JSON 索引和 PostgreSQL 任务镜像表。
+- 运行中状态变化会同步到：
+  - `tasks`
+  - `task_events`
+  - `task_results`
+- 旧生成接口允许可选 Bearer token：
+  - 带 token 时，任务归属当前登录用户
+  - 不带 token 时，任务归属禁用的兼容系统用户，这类任务不会出现在普通用户历史列表中
+
+## 7. 已冻结旧接口
+以下接口仍在仓库中，但不属于当前正式入口：
+- `POST /api/detail/generate`
+- `GET /api/templates/main-images`
+- `GET /api/templates/detail-pages`
+- `POST /api/templates/detail-pages/preview`
+- `GET /api/assets/{file_name}`
+
+## 8. 当前未提供的 API
+以下能力还没有正式 API：
+- 单张图片局部标记后二次生成的正式接口
+- 任务取消 / 任务重试
+- 邮箱验证、找回密码、角色权限
+- provider 全量 `task_usage_records` 自动落库
+
+## 9. 错误处理
 - 参数校验失败：HTTP `422`
-- 业务错误：HTTP `400`
+- 鉴权失败：HTTP `401`
+- 禁止访问：HTTP `403`
+- 资源不存在：HTTP `404`
+- 资源冲突：HTTP `409`
+- 其他业务错误：HTTP `400`
 - 未处理异常：HTTP `500`
 
-detail 运行失败或部分失败时：
-- `runtime.message` 优先返回 `task.json.error_message`
-- 若任务进入 `review_required`，说明至少有一部分页面成功，但仍存在失败页或 QC 风险页
+统一异常入口：
+- `backend/core/exceptions.py`
+- `backend/main.py`

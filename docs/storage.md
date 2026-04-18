@@ -1,44 +1,94 @@
-# 存储方案说明
+﻿# 存储方案说明
 
-## 1. 当前存储方案
-当前默认是本地文件存储：
-- 任务索引：`storage/tasks/index.json`
-- 任务目录：`outputs/tasks/{task_id}/`
-- 详情页结构化结果：写入任务目录（如 `detail_page_modules.json`）
+## 1. 当前存储分层
+当前仓库使用两套并行存储：
+- 本地文件系统 + JSON：继续承载任务执行真源、任务目录产物和旧 runtime 聚合
+- PostgreSQL：承载用户体系、认证、安全审计，以及任务元数据镜像
 
-## 2. 本地存储与远端存储切换
-- 当前代码主路径仍是本地文件存储。
-- `backend/storage/` 中已预留存储抽象（如 `StorageBackend`、`StorageFactory`），用于未来扩展。
-- 在未完成实现前，不在文档中宣称“已支持远端对象存储”。
+## 2. 本地文件存储
+### 2.1 任务索引
+- `storage/tasks/index.json`
+- 由 `backend/repositories/task_repository.py` 负责读写
 
-## 3. 文件组织规则
-
-### 3.1 索引层
-- `storage/tasks/index.json` 存储任务摘要列表。
-- 每次任务创建或状态更新，由 `TaskRepository` 回写索引。
-
-### 3.2 任务层
+### 2.2 任务目录
 `outputs/tasks/{task_id}/` 常见内容：
-- `task.json`：任务运行时主清单
-- `inputs/`：上传原图
-- `generated/`：模型生成原图
-- `final/`：后处理最终图
-- `exports/`：ZIP 导出包
-- `prompt_plan_v2.json`、`qc_report.json` 等中间产物
+- `task.json`
+- `inputs/`
+- `generated/`
+- `final/`
+- `exports/`
+- `prompt_plan_v2.json`
+- `qc_report.json`
+- `usage/`
 
-## 4. 任务文件路径规则
-- 任务文件访问统一通过：`/api/tasks/{task_id}/files/{file_name}`。
-- `file_name` 为任务目录内相对路径（如 `final/shot_01.png`）。
-- 后端会做路径越界校验，禁止访问任务目录之外文件。
+### 2.3 文件访问
+- `GET /api/tasks/{task_id}/files/{file_name}`
+- `GET /api/detail/jobs/{task_id}/files/{file_name}`
 
-## 5. 图片 URL 获取策略
-- 后端 runtime 返回相对 URL（`/api/tasks/.../files/...`）。
-- 前端通过 `resolveApiUrl` 拼接为当前环境下可访问绝对地址。
+后端会做任务目录越界校验，禁止访问任务目录之外的文件。
 
-## 6. 后续扩展方向
-- 引入对象存储（OSS/S3）时，应保持 API 协议稳定，优先在服务层与存储适配层扩展。
-- 若产物 URL 改为签名直链，必须同步更新：
-  - `docs/api.md`
-  - `docs/workflow.md`
-  - `docs/frontend-workbench.md`
-  - `README.md`
+## 3. PostgreSQL 存储
+### 3.1 当前正式使用的表
+- `users`
+- `refresh_tokens`
+- `audit_logs`
+- `idempotency_keys`
+- `tasks`
+- `task_assets`
+- `task_results`
+- `task_events`
+- `task_usage_records`
+
+### 3.2 当前接入方式
+- 认证链路直接读写数据库
+- 主图 / 详情图任务创建时做兼容双写
+- 任务运行态通过兼容层把本地 JSON / 文件信息镜像到：
+  - `tasks`
+  - `task_events`
+  - `task_results`
+- `task_usage_records` 当前只提供预留写入服务，尚未接全量 provider 自动落库
+
+### 3.3 关键设计约束
+- 不把文件二进制写入数据库
+- 不把强关系字段偷放进 JSONB
+- 所有任务相关表都带 `user_id`
+- `updated_at` 由数据库触发器统一维护
+- `cos_key` 当前保存任务目录相对路径，为未来 COS 接入保留字段语义
+
+## 4. 用户隔离与兼容用户
+- v1 任务查询接口只返回当前登录用户的数据
+- 旧生成接口支持可选 Bearer token
+- 不带 token 时，任务会落到禁用的兼容系统用户名下
+- 这样做的目的：
+  - 不破坏旧生成入口
+  - 不让匿名旧任务进入普通用户历史列表
+
+## 5. Alembic 与迁移
+### 5.1 入口
+- `alembic.ini`
+- `alembic/env.py`
+- `alembic/versions/20260418_01_initial_auth_and_task_schema.py`
+- `alembic/versions/20260418_02_task_enum_alignment_for_v1_history.py`
+
+### 5.2 常用命令
+```bash
+alembic upgrade head
+alembic downgrade -1
+alembic upgrade head --sql
+```
+
+### 5.3 当前验证边界
+- 已验证：
+  - Alembic 离线 SQL 生成
+  - SQLite 下的认证与任务接口测试
+- 未验证：
+  - 真实 PostgreSQL 实例上的 `alembic upgrade head`
+
+## 6. 后续迁移方向
+建议顺序：
+1. 继续把 `task_events`、`task_results` 与现有运行态字段对齐
+2. 把历史任务前端页面切到 `/api/v1/tasks*`
+3. 再评估是否移除 `storage/tasks/index.json`
+4. 最后再接入 COS，并把 `cos_key` 切换为真实对象键
+
+在这之前，对外口径必须明确：当前正式任务执行真源仍是本地文件和 JSON，PostgreSQL 负责任务元数据镜像与用户隔离查询。

@@ -11,6 +11,8 @@ from pathlib import Path
 
 from fastapi import UploadFile
 
+from backend.db.enums import TaskType
+from backend.db.models.user import User
 from backend.engine.core.config import get_settings
 from backend.engine.core.paths import ensure_task_dirs
 from backend.engine.domain.asset import AssetType
@@ -20,6 +22,7 @@ from backend.engine.workflows.graph import run_workflow
 from backend.engine.workflows.state import WorkflowExecutionError, WorkflowState, format_workflow_log
 from backend.repositories.task_repository import TaskRepository
 from backend.schemas.task import MainImageGeneratePayload, TaskSummary
+from backend.services.task_db_mirror_service import TaskDbMirrorService
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +41,7 @@ class MainImageService:
     def __init__(self) -> None:
         self.storage = LocalStorageService()
         self.repo = TaskRepository()
+        self.db_mirror = TaskDbMirrorService()
 
     async def prepare_generation(
         self,
@@ -46,6 +50,7 @@ class MainImageService:
         white_bg: UploadFile,
         detail_files: list[UploadFile],
         bg_files: list[UploadFile],
+        current_user: User | None,
     ) -> PreparedMainImageTask:
         """创建任务并把上传文件先落盘。
 
@@ -111,6 +116,21 @@ class MainImageService:
             background_image_count=len(bg_files),
         )
         self.repo.save_task(summary)
+        await self.db_mirror.create_task_record(
+            task_id=task_id,
+            current_user=current_user,
+            task_type=TaskType.MAIN_IMAGE,
+            title=payload.product_name,
+            platform=payload.platform,
+            input_summary={
+                "white_bg_count": 1,
+                "detail_image_count": len(detail_files),
+                "background_image_count": len(bg_files),
+            },
+            params=payload.model_dump(mode="json"),
+            assets=self.db_mirror.build_main_image_asset_inputs(assets),
+            created_at=task.created_at,
+        )
         return PreparedMainImageTask(summary=summary, initial_state=initial_state)
 
     def run_prepared_task(self, prepared: PreparedMainImageTask) -> None:
@@ -125,17 +145,20 @@ class MainImageService:
             progress_task = progress_state.get("task")
             if progress_task is not None:
                 self.repo.save_runtime_task(progress_task)
+                self.db_mirror.sync_runtime_from_local_sync(task_id=progress_task.task_id, task_type=TaskType.MAIN_IMAGE)
 
         try:
             result = run_workflow(initial_state, on_progress=persist_progress)
             result_task = result["task"]
             self.repo.save_runtime_task(result_task)
+            self.db_mirror.sync_runtime_from_local_sync(task_id=result_task.task_id, task_type=TaskType.MAIN_IMAGE)
             logger.info("主图任务完成 task_id=%s status=%s", task.task_id, result_task.status.value)
         except WorkflowExecutionError as exc:
             failed_state = exc.task_state or {}
             failed_task = failed_state.get("task") if isinstance(failed_state, dict) else None
             if failed_task is not None:
                 self.repo.save_runtime_task(failed_task)
+                self.db_mirror.sync_runtime_from_local_sync(task_id=failed_task.task_id, task_type=TaskType.MAIN_IMAGE)
             logger.exception("主图任务失败 task_id=%s node=%s", task.task_id, exc.node_name)
         except Exception as exc:  # pragma: no cover - 兜底逻辑
             logger.exception("主图任务出现未处理异常 task_id=%s", task.task_id)
@@ -150,6 +173,7 @@ class MainImageService:
             )
             self.storage.save_task_manifest(failed_task)
             self.repo.save_runtime_task(failed_task)
+            self.db_mirror.sync_runtime_from_local_sync(task_id=failed_task.task_id, task_type=TaskType.MAIN_IMAGE)
 
     def build_result_dir(self, task_id: str) -> Path:
         """返回任务最终图片目录。"""
