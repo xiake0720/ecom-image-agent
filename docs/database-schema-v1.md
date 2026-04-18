@@ -14,9 +14,10 @@
 - `updated_at` 通过数据库触发器 `set_updated_at_timestamp()` 自动更新
 - 文件二进制不入库，只存元数据和对象键
 - 所有任务相关表都带 `user_id`
+- 当前阶段 `cos_key` 保存任务目录相对路径，作为未来 COS 对象键占位字段
 
 ## 3. 集中枚举
-定义位置：[`backend/db/enums.py`](/D:/python/ecom-image-agent/backend/db/enums.py)
+定义位置：`backend/db/enums.py`
 
 ### 3.1 users.status
 - `active`
@@ -25,17 +26,17 @@
 
 ### 3.2 tasks.task_type
 - `main_image`
-- `detail_page_v2`
-- `local_regenerate`
+- `detail_page`
+- `image_edit`
 
 ### 3.3 tasks.status
 - `pending`
 - `queued`
 - `running`
-- `review_required`
 - `succeeded`
 - `failed`
-- `canceled`
+- `partial_failed`
+- `cancelled`
 
 ### 3.4 task_results.status
 - `pending`
@@ -189,8 +190,8 @@
 | width | INTEGER | NULL |
 | height | INTEGER | NULL |
 | duration_ms | INTEGER | NULL |
-| scan_status | VARCHAR(32) | NOT NULL, default `pending` |
 | metadata | JSONB | NULL |
+| scan_status | VARCHAR(32) | NOT NULL, default `pending` |
 | sort_order | INTEGER | NOT NULL, default `0` |
 | created_at | TIMESTAMPTZ | NOT NULL, default `now()` |
 | updated_at | TIMESTAMPTZ | NOT NULL, default `now()` |
@@ -295,6 +296,7 @@
 - 未来如果有直连 SQL 更新，也不会漏写 `updated_at`
 
 ## 7. 当前接入状态
-- 已正式接入业务：`users`、`refresh_tokens`、`audit_logs`
-- 已提供 schema 和 repository 骨架：阶段 2 所有任务表
-- 尚未把主图/详情图任务运行态迁入 PostgreSQL
+- 已正式接入业务：`users`、`refresh_tokens`、`audit_logs`、`idempotency_keys`
+- 已接入兼容双写：`tasks`、`task_assets`、`task_results`、`task_events`
+- 已提供预留写入服务：`task_usage_records`
+- 当前任务 runtime 真源仍是本地文件和 JSON，数据库承担元数据镜像与历史查询职责

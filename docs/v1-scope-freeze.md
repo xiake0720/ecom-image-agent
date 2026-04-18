@@ -67,7 +67,12 @@
   - `refresh_tokens`
   - `audit_logs`
   - `idempotency_keys`
-- 阶段 2 任务表当前只完成 schema 和 repository 骨架，尚未替换现有 JSON 任务链路。
+- 任务相关数据库表当前已接入兼容双写：
+  - `tasks`
+  - `task_assets`
+  - `task_results`
+  - `task_events`
+- 阶段 2 任务表仍未替换现有 JSON / 文件任务真链路。
 
 ## 6. 废弃或冻结的旧实现
 以下内容不删除，但一期视为 `deprecated` 或 `frozen`：
@@ -91,7 +96,7 @@
   - 当前只能证明后端账号骨架可用，不能证明前端登录态闭环已完成。
 - “单张图片局部标记后二次生成”仍没有正式页面、正式 API 和任务协议。
 - 主图/详情图任务主链路仍使用本地文件系统和 `storage/tasks/index.json`。
-  - 数据库里的阶段 2 任务表尚未成为真实任务源。
+  - 数据库里的阶段 2 任务表当前是镜像层，不是真实任务源。
 - 旧接口和旧页面代码仍在仓库内。
   - 如果后续继续修改这些模块而不同步文档，范围容易再次漂移。
 - 当前执行环境未验证真实 PostgreSQL 实例上的 `alembic upgrade head`。
