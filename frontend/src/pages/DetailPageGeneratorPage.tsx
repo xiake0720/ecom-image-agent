@@ -15,8 +15,8 @@ import { PageHeader } from "../components/common/PageHeader";
 import { SectionCard } from "../components/common/SectionCard";
 import { PageShell } from "../components/layout/PageShell";
 import { fetchDetailRuntime, submitDetailJob } from "../services/detailPageApi";
-import { fetchTaskRuntime, fetchTasks } from "../services/taskApi";
-import type { TaskRuntimeResult, TaskSummary } from "../types/api";
+import { fetchTaskRuntime, fetchV1Tasks } from "../services/taskApi";
+import type { TaskRuntimeResult, V1TaskListItem } from "../types/api";
 import type { DetailPageRuntimeImage, DetailPageRuntimePayload } from "../types/detail";
 import "./DetailPageGeneratorPage.css";
 
@@ -82,7 +82,7 @@ export function DetailPageGeneratorPage() {
 
   const [mainTaskId, setMainTaskId] = useState(routeMainTaskId);
   const [selectedMainResults, setSelectedMainResults] = useState<string[]>([]);
-  const [mainTaskOptions, setMainTaskOptions] = useState<TaskSummary[]>([]);
+  const [mainTaskOptions, setMainTaskOptions] = useState<V1TaskListItem[]>([]);
   const [mainTaskResults, setMainTaskResults] = useState<TaskRuntimeResult[]>([]);
   const [mainSourceState, setMainSourceState] = useState<"idle" | "loading" | "error" | "empty" | "ready">("idle");
   const [mainSourceMessage, setMainSourceMessage] = useState("选择主图任务后，可导入 completed 结果作为详情图参考。");
@@ -95,9 +95,9 @@ export function DetailPageGeneratorPage() {
   const [submitting, setSubmitting] = useState<"plan" | "full" | "">("");
 
   useEffect(() => {
-    fetchTasks()
-      .then((rows) => {
-        setMainTaskOptions(rows.filter((item) => item.task_type === "main_image").slice(0, 12));
+    fetchV1Tasks({ taskType: "main_image", pageSize: 12 })
+      .then((payload) => {
+        setMainTaskOptions(payload.items);
       })
       .catch((error) => {
         setPageError(`主图任务列表加载失败：${extractApiErrorMessage(error)}`);

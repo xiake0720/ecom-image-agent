@@ -67,3 +67,22 @@ class TaskQcStatus(StrEnum):
     PASSED = "passed"
     REVIEW_REQUIRED = "review_required"
     FAILED = "failed"
+
+
+class ImageEditStatus(StrEnum):
+    PENDING = "pending"
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class ImageEditSelectionType(StrEnum):
+    RECTANGLE = "rectangle"
+    MASK = "mask"
+
+
+class ImageEditMode(StrEnum):
+    NATIVE_INPAINTING = "native_inpainting"
+    FULL_IMAGE_CONSTRAINED_REGENERATION = "full_image_constrained_regeneration"

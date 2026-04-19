@@ -1,6 +1,8 @@
-﻿import React from "react";
+import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { AuthProvider } from "./auth/AuthProvider";
+import { PublicOnly, RequireAuth } from "./auth/RouteGuards";
 import { Layout } from "./components/Layout";
 import {
   DEFAULT_V1_WORKSPACE_ROUTE,
@@ -39,32 +41,57 @@ const workspaceRoutes: WorkspaceRouteDefinition[] = [
 
 /**
  * React 入口。
- * 为什么这样处理：用统一 route flag 冻结一期入口，保留代码但不再暴露 mock 页面。
+ * 为什么这样处理：工作台路由统一要求登录，非一期页面仍保留代码但不暴露入口。
  */
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <BrowserRouter>
-      <Routes>
-        <Route
-          path="/login"
-          element={isRouteEnabled("login") ? <LoginPage /> : <Navigate to={DEFAULT_V1_WORKSPACE_ROUTE} replace />}
-        />
-        <Route
-          path="/register"
-          element={isRouteEnabled("register") ? <RegisterPage /> : <Navigate to="/login" replace />}
-        />
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Navigate to={DEFAULT_V1_WORKSPACE_ROUTE} replace />} />
-          {workspaceRoutes.map((route) => (
-            <Route
-              key={route.path}
-              path={route.path}
-              element={isRouteEnabled(route.key) ? route.element : <Navigate to={DEFAULT_V1_WORKSPACE_ROUTE} replace />}
-            />
-          ))}
-        </Route>
-        <Route path="*" element={<Navigate to={DEFAULT_V1_WORKSPACE_ROUTE} replace />} />
-      </Routes>
-    </BrowserRouter>
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route
+            path="/login"
+            element={
+              isRouteEnabled("login") ? (
+                <PublicOnly>
+                  <LoginPage />
+                </PublicOnly>
+              ) : (
+                <Navigate to={DEFAULT_V1_WORKSPACE_ROUTE} replace />
+              )
+            }
+          />
+          <Route
+            path="/register"
+            element={
+              isRouteEnabled("register") ? (
+                <PublicOnly>
+                  <RegisterPage />
+                </PublicOnly>
+              ) : (
+                <Navigate to="/login" replace />
+              )
+            }
+          />
+          <Route
+            path="/"
+            element={
+              <RequireAuth>
+                <Layout />
+              </RequireAuth>
+            }
+          >
+            <Route index element={<Navigate to={DEFAULT_V1_WORKSPACE_ROUTE} replace />} />
+            {workspaceRoutes.map((route) => (
+              <Route
+                key={route.path}
+                path={route.path}
+                element={isRouteEnabled(route.key) ? route.element : <Navigate to={DEFAULT_V1_WORKSPACE_ROUTE} replace />}
+              />
+            ))}
+          </Route>
+          <Route path="*" element={<Navigate to={DEFAULT_V1_WORKSPACE_ROUTE} replace />} />
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
   </React.StrictMode>,
 );

@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     debug: bool = False
     api_prefix: str = "/api"
     api_v1_prefix: str = "/api/v1"
-    cors_origins: list[str] = Field(default_factory=lambda: ["*"])
+    cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173"])
 
     storage_root: Path = Path("storage")
     outputs_root: Path = Path("outputs/tasks")
@@ -31,6 +31,29 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/ecom_image_agent"
     database_echo: bool = False
+
+    cos_enabled: bool = False
+    cos_secret_id: str = ""
+    cos_secret_key: str = ""
+    cos_region: str = ""
+    cos_bucket: str = ""
+    cos_public_host: str = ""
+    cos_sign_expire_seconds: int = 600
+    cos_max_image_size_bytes: int = 20 * 1024 * 1024
+    cos_allowed_image_mime_types: list[str] = Field(default_factory=lambda: ["image/png", "image/jpeg", "image/webp"])
+
+    celery_enabled: bool = False
+    redis_url: str = "redis://127.0.0.1:6379/0"
+    celery_broker_url: str = ""
+    celery_result_backend: str = ""
+    celery_task_always_eager: bool = False
+    celery_task_serializer: str = "json"
+    celery_accept_content: list[str] = Field(default_factory=lambda: ["json"])
+    celery_result_serializer: str = "json"
+    celery_task_time_limit_seconds: int = 3600
+    celery_task_soft_time_limit_seconds: int = 3300
+    celery_max_retries: int = 1
+    celery_retry_countdown_seconds: int = 30
 
     auth_jwt_secret_key: str = "change-me-in-env"
     auth_jwt_algorithm: str = "HS256"
@@ -53,7 +76,35 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             stripped = value.strip()
             if not stripped:
-                return ["*"]
+                return ["http://localhost:5173", "http://127.0.0.1:5173"]
+            if stripped.startswith("["):
+                return json.loads(stripped)
+            return [item.strip() for item in stripped.split(",") if item.strip()]
+        return value
+
+    @field_validator("cos_allowed_image_mime_types", mode="before")
+    @classmethod
+    def _parse_cos_allowed_image_mime_types(cls, value: Any) -> Any:
+        """兼容 JSON 数组和逗号分隔的 MIME 白名单配置。"""
+
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return ["image/png", "image/jpeg", "image/webp"]
+            if stripped.startswith("["):
+                return json.loads(stripped)
+            return [item.strip() for item in stripped.split(",") if item.strip()]
+        return value
+
+    @field_validator("celery_accept_content", mode="before")
+    @classmethod
+    def _parse_celery_accept_content(cls, value: Any) -> Any:
+        """兼容 Celery accept_content 的 JSON 数组和逗号分隔写法。"""
+
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return ["json"]
             if stripped.startswith("["):
                 return json.loads(stripped)
             return [item.strip() for item in stripped.split(",") if item.strip()]
@@ -73,6 +124,27 @@ class Settings(BaseSettings):
         """返回异步数据库 URL。"""
 
         return self.database_url
+
+    def resolve_celery_broker_url(self) -> str:
+        """返回 Celery broker URL，默认复用 Redis URL。"""
+
+        return self.celery_broker_url.strip() or self.redis_url
+
+    def resolve_celery_result_backend(self) -> str:
+        """返回 Celery result backend，默认复用 Redis URL。"""
+
+        return self.celery_result_backend.strip() or self.redis_url
+
+    def is_cos_ready(self) -> bool:
+        """判断 COS 是否具备真实签名和上传能力。"""
+
+        return bool(
+            self.cos_enabled
+            and self.cos_secret_id.strip()
+            and self.cos_secret_key.strip()
+            and self.cos_region.strip()
+            and self.cos_bucket.strip()
+        )
 
 
 @lru_cache(maxsize=1)

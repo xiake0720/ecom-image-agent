@@ -155,3 +155,60 @@ detail 失败或部分失败时：
 - `director_brief`
 - `visual_review`
 - `retry_decisions`
+
+## 6. Celery + Redis 执行调度补充
+阶段 4 后，主图和详情图的任务执行调度支持两种模式：
+- 默认模式：`ECOM_CELERY_ENABLED=false`，继续使用旧进程内队列。
+- Celery 模式：`ECOM_CELERY_ENABLED=true`，API 创建本地任务和数据库任务镜像后，把 `task_id` 提交给 Celery worker。
+
+Celery 模式不改变 workflow 核心顺序：
+- 主图 worker 仍执行 `run_workflow(...)`。
+- 详情图 worker 仍执行 `run_detail_workflow(...)`。
+- 输入文件、`task.json`、runtime 文件和结果产物仍写在 `outputs/tasks/{task_id}/`。
+- `storage/tasks/index.json` 仍保留，用于旧 runtime 聚合和本地兼容。
+
+状态写入规则：
+- API 创建任务时写入本地任务索引和数据库任务镜像。
+- Worker 开始执行时写入 `tasks.status=running` 和 `task_running` 事件。
+- Worker 触发 retry 时写入 `tasks.status=queued`、`retry_count` 和 `task_retrying` 事件。
+- Worker 最终失败时写入 `tasks.status=failed`、`error_message`、`finished_at` 和 `task_failed` 事件。
+- workflow 内部进度仍由 progress callback 同步本地 JSON，并通过兼容层同步到 `tasks`、`task_events`、`task_results`。
+
+部署约束：
+- API 和 worker 必须共享同一份 `outputs/tasks/`、`storage/tasks/` 和 provider 环境变量。
+- Redis 只作为 Celery broker / result backend，不保存图片文件和任务产物。
+
+## 7. 前端登录态与任务恢复补充
+阶段 5 后，前端工作台路由统一要求登录：
+- `/main-images`
+- `/detail-pages`
+- `/tasks`
+
+登录态恢复规则：
+- 前端优先使用本地 access token 调用 `GET /api/v1/auth/me`。
+- access token 失效时尝试调用 `POST /api/v1/auth/refresh`。
+- refresh 成功后更新本地 access token。
+- refresh 失败时清理本地 token 并跳转登录页。
+
+历史任务恢复规则：
+- `main_image` 从历史任务页恢复到 `/main-images`，并写入 `main-image-active-task-id`。
+- `detail_page` 从历史任务页恢复到 `/detail-pages?task_id={task_id}`。
+- `image_edit` 只保留类型展示，正式编辑恢复留到阶段 6。
+
+历史任务页数据源：
+- 列表：`GET /api/v1/tasks`
+- runtime 摘要：`GET /api/v1/tasks/{task_id}/runtime`
+- 结果摘要：`GET /api/v1/tasks/{task_id}/results`
+- 结果下载：`GET /api/v1/files/{file_id}/download-url`
+## 8. 单图编辑工作流补充
+阶段 6 后，历史任务结果图支持最小可用的局部编辑：
+
+1. 前端在 `/tasks` 的结果卡片展开编辑面板。
+2. 用户拖拽矩形选区，坐标按原图可视区域归一化为 `ratio`。
+3. 用户输入编辑指令并调用 `POST /api/v1/results/{result_id}/edits`。
+4. 后端创建 `tasks(task_type=image_edit)`、`image_edits` 和初始 `task_events`。
+5. Celery 启用时提交 `ecom.image_edit.run`；本地开发未启用 Celery 时使用同一执行服务的后台线程 fallback。
+6. worker 复制源图到编辑任务目录，当前以 `full_image_constrained_regeneration` 模式调用现有图片 provider。
+7. 生成图写入 `outputs/tasks/{edit_task_id}/final/edited_result.png`。
+8. 后端写入新的 `task_results(result_type=image_edit)`，并把 `parent_result_id` 指向源结果。
+9. 前端通过 `GET /api/v1/results/{result_id}/edits` 展示编辑历史和派生版本。

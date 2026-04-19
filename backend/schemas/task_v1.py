@@ -106,6 +106,7 @@ class TaskResultResponse(BaseModel):
     qc_score: float | None = None
     is_primary: bool = True
     file_url: str = ""
+    download_url_api: str = ""
     created_at: datetime
     updated_at: datetime
 

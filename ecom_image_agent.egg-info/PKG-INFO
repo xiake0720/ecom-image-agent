@@ -21,6 +21,9 @@ Requires-Dist: asyncpg>=0.30.0
 Requires-Dist: alembic>=1.14.0
 Requires-Dist: PyJWT>=2.9.0
 Requires-Dist: email-validator>=2.2.0
+Requires-Dist: cos-python-sdk-v5>=1.9.35
+Requires-Dist: celery[redis]>=5.4.0
+Requires-Dist: redis>=5.0.0
 Provides-Extra: dev
 Requires-Dist: pytest>=8.3.0; extra == "dev"
 Requires-Dist: pytest-cov>=6.0.0; extra == "dev"
@@ -59,26 +62,27 @@ Requires-Dist: aiosqlite>=0.20.0; extra == "dev"
 - `/settings`
 - `/assets-library`
 
-范围冻结事实见 [`docs/v1-scope-freeze.md`](/D:/python/ecom-image-agent/docs/v1-scope-freeze.md)。
+范围冻结事实见 `docs/v1-scope-freeze.md`。
 
 ## 当前正式架构
-- 后端入口：[`backend/main.py`](/D:/python/ecom-image-agent/backend/main.py)
-- 前端入口：[`frontend/src/main.tsx`](/D:/python/ecom-image-agent/frontend/src/main.tsx)
-- 主图工作流：[`backend/engine/workflows/graph.py`](/D:/python/ecom-image-agent/backend/engine/workflows/graph.py)
-- 详情图工作流：[`backend/engine/workflows/detail_graph.py`](/D:/python/ecom-image-agent/backend/engine/workflows/detail_graph.py)
-- 数据库迁移：[`alembic/`](/D:/python/ecom-image-agent/alembic)
+- 后端入口：`backend/main.py`
+- 前端入口：`frontend/src/main.tsx`
+- 主图工作流：`backend/engine/workflows/graph.py`
+- 详情图工作流：`backend/engine/workflows/detail_graph.py`
+- 数据库迁移：`alembic/`
 - 任务索引：`storage/tasks/index.json`
 - 任务产物：`outputs/tasks/{task_id}/`
 
 当前后端是双存储结构：
-- 用户认证和数据库骨架：PostgreSQL
-- 主图/详情图任务主链路：本地文件系统 + JSON
+- 用户认证与任务元数据镜像：PostgreSQL
+- 主图/详情图任务执行真源：本地文件系统 + JSON
+- 文件对象存储：可选启用腾讯云 COS，未启用时保留本地兼容模式
 
 ## 目录结构
 ```text
 backend/
   api/                     # FastAPI 路由层
-  api/v1/                  # 版本化 API（当前已接入 auth）
+  api/v1/                  # 版本化 API（当前已接入 auth + tasks）
   core/                    # 配置、异常、middleware、安全工具
   db/                      # SQLAlchemy Async 基础设施与 models
   repositories/            # JSON 仓储与数据库仓储
@@ -87,13 +91,13 @@ backend/
   engine/                  # 主图/详情图 workflow、provider、渲染、存储
   templates/               # 旧模板体系资源（已冻结）
 alembic/                   # 数据库迁移
+docs/                      # 项目事实文档
 frontend/
   src/config/              # 前端范围开关与配置
   src/pages/               # 页面容器
   src/components/          # 复用 UI 组件
   src/services/            # API 调用层
   src/types/               # 前端 contract
-docs/                      # 项目事实文档
 storage/tasks/             # JSON 任务索引
 outputs/tasks/             # 任务产物
 ```
@@ -133,12 +137,21 @@ npm run dev
 
 ## 环境变量
 ### FastAPI / 认证 / 数据库（`ECOM_`）
-定义位置：[`backend/core/config.py`](/D:/python/ecom-image-agent/backend/core/config.py)
+定义位置：`backend/core/config.py`
 - `ECOM_API_PREFIX`
 - `ECOM_API_V1_PREFIX`
 - `ECOM_CORS_ORIGINS`
 - `ECOM_DATABASE_URL`
 - `ECOM_DATABASE_ECHO`
+- `ECOM_COS_ENABLED`
+- `ECOM_COS_SECRET_ID`
+- `ECOM_COS_SECRET_KEY`
+- `ECOM_COS_REGION`
+- `ECOM_COS_BUCKET`
+- `ECOM_COS_PUBLIC_HOST`
+- `ECOM_COS_SIGN_EXPIRE_SECONDS`
+- `ECOM_COS_MAX_IMAGE_SIZE_BYTES`
+- `ECOM_COS_ALLOWED_IMAGE_MIME_TYPES`
 - `ECOM_AUTH_JWT_SECRET_KEY`
 - `ECOM_AUTH_ACCESS_TOKEN_EXPIRE_MINUTES`
 - `ECOM_AUTH_REFRESH_TOKEN_EXPIRE_DAYS`
@@ -147,11 +160,16 @@ npm run dev
 - `ECOM_AUTH_REFRESH_COOKIE_SAMESITE`
 - `ECOM_AUTH_REFRESH_COOKIE_PATH`
 - `ECOM_AUTH_TOKEN_HASH_SECRET`
+- `ECOM_COMPAT_TASK_USER_EMAIL`
+- `ECOM_COMPAT_TASK_USER_NICKNAME`
 
 ### 生成引擎 / provider（`ECOM_IMAGE_AGENT_`）
-定义位置：[`backend/engine/core/config.py`](/D:/python/ecom-image-agent/backend/engine/core/config.py)
+定义位置：`backend/engine/core/config.py`
 - `ECOM_IMAGE_AGENT_TEXT_PROVIDER_MODE`
 - `ECOM_IMAGE_AGENT_IMAGE_PROVIDER_MODE`
+- `ECOM_IMAGE_AGENT_TASKS_DIR`
+- `ECOM_IMAGE_AGENT_CACHE_DIR`
+- `ECOM_IMAGE_AGENT_EXPORTS_DIR`
 - `ECOM_IMAGE_AGENT_RUNAPI_API_KEY`
 - `ECOM_IMAGE_AGENT_RUNAPI_TEXT_API_KEY`
 - `ECOM_IMAGE_AGENT_GOOGLE_API_KEY`
@@ -165,7 +183,17 @@ npm run dev
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/auth/me`
 
-### 生成与任务 API
+### v1 任务 API
+- `GET /api/v1/tasks`
+- `GET /api/v1/tasks/{task_id}`
+- `GET /api/v1/tasks/{task_id}/runtime`
+- `GET /api/v1/tasks/{task_id}/results`
+
+### v1 文件 API
+- `POST /api/v1/storage/presign`
+- `GET /api/v1/files/{file_id}/download-url`
+
+### 生成与旧任务 API
 - `GET /api/health`
 - `POST /api/image/generate-main`
 - `GET /api/tasks`
@@ -178,29 +206,29 @@ npm run dev
 - `GET /api/detail/jobs/{task_id}/runtime`
 - `GET /api/detail/jobs/{task_id}/files/{file_name}`
 
-已冻结旧接口：
-- `POST /api/detail/generate`
-- `GET /api/templates/main-images`
-- `GET /api/templates/detail-pages`
-- `POST /api/templates/detail-pages/preview`
-
-详细字段见 [`docs/api.md`](/D:/python/ecom-image-agent/docs/api.md)。
+详细字段见 `docs/api.md`。
 
 ## 当前状态说明
 - 后端真实注册/登录/refresh/logout/me 已完成。
-- 前端 `/login` 和 `/register` 目前仍是壳层页面，尚未接入新认证 API。
-- 主图/详情图生成核心逻辑未被本次数据库和认证改造影响。
+- v1 历史任务接口已完成，支持分页、筛选和按用户隔离。
+- 主图/详情图任务当前采用“旧链路继续跑 + 数据库镜像写入”的兼容方案。
+- 腾讯云 COS 预签名上传、签名下载和兼容写入已完成；本地开发默认仍走本地文件。
+- 前端 `/login` 和 `/register` 仍是壳层页面，尚未接入新认证 API。
+- 前端历史任务页仍在使用旧 `/api/tasks*` 接口，尚未切到 `/api/v1/tasks*`。
+- 前端已提供 COS 直传 service，但页面级完整切换待登录态和任务恢复阶段完成。
 - 单张图片局部标记后二次生成仍未正式交付。
 
 ## 文档索引
-- [`docs/v1-scope-freeze.md`](/D:/python/ecom-image-agent/docs/v1-scope-freeze.md)
-- [`docs/architecture.md`](/D:/python/ecom-image-agent/docs/architecture.md)
-- [`docs/api.md`](/D:/python/ecom-image-agent/docs/api.md)
-- [`docs/database-schema-v1.md`](/D:/python/ecom-image-agent/docs/database-schema-v1.md)
-- [`docs/storage.md`](/D:/python/ecom-image-agent/docs/storage.md)
-- [`docs/frontend-workbench.md`](/D:/python/ecom-image-agent/docs/frontend-workbench.md)
-- [`docs/codebase-file-map.md`](/D:/python/ecom-image-agent/docs/codebase-file-map.md)
-- [`docs/development-rules.md`](/D:/python/ecom-image-agent/docs/development-rules.md)
+- `docs/v1-scope-freeze.md`
+- `docs/task-migration-plan.md`
+- `docs/cos-integration.md`
+- `docs/architecture.md`
+- `docs/api.md`
+- `docs/database-schema-v1.md`
+- `docs/storage.md`
+- `docs/frontend-workbench.md`
+- `docs/codebase-file-map.md`
+- `docs/development-rules.md`
 
 ## 协作规范
-仓库级执行规范见 [`AGENTS.md`](/D:/python/ecom-image-agent/AGENTS.md)。
+仓库级执行规范见 `AGENTS.md`。

@@ -40,6 +40,7 @@ from backend.repositories.db.user_repository import UserRepository
 from backend.repositories.task_repository import TaskRepository
 from backend.schemas.detail import DetailPageAssetRef, DetailPageRenderResult
 from backend.schemas.task import TaskSummary
+from backend.services.storage.cos_service import CosService
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +67,7 @@ class TaskDbMirrorService:
         self.settings = get_settings()
         self.session_factory = get_async_session_factory()
         self.local_repo = TaskRepository()
+        self.cos_service = CosService()
 
     async def create_task_record(
         self,
@@ -301,6 +303,15 @@ class TaskDbMirrorService:
         relative_path = self._relative_task_path(asset_input.local_path)
         mime_type = self._guess_mime_type(asset_input.local_path)
         width, height = self._read_image_size(asset_input.local_path, asset_input.width, asset_input.height)
+        cos_key = self._sync_file_to_cos_if_enabled(
+            local_path=asset_input.local_path,
+            user_id=user_id,
+            task_id=task_id,
+            kind="inputs",
+            file_name=asset_input.file_name or relative_path,
+            mime_type=mime_type,
+            fallback_key=relative_path,
+        )
         source_task_result_id = await self._resolve_source_task_result_id(
             result_repo=result_repo,
             source_task_id=asset_input.source_task_id,
@@ -314,7 +325,7 @@ class TaskDbMirrorService:
             source_type=asset_input.source_type,
             source_task_result_id=source_task_result_id,
             file_name=asset_input.file_name,
-            cos_key=relative_path,
+            cos_key=cos_key,
             mime_type=mime_type,
             size_bytes=asset_input.local_path.stat().st_size,
             sha256=self._sha256(asset_input.local_path),
@@ -341,6 +352,11 @@ class TaskDbMirrorService:
         if source_uuid is None:
             return None
         result = await result_repo.find_by_task_and_cos_key(source_uuid, cos_key=source_result_file)
+        if result is None:
+            for candidate in await result_repo.list_by_task(source_uuid):
+                if (candidate.render_meta or {}).get("local_relative_path") == source_result_file:
+                    result = candidate
+                    break
         return result.id if result is not None else None
 
     def _build_result_rows(
@@ -377,6 +393,16 @@ class TaskDbMirrorService:
         for index, path in enumerate(image_paths, start=1):
             relative_path = path.relative_to(task_dir).as_posix()
             width, height = self._read_image_size(path)
+            mime_type = self._guess_mime_type(path)
+            cos_key = self._sync_file_to_cos_if_enabled(
+                local_path=path,
+                user_id=user_id,
+                task_id=task_uuid,
+                kind="results",
+                file_name=relative_path,
+                mime_type=mime_type,
+                fallback_key=relative_path,
+            )
             rows.append(
                 TaskResult(
                     id=self._uuid5(f"task-result:{task_id}:{relative_path}"),
@@ -385,13 +411,13 @@ class TaskDbMirrorService:
                     result_type=result_type,
                     shot_no=index,
                     status=TaskResultStatus.SUCCEEDED.value,
-                    cos_key=relative_path,
-                    mime_type=self._guess_mime_type(path),
+                    cos_key=cos_key,
+                    mime_type=mime_type,
                     size_bytes=path.stat().st_size,
                     sha256=self._sha256(path),
                     width=width,
                     height=height,
-                    render_meta={"source": "local_file"},
+                    render_meta={"source": "cos" if self.cos_service.is_enabled() else "local_file", "local_relative_path": relative_path},
                     is_primary=index == 1,
                 )
             )
@@ -430,6 +456,16 @@ class TaskDbMirrorService:
             if not image_path.exists():
                 continue
             width, height = self._read_image_size(image_path, render_row.width, render_row.height)
+            mime_type = self._guess_mime_type(image_path)
+            cos_key = self._sync_file_to_cos_if_enabled(
+                local_path=image_path,
+                user_id=user_id,
+                task_id=task_uuid,
+                kind="results",
+                file_name=render_row.relative_path,
+                mime_type=mime_type,
+                fallback_key=render_row.relative_path,
+            )
             rows.append(
                 TaskResult(
                     id=self._uuid5(f"task-result:{task_id}:{render_row.relative_path}"),
@@ -439,8 +475,8 @@ class TaskDbMirrorService:
                     page_no=index,
                     version_no=max(1, render_row.retry_count + 1),
                     status=TaskResultStatus.SUCCEEDED.value,
-                    cos_key=render_row.relative_path,
-                    mime_type=self._guess_mime_type(image_path),
+                    cos_key=cos_key,
+                    mime_type=mime_type,
                     size_bytes=image_path.stat().st_size,
                     sha256=self._sha256(image_path),
                     width=width,
@@ -451,6 +487,8 @@ class TaskDbMirrorService:
                         "model_name": render_row.model_name,
                         "reference_roles": render_row.reference_roles,
                         "retry_count": render_row.retry_count,
+                        "source": "cos" if self.cos_service.is_enabled() else "local_file",
+                        "local_relative_path": render_row.relative_path,
                     },
                     is_primary=index == 1,
                 )
@@ -666,6 +704,30 @@ class TaskDbMirrorService:
         if suffix == ".webp":
             return "image/webp"
         return "image/png"
+
+    def _sync_file_to_cos_if_enabled(
+        self,
+        *,
+        local_path: Path,
+        user_id: uuid.UUID,
+        task_id: uuid.UUID,
+        kind: str,
+        file_name: str,
+        mime_type: str,
+        fallback_key: str,
+    ) -> str:
+        """COS 启用时上传文件并返回对象 key；否则保持本地相对路径兼容。"""
+
+        if not self.cos_service.is_enabled():
+            return fallback_key
+        cos_key = self.cos_service.build_task_object_key(
+            user_id=user_id,
+            task_id=task_id,
+            kind=kind,
+            file_name=file_name,
+        )
+        self.cos_service.upload_file(local_path=local_path, key=cos_key, mime_type=mime_type)
+        return cos_key
 
     def _read_image_size(
         self,

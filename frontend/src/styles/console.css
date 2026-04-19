@@ -111,6 +111,24 @@ a {
   font-size: 13px;
 }
 
+.topbar-user {
+  max-width: 180px;
+  overflow: hidden;
+  color: #334155;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar-logout-btn {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid #cfd9ee;
+  border-radius: 999px;
+  background: #fff;
+  color: #2946a7;
+  cursor: pointer;
+}
+
 .status-pill {
   padding: 6px 10px;
   border-radius: 999px;
@@ -162,6 +180,7 @@ a {
 .filter-bar select,
 select,
 input[type="text"],
+input[type="email"],
 input[type="password"] {
   height: var(--control-height);
   border-radius: 10px;
@@ -184,6 +203,12 @@ input[type="password"] {
   background: #fff;
   border-color: #cfd9ee;
   color: #2946a7;
+}
+
+.btn-primary:disabled,
+.btn-secondary:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
 }
 
 .section-card {
@@ -238,6 +263,65 @@ input[type="password"] {
   border: 1px solid #d2dcf2;
   background: #fff;
   padding: 0 10px;
+}
+
+.login-shell {
+  display: grid;
+  place-items: center;
+}
+
+.login-card {
+  width: min(440px, calc(100vw - 40px));
+}
+
+.login-card h2 {
+  margin: 0;
+  font-size: 28px;
+}
+
+.login-card p {
+  margin: 10px 0 0;
+  color: var(--sub);
+  line-height: 1.6;
+}
+
+.login-form {
+  margin-top: 18px;
+  display: grid;
+  gap: 12px;
+}
+
+.login-field {
+  display: grid;
+  gap: 8px;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.login-field .input,
+.login-form .btn-primary {
+  width: 100%;
+}
+
+.form-error {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #fecaca;
+  border-radius: 12px;
+  background: #fef2f2;
+  color: #991b1b;
+  font-size: 13px;
+}
+
+.login-footer {
+  margin-top: 16px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #2946a7;
+  font-size: 14px;
+  font-weight: 700;
 }
 
 @media (max-width: 1440px) {

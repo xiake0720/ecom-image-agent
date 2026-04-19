@@ -15,7 +15,7 @@ from backend.db.enums import TaskType
 from backend.db.models.user import User
 from backend.engine.core.config import get_settings
 from backend.engine.core.paths import ensure_task_dirs
-from backend.engine.domain.asset import AssetType
+from backend.engine.domain.asset import Asset, AssetType
 from backend.engine.domain.task import Task, TaskStatus
 from backend.engine.services.storage.local_storage import LocalStorageService
 from backend.engine.workflows.graph import run_workflow
@@ -88,6 +88,7 @@ class MainImageService:
             uploads_payload.append((file.filename or "style.png", await file.read(), AssetType.BACKGROUND_STYLE))
 
         assets = self.storage.save_uploads(task_id, uploads_payload)
+        self.storage.save_json_artifact(task_id, "inputs/asset_manifest.json", assets)
         initial_state: WorkflowState = {
             "task": task,
             "assets": assets,
@@ -133,7 +134,48 @@ class MainImageService:
         )
         return PreparedMainImageTask(summary=summary, initial_state=initial_state)
 
-    def run_prepared_task(self, prepared: PreparedMainImageTask) -> None:
+    def load_prepared_task(self, task_id: str) -> PreparedMainImageTask:
+        """从已落盘任务目录重建 Celery worker 可执行状态。"""
+
+        task_dirs = ensure_task_dirs(task_id)
+        task_path = task_dirs["task"] / "task.json"
+        if not task_path.exists():
+            raise FileNotFoundError(f"主图任务 manifest 不存在: {task_id}")
+        task = Task.model_validate_json(task_path.read_text(encoding="utf-8"))
+        asset_manifest_path = task_dirs["inputs"] / "asset_manifest.json"
+        if asset_manifest_path.exists():
+            assets = [Asset.model_validate(item) for item in self._load_json_list(asset_manifest_path)]
+        else:
+            assets = self._scan_input_assets(task_id)
+        settings = get_settings()
+        summary = self.repo.get_task(task_id) or self.repo.create_task_summary(
+            task_id=task_id,
+            task_type="main_image",
+            status=task.status.value,
+            title=task.product_name,
+            platform=task.platform,
+            result_path=str(task_dirs["final"]),
+            created_at=task.created_at,
+            provider_label=settings.resolve_image_provider_route().label,
+            model_label=settings.resolve_image_model_selection().label,
+        )
+        initial_state: WorkflowState = {
+            "task": task,
+            "assets": assets,
+            "logs": [
+                format_workflow_log(
+                    task_id=task_id,
+                    node_name="celery_worker",
+                    event="loaded",
+                    detail="Celery worker 已从任务目录恢复主图任务",
+                )
+            ],
+            "cache_enabled": bool(settings.enable_node_cache),
+            "ignore_cache": False,
+        }
+        return PreparedMainImageTask(summary=summary, initial_state=initial_state)
+
+    def run_prepared_task(self, prepared: PreparedMainImageTask, *, raise_on_error: bool = False) -> None:
         """在后台线程执行已准备好的主图任务。"""
 
         initial_state = prepared.initial_state
@@ -160,6 +202,8 @@ class MainImageService:
                 self.repo.save_runtime_task(failed_task)
                 self.db_mirror.sync_runtime_from_local_sync(task_id=failed_task.task_id, task_type=TaskType.MAIN_IMAGE)
             logger.exception("主图任务失败 task_id=%s node=%s", task.task_id, exc.node_name)
+            if raise_on_error:
+                raise
         except Exception as exc:  # pragma: no cover - 兜底逻辑
             logger.exception("主图任务出现未处理异常 task_id=%s", task.task_id)
             failed_task = task.model_copy(
@@ -174,8 +218,48 @@ class MainImageService:
             self.storage.save_task_manifest(failed_task)
             self.repo.save_runtime_task(failed_task)
             self.db_mirror.sync_runtime_from_local_sync(task_id=failed_task.task_id, task_type=TaskType.MAIN_IMAGE)
+            if raise_on_error:
+                raise
 
     def build_result_dir(self, task_id: str) -> Path:
         """返回任务最终图片目录。"""
 
         return ensure_task_dirs(task_id)["final"]
+
+    def _load_json_list(self, path: Path) -> list[dict[str, object]]:
+        """读取 Pydantic 列表产物。"""
+
+        import json
+
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, list) else []
+
+    def _scan_input_assets(self, task_id: str) -> list[Asset]:
+        """兼容历史任务：没有 asset_manifest 时从 inputs 目录推导素材。"""
+
+        inputs_dir = ensure_task_dirs(task_id)["inputs"]
+        image_paths = sorted(
+            [path for path in inputs_dir.iterdir() if path.is_file() and path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}],
+            key=lambda item: item.name,
+        )
+        assets: list[Asset] = []
+        for index, path in enumerate(image_paths, start=1):
+            asset_type = AssetType.WHITE_BG if index == 1 else AssetType.DETAIL
+            assets.append(
+                Asset(
+                    asset_id=f"asset-{index:02d}",
+                    filename=path.name,
+                    local_path=str(path),
+                    mime_type=self._guess_mime_type(path),
+                    asset_type=asset_type,
+                )
+            )
+        return assets
+
+    def _guess_mime_type(self, path: Path) -> str:
+        suffix = path.suffix.lower()
+        if suffix in {".jpg", ".jpeg"}:
+            return "image/jpeg"
+        if suffix == ".webp":
+            return "image/webp"
+        return "image/png"

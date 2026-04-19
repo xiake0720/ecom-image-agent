@@ -11,6 +11,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.db.base import Base
 from backend.db.enums import (
+    ImageEditMode,
+    ImageEditSelectionType,
+    ImageEditStatus,
     TaskAssetScanStatus,
     TaskEventLevel,
     TaskQcStatus,
@@ -187,4 +190,69 @@ class TaskUsageRecord(Base, UUIDPrimaryKeyMixin, CreatedAtMixin):
     cost_currency: Mapped[str] = mapped_column(sa.String(length=10), nullable=False, default="CNY", server_default="CNY")
     success: Mapped[bool] = mapped_column(sa.Boolean(), nullable=False, default=True, server_default=sa.true())
     error_code: Mapped[str | None] = mapped_column(sa.String(length=100), nullable=True)
+    metadata_json: Mapped[dict[str, object] | None] = mapped_column("metadata", JSONB_TYPE, nullable=True)
+
+
+class ImageEdit(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """Single-result edit request and execution record."""
+
+    __tablename__ = "image_edits"
+    __table_args__ = (
+        sa.CheckConstraint(
+            "selection_type IN ('rectangle', 'mask')",
+            name="image_edits_selection_type",
+        ),
+        sa.CheckConstraint(
+            "status IN ('pending', 'queued', 'running', 'succeeded', 'failed', 'cancelled')",
+            name="image_edits_status",
+        ),
+        sa.CheckConstraint(
+            "mode IN ('native_inpainting', 'full_image_constrained_regeneration')",
+            name="image_edits_mode",
+        ),
+        sa.Index("ix_image_edits_source_result_id_created_at", "source_result_id", "created_at"),
+        sa.Index("ix_image_edits_user_id_created_at", "user_id", "created_at"),
+        sa.Index("ix_image_edits_edit_task_id", "edit_task_id"),
+        sa.Index("ix_image_edits_edited_result_id", "edited_result_id"),
+    )
+
+    source_result_id: Mapped[uuid.UUID] = mapped_column(
+        UUID_TYPE,
+        sa.ForeignKey("task_results.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    edit_task_id: Mapped[uuid.UUID] = mapped_column(
+        UUID_TYPE,
+        sa.ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID_TYPE, sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    edited_result_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID_TYPE,
+        sa.ForeignKey("task_results.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    selection_type: Mapped[str] = mapped_column(
+        sa.String(length=32),
+        nullable=False,
+        default=ImageEditSelectionType.RECTANGLE.value,
+        server_default=ImageEditSelectionType.RECTANGLE.value,
+    )
+    selection: Mapped[dict[str, object]] = mapped_column(JSONB_TYPE, nullable=False)
+    instruction: Mapped[str] = mapped_column(sa.Text(), nullable=False)
+    mode: Mapped[str] = mapped_column(
+        sa.String(length=64),
+        nullable=False,
+        default=ImageEditMode.FULL_IMAGE_CONSTRAINED_REGENERATION.value,
+        server_default=ImageEditMode.FULL_IMAGE_CONSTRAINED_REGENERATION.value,
+    )
+    status: Mapped[str] = mapped_column(
+        sa.String(length=32),
+        nullable=False,
+        default=ImageEditStatus.QUEUED.value,
+        server_default=ImageEditStatus.QUEUED.value,
+    )
+    error_message: Mapped[str | None] = mapped_column(sa.Text(), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     metadata_json: Mapped[dict[str, object] | None] = mapped_column("metadata", JSONB_TYPE, nullable=True)

@@ -8,7 +8,7 @@
 - `alembic/`：数据库迁移脚本
 
 当前正式后端存在两条并行主线：
-- 任务执行主线：继续使用本地文件系统 + JSON 索引 + 任务目录产物
+- 任务执行主线：继续使用本地文件系统 + JSON 索引 + 任务目录产物，执行调度可选 Celery + Redis
 - 元数据与用户主线：使用 PostgreSQL + SQLAlchemy Async + Alembic
 
 ## 2. FastAPI 分层
@@ -26,6 +26,8 @@
   - v1 认证 API
 - `backend/api/v1/tasks.py`
   - v1 历史任务查询 API
+- `backend/api/v1/storage.py`
+  - v1 文件预签名上传与签名下载 API
 - `backend/api/dependencies.py`
   - `get_db_session`
   - `get_auth_service`
@@ -42,6 +44,14 @@
 - 任务数据库兼容层：
   - `backend/services/task_db_mirror_service.py`
   - 负责把旧 JSON / 文件任务元数据镜像写入 PostgreSQL
+- 文件存储服务：
+  - `backend/services/storage/cos_service.py`
+  - `backend/services/storage/upload_guard_service.py`
+  - `backend/services/storage/storage_service.py`
+  - 负责 COS 预签名上传、签名下载、文件校验和本地兼容 URL
+- Celery 执行状态服务：
+  - `backend/services/task_execution_state_service.py`
+  - 负责 worker 外层的 running、retry、failed 状态和事件写入
 - v1 任务查询服务：
   - `backend/services/task_query_service.py`
   - 负责按用户隔离读取 `tasks`、`task_events`、`task_results`
@@ -75,12 +85,25 @@
 - 历史任务查询
 - 关键任务事件
 - 结果摘要与结果文件元数据
+- 私有文件签名上传 / 签名下载
 
 数据库当前尚未承载：
 - 任务文件二进制
-- 真实任务执行调度
+- 任务队列本身
 - 旧 JSON 索引的完全替代
 - provider 全量 usage 自动落库
+- COS 上传完成确认状态
+
+### 3.3 Redis / Celery
+Celery + Redis 是阶段 4 新增的可选任务调度层：
+- `backend/workers/celery_app.py` 创建 Celery app
+- `backend/workers/tasks/main_image_tasks.py` 执行主图任务
+- `backend/workers/tasks/detail_page_tasks.py` 执行详情图任务
+- `backend/workers/tasks/image_edit_tasks.py` 执行单图局部编辑任务
+- Redis 默认作为 broker 和 result backend
+- `ECOM_CELERY_ENABLED=false` 时继续使用旧进程内队列 fallback
+
+Celery 只替换执行调度，不替换本地任务目录、旧 runtime 聚合和数据库任务镜像。
 
 ## 4. 认证架构
 ### 4.1 登录态设计
@@ -88,6 +111,8 @@
 - Refresh token：HttpOnly cookie + 数据库哈希存储
 - 密码哈希：`scrypt`
 - 当前用户依赖：`get_current_user`
+- 前端通过 `AuthProvider` 保存 access token，并由统一 HTTP client 注入 Bearer token
+- refresh cookie 依赖 CORS credentials，`ECOM_CORS_ORIGINS` 必须配置明确 origin
 
 ### 4.2 审计
 当前已记录以下动作：
@@ -123,11 +148,26 @@
 - 工作流入口：`backend/engine/workflows/graph.py`
 - 服务入口：`backend/services/main_image_service.py`
 - runtime 聚合：`backend/services/task_runtime_service.py`
+- Celery task：`backend/workers/tasks/main_image_tasks.py`
 
 ### 6.2 详情图系统
 - 工作流入口：`backend/engine/workflows/detail_graph.py`
 - 服务入口：`backend/services/detail_page_job_service.py`
 - runtime 聚合：`backend/services/detail_runtime_service.py`
+- Celery task：`backend/workers/tasks/detail_page_tasks.py`
+
+### 6.3 执行调度
+- 默认模式：API 创建任务后提交旧进程内队列。
+- Celery 模式：API 创建任务和数据库镜像后提交 Celery，worker 根据 `task_id` 从任务目录恢复输入并执行原 workflow。
+- 两种模式共用同一套本地任务目录、runtime 聚合和数据库兼容写入。
+
+### 6.4 单图二次编辑
+- API 入口：`POST /api/v1/results/{result_id}/edits`、`GET /api/v1/results/{result_id}/edits`
+- 服务入口：`backend/services/image_edit_service.py`
+- 数据表：`image_edits`、`tasks(task_type=image_edit)`、`task_results(result_type=image_edit)`
+- Celery task：`backend/workers/tasks/image_edit_tasks.py`
+- 当前 provider 未暴露原生 inpainting，执行模式明确写入 `full_image_constrained_regeneration`
+- 编辑结果以派生版本写入 `task_results.parent_result_id`
 
 ## 7. 存储结构
 ### 7.1 本地文件与 JSON
@@ -136,9 +176,16 @@
 
 ### 7.2 PostgreSQL
 - 结构定义见 `docs/database-schema-v1.md`
-- `cos_key` 当前保存任务目录内的相对路径，占位未来对象存储键
+- `cos_key` 在本地兼容模式保存任务目录相对路径，在 COS 模式保存对象 key
 - 当前不存文件二进制
 - 当前不替代现有任务文件落盘逻辑
+
+### 7.3 腾讯云 COS
+- 配置见 `backend/core/config.py` 的 `ECOM_COS_*`
+- 预签名上传：`POST /api/v1/storage/presign`
+- 签名下载：`GET /api/v1/files/{file_id}/download-url`
+- 对象 key 规范：`users/{user_id}/tasks/{task_id}/{kind}/{filename}`
+- COS 未启用时，旧本地文件接口继续可用
 
 ## 8. deprecated / frozen 模块
 以下模块继续保留，但不属于当前正式主线：

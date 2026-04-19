@@ -1,32 +1,102 @@
+import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { useAuth } from "../hooks/useAuth";
+import { extractApiErrorMessage } from "../services/apiError";
 import "../styles/console.css";
 
-/**
- * 注册入口壳页。
- * 说明：当前仓库未接入真实鉴权 API，本页只冻结一期入口与页面边界。
- */
+/** 注册页：创建真实账号并立即进入登录态。 */
 export function RegisterPage() {
   const navigate = useNavigate();
+  const { register } = useAuth();
+  const [nickname, setNickname] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setErrorMessage("");
+    if (password !== confirmPassword) {
+      setErrorMessage("两次输入的密码不一致");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await register({ email, password, nickname: nickname || undefined });
+      navigate("/main-images", { replace: true });
+    } catch (error) {
+      setErrorMessage(extractApiErrorMessage(error));
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   return (
     <div className="console-shell login-shell">
-      <div className="section-card login-card">
+      <form className="section-card login-card" onSubmit={handleSubmit}>
         <h2>创建账号</h2>
-        <p>一期保留注册入口，当前仅提供前端页面壳，不接真实鉴权服务。</p>
+        <p>注册后即可创建主图 / 详情图任务，并在历史任务中按账号查看。</p>
         <div className="login-form">
-          <input className="input" placeholder="用户名" style={{ width: "100%" }} />
-          <input className="input" placeholder="手机号 / 邮箱" style={{ width: "100%" }} />
-          <input className="input" placeholder="密码" type="password" style={{ width: "100%" }} />
-          <input className="input" placeholder="确认密码" type="password" style={{ width: "100%" }} />
-          <button className="btn-primary" style={{ width: "100%" }} onClick={() => navigate("/login")}>
-            注册入口保留，返回登录
+          <label className="login-field">
+            昵称
+            <input
+              className="input"
+              placeholder="可选"
+              value={nickname}
+              onChange={(event) => setNickname(event.target.value)}
+              maxLength={100}
+            />
+          </label>
+          <label className="login-field">
+            邮箱
+            <input
+              className="input"
+              placeholder="user@example.com"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              required
+            />
+          </label>
+          <label className="login-field">
+            密码
+            <input
+              className="input"
+              placeholder="至少 8 位"
+              type="password"
+              autoComplete="new-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              minLength={8}
+              required
+            />
+          </label>
+          <label className="login-field">
+            确认密码
+            <input
+              className="input"
+              placeholder="再次输入密码"
+              type="password"
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={(event) => setConfirmPassword(event.target.value)}
+              minLength={8}
+              required
+            />
+          </label>
+          {errorMessage ? <p className="form-error">{errorMessage}</p> : null}
+          <button className="btn-primary" type="submit" disabled={submitting}>
+            {submitting ? "注册中..." : "注册并进入工作台"}
           </button>
         </div>
         <div className="login-footer">
           <Link to="/login">已有账号，去登录</Link>
-          <Link to="/main-images">返回工作台</Link>
         </div>
-      </div>
+      </form>
     </div>
   );
 }

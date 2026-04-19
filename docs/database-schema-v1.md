@@ -14,7 +14,7 @@
 - `updated_at` 通过数据库触发器 `set_updated_at_timestamp()` 自动更新
 - 文件二进制不入库，只存元数据和对象键
 - 所有任务相关表都带 `user_id`
-- 当前阶段 `cos_key` 保存任务目录相对路径，作为未来 COS 对象键占位字段
+- 本地兼容模式下 `cos_key` 保存任务目录相对路径；COS 模式下保存真实对象 key
 
 ## 3. 集中枚举
 定义位置：`backend/db/enums.py`
@@ -281,6 +281,32 @@
 - `ix_task_usage_records_user_id_created_at`
 - `ix_task_usage_records_provider_type_provider_name`
 
+### 5.6 image_edits
+| 字段 | 类型 | 约束 |
+| --- | --- | --- |
+| id | UUID | PK |
+| source_result_id | UUID | FK -> task_results.id, NOT NULL |
+| edit_task_id | UUID | FK -> tasks.id, NOT NULL |
+| user_id | UUID | FK -> users.id, NOT NULL |
+| edited_result_id | UUID | FK -> task_results.id, NULL |
+| selection_type | VARCHAR(32) | NOT NULL, `rectangle` / `mask` |
+| selection | JSONB | NOT NULL |
+| instruction | TEXT | NOT NULL |
+| mode | VARCHAR(64) | NOT NULL, `native_inpainting` / `full_image_constrained_regeneration` |
+| status | VARCHAR(32) | NOT NULL, `pending` / `queued` / `running` / `succeeded` / `failed` / `cancelled` |
+| error_message | TEXT | NULL |
+| started_at | TIMESTAMPTZ | NULL |
+| finished_at | TIMESTAMPTZ | NULL |
+| metadata | JSONB | NULL |
+| created_at | TIMESTAMPTZ | NOT NULL, default `now()` |
+| updated_at | TIMESTAMPTZ | NOT NULL, default `now()` |
+
+索引：
+- `ix_image_edits_source_result_id_created_at`
+- `ix_image_edits_user_id_created_at`
+- `ix_image_edits_edit_task_id`
+- `ix_image_edits_edited_result_id`
+
 ## 6. 自动更新时间方案
 更新触发器定义于 migration：
 - 函数：`set_updated_at_timestamp()`
@@ -290,6 +316,7 @@
   - `tasks`
   - `task_results`
   - `task_assets`
+  - `image_edits`
 
 这层方案保证：
 - ORM 更新会刷新 `updated_at`
@@ -299,4 +326,6 @@
 - 已正式接入业务：`users`、`refresh_tokens`、`audit_logs`、`idempotency_keys`
 - 已接入兼容双写：`tasks`、`task_assets`、`task_results`、`task_events`
 - 已提供预留写入服务：`task_usage_records`
+- 已接入阶段 6 单图编辑记录：`image_edits`
 - 当前任务 runtime 真源仍是本地文件和 JSON，数据库承担元数据镜像与历史查询职责
+- 已接入 COS key 兼容语义：本地模式保存相对路径，COS 模式保存 `users/{user_id}/tasks/{task_id}/{kind}/{filename}`

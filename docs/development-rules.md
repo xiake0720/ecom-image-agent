@@ -26,6 +26,8 @@
 - 页面行为 / 轮询逻辑变化：更新 `docs/frontend-workbench.md` 或 `docs/workflow.md`
 - 架构或目录职责变化：更新 `docs/architecture.md`、`docs/codebase-file-map.md`、`README.md`
 - 存储方案变化：更新 `docs/storage.md`、`docs/database-schema-v1.md`
+- COS 或文件访问规则变化：更新 `docs/cos-integration.md`、`docs/api.md`、`docs/storage.md`
+- 异步任务、worker、队列或 Redis 配置变化：更新 `docs/celery-task-architecture.md`、`docs/workflow.md`、`docs/architecture.md`
 - 开发规范或环境变量变化：更新 `docs/development-rules.md`、`README.md`、`AGENTS.md`
 
 ## 5. 环境变量要求
@@ -41,7 +43,11 @@
 - 不把文件二进制存进数据库
 - 不把强关系字段偷放进 JSONB
 - 兼容迁移阶段允许 JSON / 文件系统 与 PostgreSQL 并行存在
+- COS Secret 只能保存在后端环境变量，禁止下发前端
+- 文件下载必须先做用户归属校验，再返回签名 URL 或本地兼容 URL
 - 对外口径必须明确当前真源，不允许超实现承诺
+- Celery 只替换执行调度层时，必须保留本地任务目录和数据库镜像写入的一致性说明
+- 前端需要 refresh cookie 时，CORS 必须使用明确 origin 并开启 credentials，禁止用 `*` 作为正式跨域登录配置
 
 ## 7. 提交前检查项
 - 是否改动了 API、schema、状态字段或任务落盘结构？

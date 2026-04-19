@@ -43,6 +43,8 @@
 当前后端是双存储结构：
 - 用户认证与任务元数据镜像：PostgreSQL
 - 主图/详情图任务执行真源：本地文件系统 + JSON
+- 文件对象存储：可选启用腾讯云 COS，未启用时保留本地兼容模式
+- 异步任务执行：可选启用 Celery + Redis，未启用时保留进程内队列 fallback
 
 ## 目录结构
 ```text
@@ -54,12 +56,16 @@ backend/
   repositories/            # JSON 仓储与数据库仓储
   schemas/                 # Pydantic schema
   services/                # 后端业务编排层
+  workers/                 # Celery app 与异步任务入口
   engine/                  # 主图/详情图 workflow、provider、渲染、存储
   templates/               # 旧模板体系资源（已冻结）
 alembic/                   # 数据库迁移
+docker-compose.dev.yml     # 本地 PostgreSQL / Redis 依赖
 docs/                      # 项目事实文档
 frontend/
+  src/auth/                # 前端登录态 Provider 与路由守卫
   src/config/              # 前端范围开关与配置
+  src/hooks/               # 前端复用 hooks
   src/pages/               # 页面容器
   src/components/          # 复用 UI 组件
   src/services/            # API 调用层
@@ -85,12 +91,29 @@ cp .env.example .env
 alembic upgrade head
 ```
 
-### 4. 启动后端
+### 4. 启动本地依赖（可选）
+如果要使用 PostgreSQL 和 Redis 容器：
+```bash
+docker compose -f docker-compose.dev.yml up -d postgres redis
+```
+
+### 5. 启动后端
 ```bash
 uvicorn backend.main:app --reload --port 8000
 ```
 
-### 5. 启动前端
+### 6. 启动 Celery Worker（启用 Celery 时）
+Windows 本地建议：
+```bash
+celery -A backend.workers.celery_app.celery_app worker -l info -P solo
+```
+
+Linux / macOS：
+```bash
+celery -A backend.workers.celery_app.celery_app worker -l info
+```
+
+### 7. 启动前端
 ```bash
 cd frontend
 npm install
@@ -106,9 +129,30 @@ npm run dev
 定义位置：`backend/core/config.py`
 - `ECOM_API_PREFIX`
 - `ECOM_API_V1_PREFIX`
-- `ECOM_CORS_ORIGINS`
+- `ECOM_CORS_ORIGINS`（本地默认包含 `http://localhost:5173` 和 `http://127.0.0.1:5173`，用于携带 refresh cookie）
 - `ECOM_DATABASE_URL`
 - `ECOM_DATABASE_ECHO`
+- `ECOM_COS_ENABLED`
+- `ECOM_COS_SECRET_ID`
+- `ECOM_COS_SECRET_KEY`
+- `ECOM_COS_REGION`
+- `ECOM_COS_BUCKET`
+- `ECOM_COS_PUBLIC_HOST`
+- `ECOM_COS_SIGN_EXPIRE_SECONDS`
+- `ECOM_COS_MAX_IMAGE_SIZE_BYTES`
+- `ECOM_COS_ALLOWED_IMAGE_MIME_TYPES`
+- `ECOM_CELERY_ENABLED`
+- `ECOM_REDIS_URL`
+- `ECOM_CELERY_BROKER_URL`
+- `ECOM_CELERY_RESULT_BACKEND`
+- `ECOM_CELERY_TASK_ALWAYS_EAGER`
+- `ECOM_CELERY_TASK_SERIALIZER`
+- `ECOM_CELERY_ACCEPT_CONTENT`
+- `ECOM_CELERY_RESULT_SERIALIZER`
+- `ECOM_CELERY_TASK_TIME_LIMIT_SECONDS`
+- `ECOM_CELERY_TASK_SOFT_TIME_LIMIT_SECONDS`
+- `ECOM_CELERY_MAX_RETRIES`
+- `ECOM_CELERY_RETRY_COUNTDOWN_SECONDS`
 - `ECOM_AUTH_JWT_SECRET_KEY`
 - `ECOM_AUTH_ACCESS_TOKEN_EXPIRE_MINUTES`
 - `ECOM_AUTH_REFRESH_TOKEN_EXPIRE_DAYS`
@@ -146,6 +190,14 @@ npm run dev
 - `GET /api/v1/tasks/{task_id}/runtime`
 - `GET /api/v1/tasks/{task_id}/results`
 
+### v1 文件 API
+- `POST /api/v1/storage/presign`
+- `GET /api/v1/files/{file_id}/download-url`
+
+### v1 图片编辑 API
+- `POST /api/v1/results/{result_id}/edits`
+- `GET /api/v1/results/{result_id}/edits`
+
 ### 生成与旧任务 API
 - `GET /api/health`
 - `POST /api/image/generate-main`
@@ -165,13 +217,21 @@ npm run dev
 - 后端真实注册/登录/refresh/logout/me 已完成。
 - v1 历史任务接口已完成，支持分页、筛选和按用户隔离。
 - 主图/详情图任务当前采用“旧链路继续跑 + 数据库镜像写入”的兼容方案。
-- 前端 `/login` 和 `/register` 仍是壳层页面，尚未接入新认证 API。
-- 前端历史任务页仍在使用旧 `/api/tasks*` 接口，尚未切到 `/api/v1/tasks*`。
-- 单张图片局部标记后二次生成仍未正式交付。
+- 腾讯云 COS 预签名上传、签名下载和兼容写入已完成；本地开发默认仍走本地文件。
+- Celery + Redis 任务执行框架已完成；默认关闭，开启后主图/详情图任务提交到 Celery worker。
+- 单张图片局部标记后二次生成已接入 v1：支持矩形选区、编辑指令、`image_edit` 任务、编辑历史和派生结果版本。
+- 前端 `/login` 和 `/register` 已接入新认证 API，工作台路由已受登录态保护。
+- 前端历史任务页已切到 `/api/v1/tasks*`，支持分页、筛选、runtime 摘要和结果摘要查看。
+- 前端已提供 COS 直传 service，但主图 / 详情图页面仍使用旧 multipart 提交流程，完整直传切换待后续“先建任务 / 再直传 / 再触发生成”改造。
+- 当前图片编辑默认使用 `full_image_constrained_regeneration` fallback；原生 inpainting provider 和 brush/mask 留待后续。
 
 ## 文档索引
 - `docs/v1-scope-freeze.md`
 - `docs/task-migration-plan.md`
+- `docs/cos-integration.md`
+- `docs/celery-task-architecture.md`
+- `docs/image-edit-v1.md`
+- `docs/frontend-v1-pages.md`
 - `docs/architecture.md`
 - `docs/api.md`
 - `docs/database-schema-v1.md`

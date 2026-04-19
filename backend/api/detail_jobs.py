@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse
 
 from backend.api.dependencies import get_current_user_optional
+from backend.core.config import get_settings
 from backend.core.exceptions import AppException
 from backend.core.response import success_response
 from backend.db.models.user import User
@@ -50,7 +51,7 @@ async def create_detail_job(
     prefer_main_result_first: bool = Form(default=True),
     current_user: Annotated[User | None, Depends(get_current_user_optional)] = None,
 ) -> dict[str, object]:
-    """创建详情图任务并执行完整 detail graph。"""
+    """创建详情图任务并提交 Celery 或本地 fallback 执行。"""
 
     payload = _build_payload(
         brand_name=brand_name,
@@ -80,7 +81,9 @@ async def create_detail_job(
         bg_ref_files=bg_ref_files,
         plan_only=False,
         current_user=current_user,
+        enqueue=False,
     )
+    _submit_detail_execution(task_id=result.task_id, plan_only=False)
     return success_response(result.model_dump(mode="json"), request.state.request_id, message="详情图任务已提交")
 
 
@@ -111,7 +114,7 @@ async def create_detail_plan(
     prefer_main_result_first: bool = Form(default=True),
     current_user: Annotated[User | None, Depends(get_current_user_optional)] = None,
 ) -> dict[str, object]:
-    """只生成规划、文案和 prompt，不执行渲染。"""
+    """提交只生成规划、文案和 prompt 的异步任务。"""
 
     payload = _build_payload(
         brand_name=brand_name,
@@ -141,8 +144,10 @@ async def create_detail_plan(
         bg_ref_files=bg_ref_files,
         plan_only=True,
         current_user=current_user,
+        enqueue=False,
     )
-    return success_response(result.model_dump(mode="json"), request.state.request_id, message="详情图规划任务已完成")
+    _submit_detail_execution(task_id=result.task_id, plan_only=True)
+    return success_response(result.model_dump(mode="json"), request.state.request_id, message="详情图规划任务已提交")
 
 
 @router.get("/{task_id}")
@@ -211,6 +216,18 @@ def _build_payload(
         extra_requirements=extra_requirements,
         prefer_main_result_first=prefer_main_result_first,
     )
+
+
+def _submit_detail_execution(*, task_id: str, plan_only: bool) -> None:
+    """根据配置把详情图任务提交到 Celery 或原本地执行方式。"""
+
+    settings = get_settings()
+    if settings.celery_enabled:
+        from backend.workers.tasks.detail_page_tasks import run_detail_page_task
+
+        run_detail_page_task.delay(task_id, plan_only)
+        return
+    service.enqueue_existing_task(task_id=task_id, plan_only=plan_only)
 
 
 def _safe_json_list(raw: str) -> list[str]:

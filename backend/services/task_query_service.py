@@ -233,14 +233,16 @@ class TaskQueryService:
             qc_status=result_row.qc_status,
             qc_score=float(result_row.qc_score) if result_row.qc_score is not None else None,
             is_primary=result_row.is_primary,
-            file_url=self._build_result_file_url(task_row=task_row, cos_key=result_row.cos_key),
+            file_url=self._build_result_file_url(task_row=task_row, result_row=result_row),
+            download_url_api=f"/api/v1/files/{result_row.id.hex}/download-url",
             created_at=result_row.created_at,
             updated_at=result_row.updated_at,
         )
 
-    def _build_result_file_url(self, *, task_row: DbTask, cos_key: str) -> str:
+    def _build_result_file_url(self, *, task_row: DbTask, result_row: TaskResult) -> str:
         task_id = task_row.id.hex
-        safe_key = quote(cos_key.replace("\\", "/"), safe="/")
+        local_key = str((result_row.render_meta or {}).get("local_relative_path") or result_row.cos_key)
+        safe_key = quote(local_key.replace("\\", "/"), safe="/")
         if task_row.task_type == TaskType.DETAIL_PAGE.value:
             return f"/api/detail/jobs/{task_id}/files/{safe_key}"
         return f"/api/tasks/{task_id}/files/{safe_key}"

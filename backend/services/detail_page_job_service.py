@@ -95,6 +95,7 @@ class DetailPageJobService:
         bg_ref_files: list[UploadFile],
         plan_only: bool,
         current_user: User | None,
+        enqueue: bool = True,
     ) -> DetailPageJobCreateResult:
         """创建详情图任务，根据模式立即执行或入队。"""
 
@@ -131,6 +132,9 @@ class DetailPageJobService:
             scene_ref_files=scene_ref_files,
             bg_ref_files=bg_ref_files,
         )
+        # Celery worker 只能接收 task_id，必须把恢复执行所需输入先落盘。
+        self.storage.save_json_artifact(task_id, "inputs/request_payload.json", payload)
+        self.storage.save_json_artifact(task_id, "inputs/asset_manifest.json", assets)
         initial_state: DetailWorkflowState = {
             "task": task,
             "detail_payload": payload.model_copy(),
@@ -183,13 +187,55 @@ class DetailPageJobService:
             initial_state=initial_state,
             plan_only=plan_only,
         )
+        if enqueue:
+            if plan_only:
+                self.run_prepared(prepared)
+            else:
+                detail_task_queue.enqueue(prepared, self.run_prepared)
+        return DetailPageJobCreateResult(task_id=task_id, status="created")
+
+    def enqueue_existing_task(self, *, task_id: str, plan_only: bool) -> None:
+        """本地 fallback：从任务目录恢复后交给原进程内执行方式。"""
+
+        prepared = self.load_prepared(task_id=task_id, plan_only=plan_only)
         if plan_only:
             self.run_prepared(prepared)
         else:
             detail_task_queue.enqueue(prepared, self.run_prepared)
-        return DetailPageJobCreateResult(task_id=task_id, status="created")
 
-    def run_prepared(self, prepared: PreparedDetailTask) -> None:
+    def load_prepared(self, *, task_id: str, plan_only: bool) -> PreparedDetailTask:
+        """从任务目录恢复 detail graph 执行状态，供 Celery worker 使用。"""
+
+        task_dir = get_task_dir(task_id)
+        task_path = task_dir / "task.json"
+        if not task_path.exists():
+            raise FileNotFoundError(f"详情图任务 manifest 不存在: {task_id}")
+        task = Task.model_validate_json(task_path.read_text(encoding="utf-8"))
+        payload = DetailPageJobCreatePayload.model_validate_json((task_dir / "inputs" / "request_payload.json").read_text(encoding="utf-8"))
+        asset_manifest_path = task_dir / "inputs" / "asset_manifest.json"
+        assets = self._load_detail_assets(asset_manifest_path) if asset_manifest_path.exists() else self._scan_detail_assets(task_id)
+        initial_state: DetailWorkflowState = {
+            "task": task,
+            "detail_payload": payload,
+            "detail_assets": assets,
+            "logs": [
+                format_detail_workflow_log(
+                    task_id=task_id,
+                    node_name="celery_worker",
+                    event="loaded",
+                    detail="Celery worker 已从任务目录恢复详情图任务",
+                )
+            ],
+            "error_message": "",
+        }
+        return PreparedDetailTask(
+            task_id=task_id,
+            summary_title=task.product_name,
+            initial_state=initial_state,
+            plan_only=plan_only,
+        )
+
+    def run_prepared(self, prepared: PreparedDetailTask, *, raise_on_error: bool = False) -> None:
         """执行 detail graph，并持续把运行态回写到 JSON 和数据库。"""
 
         initial_state = prepared.initial_state
@@ -216,6 +262,8 @@ class DetailPageJobService:
             if failed_task is not None:
                 self.repo.save_runtime_task(failed_task, task_type="detail_page_v2")
                 self.db_mirror.sync_runtime_from_local_sync(task_id=failed_task.task_id, task_type=TaskType.DETAIL_PAGE)
+            if raise_on_error:
+                raise
         except Exception as exc:  # pragma: no cover - 兜底保护
             failed_task = task.model_copy(
                 update={
@@ -228,6 +276,8 @@ class DetailPageJobService:
             self.storage.save_task_manifest(failed_task)
             self.repo.save_runtime_task(failed_task, task_type="detail_page_v2")
             self.db_mirror.sync_runtime_from_local_sync(task_id=failed_task.task_id, task_type=TaskType.DETAIL_PAGE)
+            if raise_on_error:
+                raise
 
     async def _persist_assets(
         self,
@@ -292,3 +342,29 @@ class DetailPageJobService:
     def _ensure_detail_dirs(self, task_dir: Path) -> None:
         for name in ["inputs", "plan", "generated", "review", "qc", "exports"]:
             (task_dir / name).mkdir(parents=True, exist_ok=True)
+
+    def _load_detail_assets(self, path: Path) -> list[DetailPageAssetRef]:
+        import json
+
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, list):
+            return []
+        return [DetailPageAssetRef.model_validate(item) for item in payload if isinstance(item, dict)]
+
+    def _scan_detail_assets(self, task_id: str) -> list[DetailPageAssetRef]:
+        """兼容历史任务：没有 asset_manifest 时从 inputs 目录构造最小素材引用。"""
+
+        inputs_dir = get_task_dir(task_id) / "inputs"
+        image_paths = sorted(
+            [path for path in inputs_dir.iterdir() if path.is_file() and path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}],
+            key=lambda item: item.name,
+        )
+        return [
+            DetailPageAssetRef(
+                asset_id=f"asset-{index:03d}",
+                role="packaging" if index == 1 else "scene_ref",
+                file_name=path.name,
+                relative_path=f"inputs/{path.name}",
+            )
+            for index, path in enumerate(image_paths, start=1)
+        ]

@@ -1,8 +1,11 @@
-import type { TaskSummary } from "../../types/api";
+interface MainTaskOption {
+  task_id: string;
+  title: string | null;
+}
 
 interface DetailTaskSourcePickerProps {
   mainTaskId: string;
-  mainTaskOptions: TaskSummary[];
+  mainTaskOptions: MainTaskOption[];
   sourceState: "idle" | "loading" | "error" | "empty" | "ready";
   sourceMessage: string;
   importedCount: number;

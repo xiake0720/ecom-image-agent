@@ -18,6 +18,14 @@ class TaskAssetRepository(SqlAlchemyRepository):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_by_id_for_user(self, asset_id: uuid.UUID, *, user_id: uuid.UUID) -> TaskAsset | None:
+        stmt: Select[tuple[TaskAsset]] = select(TaskAsset).where(
+            TaskAsset.id == asset_id,
+            TaskAsset.user_id == user_id,
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def list_by_task(self, task_id: uuid.UUID) -> list[TaskAsset]:
         stmt: Select[tuple[TaskAsset]] = select(TaskAsset).where(TaskAsset.task_id == task_id).order_by(TaskAsset.sort_order.asc(), TaskAsset.created_at.asc())
         result = await self.session.execute(stmt)
