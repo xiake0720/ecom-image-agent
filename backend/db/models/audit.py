@@ -21,6 +21,7 @@ class AuditLog(Base, UUIDPrimaryKeyMixin, CreatedAtMixin):
         sa.Index("ix_audit_logs_user_id_created_at", "user_id", "created_at"),
         sa.Index("ix_audit_logs_action_created_at", "action", "created_at"),
         sa.Index("ix_audit_logs_request_id", "request_id"),
+        sa.Index("ix_audit_logs_payload_gin", "payload", postgresql_using="gin"),
     )
 
     user_id: Mapped[uuid.UUID | None] = mapped_column(UUID_TYPE, sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True)

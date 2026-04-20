@@ -38,12 +38,19 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
             "status IN ('pending', 'queued', 'running', 'succeeded', 'failed', 'partial_failed', 'cancelled')",
             name="tasks_status",
         ),
+        sa.CheckConstraint("progress_percent >= 0 AND progress_percent <= 100", name="progress_percent_range"),
+        sa.CheckConstraint("retry_count >= 0", name="retry_count_nonnegative"),
         sa.Index("ix_tasks_user_id_created_at", "user_id", "created_at"),
         sa.Index("ix_tasks_user_id_status", "user_id", "status"),
         sa.Index("ix_tasks_user_id_task_type", "user_id", "task_type"),
         sa.Index("ix_tasks_biz_id", "biz_id"),
         sa.Index("ix_tasks_source_task_id", "source_task_id"),
         sa.Index("ix_tasks_parent_task_id", "parent_task_id"),
+        sa.Index("ix_tasks_user_id_queued_at", "user_id", "queued_at"),
+        sa.Index("ix_tasks_input_summary_gin", "input_summary", postgresql_using="gin"),
+        sa.Index("ix_tasks_params_gin", "params", postgresql_using="gin"),
+        sa.Index("ix_tasks_runtime_snapshot_gin", "runtime_snapshot", postgresql_using="gin"),
+        sa.Index("ix_tasks_result_summary_gin", "result_summary", postgresql_using="gin"),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(UUID_TYPE, sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
@@ -63,6 +70,7 @@ class Task(Base, UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin):
     error_code: Mapped[str | None] = mapped_column(sa.String(length=100), nullable=True)
     error_message: Mapped[str | None] = mapped_column(sa.Text(), nullable=True)
     retry_count: Mapped[int] = mapped_column(sa.Integer(), nullable=False, default=0, server_default="0")
+    queued_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True), nullable=True)
 
@@ -80,11 +88,21 @@ class TaskResult(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             "qc_status IS NULL OR qc_status IN ('pending', 'passed', 'review_required', 'failed')",
             name="task_results_qc_status",
         ),
+        sa.CheckConstraint("page_no IS NULL OR page_no > 0", name="page_no_positive"),
+        sa.CheckConstraint("shot_no IS NULL OR shot_no > 0", name="shot_no_positive"),
+        sa.CheckConstraint("version_no > 0", name="version_no_positive"),
+        sa.CheckConstraint("size_bytes >= 0", name="size_bytes_nonnegative"),
+        sa.CheckConstraint("width IS NULL OR width >= 0", name="width_nonnegative"),
+        sa.CheckConstraint("height IS NULL OR height >= 0", name="height_nonnegative"),
+        sa.CheckConstraint("qc_score IS NULL OR (qc_score >= 0 AND qc_score <= 100)", name="qc_score_range"),
         sa.Index("ix_task_results_task_id_created_at", "task_id", "created_at"),
         sa.Index("ix_task_results_user_id_created_at", "user_id", "created_at"),
         sa.Index("ix_task_results_task_id_result_type", "task_id", "result_type"),
         sa.Index("ix_task_results_parent_result_id", "parent_result_id"),
         sa.Index("ix_task_results_task_id_page_no_shot_no", "task_id", "page_no", "shot_no"),
+        sa.Index("ix_task_results_prompt_plan_gin", "prompt_plan", postgresql_using="gin"),
+        sa.Index("ix_task_results_prompt_final_gin", "prompt_final", postgresql_using="gin"),
+        sa.Index("ix_task_results_render_meta_gin", "render_meta", postgresql_using="gin"),
     )
 
     task_id: Mapped[uuid.UUID] = mapped_column(UUID_TYPE, sa.ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
@@ -118,10 +136,18 @@ class TaskAsset(Base, UUIDPrimaryKeyMixin, TimestampMixin):
             "scan_status IN ('pending', 'clean', 'blocked')",
             name="task_assets_scan_status",
         ),
+        sa.CheckConstraint("length(role) > 0", name="role_nonempty"),
+        sa.CheckConstraint("length(source_type) > 0", name="source_type_nonempty"),
+        sa.CheckConstraint("size_bytes >= 0", name="size_bytes_nonnegative"),
+        sa.CheckConstraint("width IS NULL OR width >= 0", name="width_nonnegative"),
+        sa.CheckConstraint("height IS NULL OR height >= 0", name="height_nonnegative"),
+        sa.CheckConstraint("duration_ms IS NULL OR duration_ms >= 0", name="duration_ms_nonnegative"),
+        sa.CheckConstraint("sort_order >= 0", name="sort_order_nonnegative"),
         sa.Index("ix_task_assets_task_id_sort_order", "task_id", "sort_order"),
         sa.Index("ix_task_assets_user_id_created_at", "user_id", "created_at"),
         sa.Index("ix_task_assets_task_id_role", "task_id", "role"),
         sa.Index("ix_task_assets_source_task_result_id", "source_task_result_id"),
+        sa.Index("ix_task_assets_metadata_gin", "metadata", postgresql_using="gin"),
     )
 
     task_id: Mapped[uuid.UUID] = mapped_column(UUID_TYPE, sa.ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
@@ -154,6 +180,7 @@ class TaskEvent(Base, UUIDPrimaryKeyMixin, CreatedAtMixin):
         sa.Index("ix_task_events_task_id_created_at", "task_id", "created_at"),
         sa.Index("ix_task_events_user_id_created_at", "user_id", "created_at"),
         sa.Index("ix_task_events_task_id_event_type", "task_id", "event_type"),
+        sa.Index("ix_task_events_payload_gin", "payload", postgresql_using="gin"),
     )
 
     task_id: Mapped[uuid.UUID] = mapped_column(UUID_TYPE, sa.ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
@@ -170,9 +197,16 @@ class TaskUsageRecord(Base, UUIDPrimaryKeyMixin, CreatedAtMixin):
 
     __tablename__ = "task_usage_records"
     __table_args__ = (
+        sa.CheckConstraint("request_units IS NULL OR request_units >= 0", name="request_units_nonnegative"),
+        sa.CheckConstraint("prompt_tokens IS NULL OR prompt_tokens >= 0", name="prompt_tokens_nonnegative"),
+        sa.CheckConstraint("completion_tokens IS NULL OR completion_tokens >= 0", name="completion_tokens_nonnegative"),
+        sa.CheckConstraint("image_count IS NULL OR image_count >= 0", name="image_count_nonnegative"),
+        sa.CheckConstraint("latency_ms IS NULL OR latency_ms >= 0", name="latency_ms_nonnegative"),
+        sa.CheckConstraint("cost_amount IS NULL OR cost_amount >= 0", name="cost_amount_nonnegative"),
         sa.Index("ix_task_usage_records_task_id_created_at", "task_id", "created_at"),
         sa.Index("ix_task_usage_records_user_id_created_at", "user_id", "created_at"),
         sa.Index("ix_task_usage_records_provider_type_provider_name", "provider_type", "provider_name"),
+        sa.Index("ix_task_usage_records_metadata_gin", "metadata", postgresql_using="gin"),
     )
 
     task_id: Mapped[uuid.UUID] = mapped_column(UUID_TYPE, sa.ForeignKey("tasks.id", ondelete="CASCADE"), nullable=False)
@@ -214,6 +248,8 @@ class ImageEdit(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         sa.Index("ix_image_edits_user_id_created_at", "user_id", "created_at"),
         sa.Index("ix_image_edits_edit_task_id", "edit_task_id"),
         sa.Index("ix_image_edits_edited_result_id", "edited_result_id"),
+        sa.Index("ix_image_edits_selection_gin", "selection", postgresql_using="gin"),
+        sa.Index("ix_image_edits_metadata_gin", "metadata", postgresql_using="gin"),
     )
 
     source_result_id: Mapped[uuid.UUID] = mapped_column(

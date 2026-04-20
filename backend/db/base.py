@@ -21,4 +21,4 @@ class Base(DeclarativeBase):
     metadata = sa.MetaData(naming_convention=NAMING_CONVENTION)
 
 
-from backend.db.models import AuditLog, IdempotencyKey, RefreshToken, Task, TaskAsset, TaskEvent, TaskResult, TaskUsageRecord, User  # noqa: E402,F401
+from backend.db.models import AuditLog, IdempotencyKey, ImageEdit, RefreshToken, Task, TaskAsset, TaskEvent, TaskResult, TaskUsageRecord, User  # noqa: E402,F401

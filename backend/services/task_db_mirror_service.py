@@ -107,6 +107,7 @@ class TaskDbMirrorService:
             task_row.parent_task_id = self._parse_optional_task_id(parent_task_id)
             task_row.current_step = "queued"
             task_row.progress_percent = Decimal("0")
+            task_row.queued_at = task_row.queued_at or now
             task_row.input_summary = input_summary
             task_row.params = params
             task_row.runtime_snapshot = {

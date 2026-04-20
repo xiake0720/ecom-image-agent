@@ -95,6 +95,7 @@ class ImageEditService:
         source_result_uuid = self._parse_uuid(result_id, field_name="result_id")
         edit_task_id = uuid.uuid4()
         edit_id = uuid.uuid4()
+        now = self._utcnow()
         selection = payload.selection.model_dump(mode="json")
         execution_backend = self._resolve_execution_backend()
         mode = ImageEditMode.FULL_IMAGE_CONSTRAINED_REGENERATION.value
@@ -126,6 +127,7 @@ class ImageEditService:
                 parent_task_id=source_task.id,
                 current_step="queued",
                 progress_percent=Decimal("0"),
+                queued_at=now,
                 input_summary={
                     "source_result_id": source_result.id.hex,
                     "source_task_id": source_task.id.hex,
