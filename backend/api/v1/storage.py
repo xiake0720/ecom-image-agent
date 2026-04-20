@@ -6,10 +6,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
 
-from backend.api.dependencies import get_current_user
+from backend.api.dependencies import get_current_user, get_request_context
+from backend.core.rate_limit import rate_limit
+from backend.core.request_context import RequestContext
 from backend.core.response import success_response
+from backend.db.enums import AuditAction
 from backend.db.models.user import User
 from backend.schemas.storage import StoragePresignRequest
+from backend.services.audit_service import write_audit_log
 from backend.services.storage.storage_service import StorageService
 
 
@@ -21,6 +25,7 @@ service = StorageService()
 async def create_presigned_upload(
     payload: StoragePresignRequest,
     request: Request,
+    _rate_limited: Annotated[None, Depends(rate_limit("upload_presign"))],
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> dict[str, object]:
     """为当前用户任务生成图片直传 COS 的预签名 URL。"""
@@ -34,8 +39,17 @@ async def get_file_download_url(
     file_id: str,
     request: Request,
     current_user: Annotated[User, Depends(get_current_user)],
+    context: Annotated[RequestContext, Depends(get_request_context)],
 ) -> dict[str, object]:
     """校验文件归属后返回签名下载 URL。"""
 
     data = await service.create_download_url(current_user=current_user, file_id=file_id)
+    await write_audit_log(
+        action=AuditAction.RESULT_DOWNLOAD.value,
+        current_user=current_user,
+        context=context,
+        object_type=data.source_type,
+        object_id=data.file_id,
+        payload={"file_id": data.file_id, "task_id": data.task_id, "source_type": data.source_type},
+    )
     return success_response(data.model_dump(mode="json"), request.state.request_id)

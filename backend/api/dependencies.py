@@ -27,7 +27,13 @@ async def get_auth_service(session: Annotated[AsyncSession, Depends(get_db_sessi
 def get_request_context(request: Request) -> RequestContext:
     """提取审计和认证所需的请求上下文。"""
 
-    client_host = request.client.host if request.client is not None else None
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        client_host = forwarded_for.split(",", 1)[0].strip()
+    else:
+        client_host = request.headers.get("x-real-ip")
+    if not client_host:
+        client_host = request.client.host if request.client is not None else None
     return RequestContext(
         request_id=getattr(request.state, "request_id", ""),
         ip_address=client_host,

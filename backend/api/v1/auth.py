@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Request, Response
 
 from backend.api.dependencies import get_auth_service, get_current_user, get_request_context
 from backend.core.config import get_settings
+from backend.core.rate_limit import rate_limit
 from backend.core.request_context import RequestContext
 from backend.core.response import success_response
 from backend.core.security import clear_refresh_cookie, set_refresh_cookie
@@ -45,6 +46,7 @@ async def login(
     payload: LoginRequest,
     request: Request,
     response: Response,
+    _rate_limited: Annotated[None, Depends(rate_limit("auth_login"))],
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
     context: Annotated[RequestContext, Depends(get_request_context)],
 ) -> dict[str, object]:

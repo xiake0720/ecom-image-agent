@@ -397,7 +397,7 @@ class DetailPageJobCreatePayload(BaseModel):
     platform: str = "tmall"
     style_preset: str = "tea_tmall_premium_light"
     price_band: str = ""
-    target_slice_count: int = Field(default=8, ge=8, le=12)
+    target_slice_count: int = Field(default=8, ge=1, le=12)
     image_size: str = "2K"
     main_image_task_id: str = ""
     selected_main_result_ids: list[str] = Field(default_factory=list)

@@ -270,7 +270,7 @@ def test_runapi_gemini31_request_disables_environment_proxy(monkeypatch) -> None
         )
     )
 
-    result = provider._generate_single(
+    image_bytes, usage = provider._generate_single(
         shot_id="shot_01",
         prompt_text="test prompt",
         reference_assets=[],
@@ -280,7 +280,8 @@ def test_runapi_gemini31_request_disables_environment_proxy(monkeypatch) -> None
     )
 
     fake_session = session_state["session"]
-    assert result == b"fake-image-bytes"
+    assert image_bytes == b"fake-image-bytes"
+    assert usage is not None
     assert fake_session.trust_env is False
     assert fake_session.proxies == {}
 
@@ -350,7 +351,7 @@ def test_runapi_gemini31_supports_file_data_uri_response(monkeypatch) -> None:
         )
     )
 
-    result = provider._generate_single(
+    image_bytes, usage = provider._generate_single(
         shot_id="shot_01",
         prompt_text="test prompt",
         reference_assets=[],
@@ -360,7 +361,8 @@ def test_runapi_gemini31_supports_file_data_uri_response(monkeypatch) -> None:
     )
 
     sessions = session_state["sessions"]
-    assert result == b"downloaded-image-bytes"
+    assert image_bytes == b"downloaded-image-bytes"
+    assert usage is not None
     assert len(sessions) == 2
     assert sessions[0].calls == [("post", "https://runapi.co/v1/models/gemini-3.1-flash-image-preview:generateContent")]
     assert sessions[1].calls == [("get", "https://runapi.co/images/fake-generated.jpg")]
@@ -423,7 +425,7 @@ def test_banana2_google_official_sdk_uses_genai_client(monkeypatch, tmp_path: Pa
         )
     )
 
-    result = provider._generate_single(
+    image_bytes, usage = provider._generate_single(
         shot_id="shot_google_01",
         prompt_text="test prompt",
         reference_assets=[asset],
@@ -432,7 +434,8 @@ def test_banana2_google_official_sdk_uses_genai_client(monkeypatch, tmp_path: Pa
         image_size="2K",
     )
 
-    assert result == b"google-sdk-image-bytes"
+    assert image_bytes == b"google-sdk-image-bytes"
+    assert usage is not None
     assert sdk_state["api_key"] == "google-test-key"
     assert sdk_state["model"] == "gemini-3.1-flash-image-preview"
     assert provider.last_request_payloads["shot_google_01"]["transport"] == "google_official_sdk"
@@ -497,7 +500,7 @@ def test_banana2_falls_back_to_runapi_when_google_key_missing(monkeypatch) -> No
         )
     )
 
-    result = provider._generate_single(
+    image_bytes, usage = provider._generate_single(
         shot_id="shot_runapi_01",
         prompt_text="fallback prompt",
         reference_assets=[],
@@ -507,7 +510,8 @@ def test_banana2_falls_back_to_runapi_when_google_key_missing(monkeypatch) -> No
     )
 
     fake_session = session_state["session"]
-    assert result == b"runapi-fallback-image"
+    assert image_bytes == b"runapi-fallback-image"
+    assert usage is not None
     assert provider.last_request_payloads["shot_runapi_01"]["generationConfig"]["imageConfig"]["aspectRatio"] == "1:1"
     assert fake_session.trust_env is False
     assert fake_session.proxies == {}

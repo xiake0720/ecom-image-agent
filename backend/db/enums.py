@@ -15,6 +15,9 @@ class AuditAction(StrEnum):
     AUTH_REGISTER = "auth.register"
     AUTH_LOGIN = "auth.login"
     AUTH_LOGOUT = "auth.logout"
+    TASK_CREATE = "task.create"
+    RESULT_DOWNLOAD = "result.download"
+    IMAGE_EDIT_CREATE = "image_edit.create"
 
 
 class TaskType(StrEnum):

@@ -9,7 +9,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.api import assets, detail, detail_jobs, health, image, tasks, templates
+from backend.api import assets, detail, detail_jobs, health, image, monitoring, tasks, templates
 from backend.api.v1 import router as v1_router
 from backend.core.config import get_settings
 from backend.core.exceptions import AppException
@@ -39,6 +39,7 @@ app.include_router(tasks.router, prefix=settings.api_prefix)
 app.include_router(templates.router, prefix=settings.api_prefix)
 app.include_router(assets.router, prefix=settings.api_prefix)
 app.include_router(v1_router, prefix=settings.api_v1_prefix)
+app.include_router(monitoring.router)
 
 
 @app.exception_handler(AppException)
@@ -46,7 +47,20 @@ async def app_exception_handler(request: Request, exc: AppException) -> JSONResp
     """统一处理业务异常，返回受控错误信息。"""
 
     request_id = getattr(request.state, "request_id", "")
-    return JSONResponse(status_code=exc.status_code, content=error_response(exc.code, str(exc), request_id))
+    logger.warning(
+        "handled_app_exception request_id=%s method=%s path=%s status_code=%s code=%s message=%s",
+        request_id,
+        request.method,
+        request.url.path,
+        exc.status_code,
+        exc.code,
+        str(exc),
+    )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=error_response(exc.code, str(exc), request_id),
+        headers=exc.headers,
+    )
 
 
 @app.exception_handler(RequestValidationError)
@@ -54,6 +68,13 @@ async def request_validation_handler(request: Request, exc: RequestValidationErr
     """统一处理参数校验错误。"""
 
     request_id = getattr(request.state, "request_id", "")
+    logger.warning(
+        "request_validation_error request_id=%s method=%s path=%s errors=%s",
+        request_id,
+        request.method,
+        request.url.path,
+        exc.errors(),
+    )
     return JSONResponse(status_code=422, content=error_response(4220, f"参数校验失败: {exc.errors()}", request_id))
 
 
@@ -61,6 +82,12 @@ async def request_validation_handler(request: Request, exc: RequestValidationErr
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """兜底异常处理，避免向前端泄漏原始栈信息。"""
 
-    logger.exception("未处理异常: %s", exc)
     request_id = getattr(request.state, "request_id", "")
+    logger.exception(
+        "unhandled_exception request_id=%s method=%s path=%s error=%s",
+        request_id,
+        request.method,
+        request.url.path,
+        exc,
+    )
     return JSONResponse(status_code=500, content=error_response(5000, "服务内部错误，请稍后重试", request_id))

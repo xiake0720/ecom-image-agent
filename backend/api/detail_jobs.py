@@ -8,13 +8,17 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse
 
-from backend.api.dependencies import get_current_user_optional
+from backend.api.dependencies import get_current_user, get_request_context
 from backend.core.config import get_settings
 from backend.core.exceptions import AppException
+from backend.core.rate_limit import rate_limit
+from backend.core.request_context import RequestContext
 from backend.core.response import success_response
+from backend.db.enums import AuditAction, TaskType
 from backend.db.models.user import User
 from backend.repositories.task_repository import TaskRepository
 from backend.schemas.detail import DetailPageJobCreatePayload
+from backend.services.audit_service import write_audit_log
 from backend.services.detail_page_job_service import DetailPageJobService
 from backend.services.detail_runtime_service import DetailRuntimeService
 
@@ -49,7 +53,9 @@ async def create_detail_job(
     brew_suggestion: str = Form(default=""),
     extra_requirements: str = Form(default=""),
     prefer_main_result_first: bool = Form(default=True),
-    current_user: Annotated[User | None, Depends(get_current_user_optional)] = None,
+    _rate_limited: Annotated[None, Depends(rate_limit("task_create"))] = None,
+    current_user: Annotated[User, Depends(get_current_user)] = None,
+    context: Annotated[RequestContext, Depends(get_request_context)] = None,
 ) -> dict[str, object]:
     """创建详情图任务并提交 Celery 或本地 fallback 执行。"""
 
@@ -84,6 +90,14 @@ async def create_detail_job(
         enqueue=False,
     )
     _submit_detail_execution(task_id=result.task_id, plan_only=False)
+    await write_audit_log(
+        action=AuditAction.TASK_CREATE.value,
+        current_user=current_user,
+        context=context,
+        object_type="task",
+        object_id=result.task_id,
+        payload={"task_type": TaskType.DETAIL_PAGE.value, "task_id": result.task_id, "plan_only": False},
+    )
     return success_response(result.model_dump(mode="json"), request.state.request_id, message="详情图任务已提交")
 
 
@@ -112,7 +126,9 @@ async def create_detail_plan(
     brew_suggestion: str = Form(default=""),
     extra_requirements: str = Form(default=""),
     prefer_main_result_first: bool = Form(default=True),
-    current_user: Annotated[User | None, Depends(get_current_user_optional)] = None,
+    _rate_limited: Annotated[None, Depends(rate_limit("task_create"))] = None,
+    current_user: Annotated[User, Depends(get_current_user)] = None,
+    context: Annotated[RequestContext, Depends(get_request_context)] = None,
 ) -> dict[str, object]:
     """提交只生成规划、文案和 prompt 的异步任务。"""
 
@@ -147,6 +163,14 @@ async def create_detail_plan(
         enqueue=False,
     )
     _submit_detail_execution(task_id=result.task_id, plan_only=True)
+    await write_audit_log(
+        action=AuditAction.TASK_CREATE.value,
+        current_user=current_user,
+        context=context,
+        object_type="task",
+        object_id=result.task_id,
+        payload={"task_type": TaskType.DETAIL_PAGE.value, "task_id": result.task_id, "plan_only": True},
+    )
     return success_response(result.model_dump(mode="json"), request.state.request_id, message="详情图规划任务已提交")
 
 

@@ -24,6 +24,22 @@ class Settings(BaseSettings):
     api_prefix: str = "/api"
     api_v1_prefix: str = "/api/v1"
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173"])
+    max_request_body_size_bytes: int = 100 * 1024 * 1024
+
+    security_headers_enabled: bool = True
+    security_hsts_enabled: bool = False
+    security_hsts_max_age_seconds: int = 31536000
+
+    rate_limit_enabled: bool = True
+    rate_limit_login_requests: int = 10
+    rate_limit_login_window_seconds: int = 60
+    rate_limit_task_create_requests: int = 30
+    rate_limit_task_create_window_seconds: int = 60
+    rate_limit_upload_presign_requests: int = 60
+    rate_limit_upload_presign_window_seconds: int = 60
+
+    metrics_enabled: bool = True
+    readiness_check_redis: bool = True
 
     storage_root: Path = Path("storage")
     outputs_root: Path = Path("outputs/tasks")

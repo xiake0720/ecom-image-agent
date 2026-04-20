@@ -12,7 +12,7 @@
 - 任务可追溯
 - 文档与实现一致
 
-当前阶段不宣称生产可用。
+当前状态是“一期可上线候选”。正式发布前必须完成 `docs/security-checklist.md` 和 `docs/release-checklist.md`。
 
 ## 当前正式边界
 一期前端保留页面：
@@ -39,6 +39,8 @@
 - 数据库迁移：`alembic/`
 - 任务索引：`storage/tasks/index.json`
 - 任务产物：`outputs/tasks/{task_id}/`
+- 部署入口：`docker-compose.dev.yml` / `docker-compose.prod.yml`
+- 监控入口：`/metrics` + Prometheus/Grafana 模板
 
 当前后端是双存储结构：
 - 用户认证与任务元数据镜像：PostgreSQL
@@ -61,8 +63,12 @@ backend/
   templates/               # 旧模板体系资源（已冻结）
 alembic/                   # 数据库迁移
 docker-compose.dev.yml     # 本地 PostgreSQL / Redis 依赖
+docker-compose.prod.yml    # 一期生产 compose 模板
+Dockerfile.backend         # 后端镜像构建
+deploy/                    # Nginx / Prometheus / Grafana 配置
 docs/                      # 项目事实文档
 frontend/
+  Dockerfile               # 前端静态站点镜像构建
   src/auth/                # 前端登录态 Provider 与路由守卫
   src/config/              # 前端范围开关与配置
   src/hooks/               # 前端复用 hooks
@@ -77,7 +83,7 @@ outputs/tasks/             # 任务产物
 ## 本地启动
 ### 1. 安装依赖
 ```bash
-pip install -e .[dev]
+python -m pip install -e .[dev]
 ```
 
 ### 2. 配置环境变量
@@ -86,9 +92,13 @@ cp .env.example .env
 ```
 
 ### 3. 初始化数据库
-确保本机 PostgreSQL 已创建目标数据库，然后执行：
+确保本机 PostgreSQL 已创建目标数据库，然后执行任一命令：
 ```bash
 alembic upgrade head
+```
+
+```bash
+python scripts/migrate.py
 ```
 
 ### 4. 启动本地依赖（可选）
@@ -99,18 +109,18 @@ docker compose -f docker-compose.dev.yml up -d postgres redis
 
 ### 5. 启动后端
 ```bash
-uvicorn backend.main:app --reload --port 8000
+python -m uvicorn backend.main:app --reload --port 8000
 ```
 
 ### 6. 启动 Celery Worker（启用 Celery 时）
 Windows 本地建议：
 ```bash
-celery -A backend.workers.celery_app.celery_app worker -l info -P solo
+celery -A backend.workers.celery_app:celery_app worker -l info -P solo
 ```
 
 Linux / macOS：
 ```bash
-celery -A backend.workers.celery_app.celery_app worker -l info
+celery -A backend.workers.celery_app:celery_app worker -l info
 ```
 
 ### 7. 启动前端
@@ -123,6 +133,34 @@ npm run dev
 默认地址：
 - 后端：`http://127.0.0.1:8000`
 - 前端：`http://127.0.0.1:5173`
+- Liveness：`http://127.0.0.1:8000/api/health/live`
+- Readiness：`http://127.0.0.1:8000/api/health/ready`
+- Metrics：`http://127.0.0.1:8000/metrics`
+
+### 8. 创建初始账号（可选）
+当前没有角色/权限模型，脚本创建的是普通 active 用户，用于首轮冒烟测试：
+```bash
+python scripts/create_admin.py --email admin@example.com --nickname Admin
+```
+
+## Docker 启动
+### 本地基础依赖
+```bash
+docker compose -f docker-compose.dev.yml up -d postgres redis
+```
+
+### 生产模板
+先从 `.env.example` 生成 `.env` 并替换所有 `change-me-*` 密钥，再执行：
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+带监控组件：
+```bash
+docker compose -f docker-compose.prod.yml --profile monitoring up -d --build
+```
+
+生产部署说明见 `docs/deployment.md`。
 
 ## 环境变量
 ### FastAPI / 认证 / 数据库（`ECOM_`）
@@ -130,6 +168,19 @@ npm run dev
 - `ECOM_API_PREFIX`
 - `ECOM_API_V1_PREFIX`
 - `ECOM_CORS_ORIGINS`（本地默认包含 `http://localhost:5173` 和 `http://127.0.0.1:5173`，用于携带 refresh cookie）
+- `ECOM_MAX_REQUEST_BODY_SIZE_BYTES`
+- `ECOM_SECURITY_HEADERS_ENABLED`
+- `ECOM_SECURITY_HSTS_ENABLED`
+- `ECOM_SECURITY_HSTS_MAX_AGE_SECONDS`
+- `ECOM_RATE_LIMIT_ENABLED`
+- `ECOM_RATE_LIMIT_LOGIN_REQUESTS`
+- `ECOM_RATE_LIMIT_LOGIN_WINDOW_SECONDS`
+- `ECOM_RATE_LIMIT_TASK_CREATE_REQUESTS`
+- `ECOM_RATE_LIMIT_TASK_CREATE_WINDOW_SECONDS`
+- `ECOM_RATE_LIMIT_UPLOAD_PRESIGN_REQUESTS`
+- `ECOM_RATE_LIMIT_UPLOAD_PRESIGN_WINDOW_SECONDS`
+- `ECOM_METRICS_ENABLED`
+- `ECOM_READINESS_CHECK_REDIS`
 - `ECOM_DATABASE_URL`
 - `ECOM_DATABASE_ECHO`
 - `ECOM_COS_ENABLED`
@@ -200,6 +251,9 @@ npm run dev
 
 ### 生成与旧任务 API
 - `GET /api/health`
+- `GET /api/health/live`
+- `GET /api/health/ready`
+- `GET /metrics`
 - `POST /api/image/generate-main`
 - `GET /api/tasks`
 - `GET /api/tasks/{task_id}`
@@ -224,6 +278,26 @@ npm run dev
 - 前端历史任务页已切到 `/api/v1/tasks*`，支持分页、筛选、runtime 摘要和结果摘要查看。
 - 前端已提供 COS 直传 service，但主图 / 详情图页面仍使用旧 multipart 提交流程，完整直传切换待后续“先建任务 / 再直传 / 再触发生成”改造。
 - 当前图片编辑默认使用 `full_image_constrained_regeneration` fallback；原生 inpainting provider 和 brush/mask 留待后续。
+- 登录、任务创建、上传签名已接入基础限流；任务创建、下载签名、图片编辑已补审计。
+- 已提供 Nginx 反向代理、生产 compose、Prometheus scrape 配置和 Grafana dashboard 模板。
+
+## 验证
+本轮阶段 8 收尾验证结果：
+```bash
+python -m pytest
+# 31 passed
+
+cd frontend
+npm run build
+# built successfully
+```
+
+补充校验：
+- `python -m compileall backend`
+- `/api/health/live`、`/api/health/ready`、`/metrics` 均可由 TestClient 访问。
+- YAML/JSON 配置已做语法校验。
+
+当前环境没有 Docker CLI，容器构建与 `docker compose config` 需在部署机验证。
 
 ## 文档索引
 - `docs/v1-scope-freeze.md`
@@ -232,6 +306,10 @@ npm run dev
 - `docs/celery-task-architecture.md`
 - `docs/image-edit-v1.md`
 - `docs/frontend-v1-pages.md`
+- `docs/deployment.md`
+- `docs/security-checklist.md`
+- `docs/release-checklist.md`
+- `docs/phase8-final-report.md`
 - `docs/architecture.md`
 - `docs/api.md`
 - `docs/database-schema-v1.md`

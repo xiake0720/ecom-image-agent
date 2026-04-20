@@ -20,6 +20,8 @@ outputs/exports/*
 /outputs/
 /backend/outputs/*
 /frontend/node_modules/*
+/frontend/dist/
+/frontend/tsconfig.tsbuildinfo
 /backend/templates/
 /.jbeval/
 .idea
