@@ -104,6 +104,7 @@ class AuthService:
             )
 
             self.user_repo.add(user)
+            await self.session.flush()
             self.refresh_token_repo.add(refresh_record)
             self.audit_log_repo.add(
                 self._build_audit_log(
