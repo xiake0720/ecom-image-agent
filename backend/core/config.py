@@ -41,6 +41,13 @@ class Settings(BaseSettings):
     metrics_enabled: bool = True
     readiness_check_redis: bool = True
 
+    log_level: str = "INFO"
+    log_json: bool = False
+    log_http_access: bool = True
+    log_sqlalchemy: bool = False
+    log_file_enabled: bool = False
+    log_file_path: Path = Path("logs/backend.log")
+
     storage_root: Path = Path("storage")
     outputs_root: Path = Path("outputs/tasks")
     template_root: Path = Path("backend/templates")
@@ -125,6 +132,16 @@ class Settings(BaseSettings):
                 return json.loads(stripped)
             return [item.strip() for item in stripped.split(",") if item.strip()]
         return value
+
+    @field_validator("log_level")
+    @classmethod
+    def _normalize_log_level(cls, value: str) -> str:
+        """Normalize logging level names accepted by stdlib logging."""
+
+        normalized = value.strip().upper()
+        if normalized not in {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"}:
+            raise ValueError("log_level must be one of CRITICAL/ERROR/WARNING/INFO/DEBUG/NOTSET")
+        return normalized
 
     @field_validator("auth_refresh_cookie_samesite")
     @classmethod

@@ -11,6 +11,7 @@ import requests
 
 from backend.engine.core.config import Settings
 from backend.engine.core.logging import describe_proxy_status, summarize_text
+from backend.core.logging import format_log_event
 from backend.engine.domain.usage import ProviderUsageSnapshot, normalize_usage_snapshot
 from backend.engine.providers.llm.base import BaseTextProvider, StructuredModel
 
@@ -227,19 +228,40 @@ class OpenAICompatibleStructuredTextProvider(BaseTextProvider, ABC):
     ) -> StructuredModel:
         self.last_usage = ProviderUsageSnapshot.unavailable(request_count=1)
         logger.info(
-            "寮€濮嬭皟鐢ㄦ枃鏈ā鍨嬶紝provider=%s锛宮ode=%s锛屾ā鍨嬫爣绛?%s锛宮odel=%s锛宻chema=%s锛宲rompt鎽樿=%s",
-            self.provider_display_name,
-            self._resolve_route_mode(),
-            self.model_selection.label,
-            self.model_selection.model_id,
-            response_model.__name__,
-            summarize_text(prompt, limit=120),
+            format_log_event(
+                "provider_text_request_started",
+                provider=self.provider_display_name,
+                mode=self._resolve_route_mode(),
+                model=self.model_selection.model_id,
+                schema=response_model.__name__,
+                prompt_length=len(prompt),
+                system_prompt_length=len(system_prompt or ""),
+            )
         )
         if self._resolve_route_mode() != "real":
+            logger.error(
+                format_log_event(
+                    "provider_text_request_failed",
+                    provider=self.provider_display_name,
+                    mode=self._resolve_route_mode(),
+                    model=self.model_selection.model_id,
+                    schema=response_model.__name__,
+                    reason="provider_not_real_mode",
+                )
+            )
             raise RuntimeError(f"{self.provider_display_name} text provider cannot run in mock mode.")
 
         api_key = self._resolve_api_key()
         if not api_key:
+            logger.error(
+                format_log_event(
+                    "provider_text_request_failed",
+                    provider=self.provider_display_name,
+                    model=self.model_selection.model_id,
+                    schema=response_model.__name__,
+                    reason="missing_api_key",
+                )
+            )
             raise RuntimeError(self._missing_api_key_message())
 
         schema = response_model.model_json_schema()
@@ -268,12 +290,14 @@ class OpenAICompatibleStructuredTextProvider(BaseTextProvider, ABC):
         if response.status_code >= 400:
             self.last_usage = ProviderUsageSnapshot.unavailable(request_count=1, latency_ms=elapsed_ms)
             logger.error(
-                "%s text request failed. model=%s, status_code=%s, elapsed_seconds=%s, response_summary=%s",
-                self.provider_display_name,
-                self.model_selection.model_id,
-                response.status_code,
-                elapsed_text,
-                summarize_text(response.text, limit=320),
+                format_log_event(
+                    "provider_text_request_failed",
+                    provider=self.provider_display_name,
+                    model=self.model_selection.model_id,
+                    status_code=response.status_code,
+                    elapsed_ms=elapsed_ms,
+                    response_length=len(response.text),
+                )
             )
             raise RuntimeError(
                 f"{self.provider_display_name} text request failed: "
@@ -299,10 +323,15 @@ class OpenAICompatibleStructuredTextProvider(BaseTextProvider, ABC):
             result = response_model.model_validate(parsed)
         except ValidationError as exc:
             logger.warning(
-                "%s text schema validation failed. model=%s, raw_summary=%s",
-                self.provider_display_name,
-                self.model_selection.model_id,
-                summarize_text(content, limit=320),
+                format_log_event(
+                    "provider_text_request_failed",
+                    provider=self.provider_display_name,
+                    model=self.model_selection.model_id,
+                    schema=response_model.__name__,
+                    reason="schema_validation_failed",
+                    elapsed_ms=elapsed_ms,
+                    response_length=len(content),
+                )
             )
             raise RuntimeError(
                 f"{self.provider_display_name} text schema validation failed: "
@@ -310,11 +339,13 @@ class OpenAICompatibleStructuredTextProvider(BaseTextProvider, ABC):
             ) from exc
 
         logger.info(
-            "鏂囨湰妯″瀷璋冪敤鎴愬姛锛宲rovider=%s锛屾ā鍨嬫爣绛?%s锛宮odel=%s锛岃€楁椂=%ss",
-            self.provider_display_name,
-            self.model_selection.label,
-            self.model_selection.model_id,
-            elapsed_text,
+            format_log_event(
+                "provider_text_request_succeeded",
+                provider=self.provider_display_name,
+                model=self.model_selection.model_id,
+                schema=response_model.__name__,
+                elapsed_ms=elapsed_ms,
+            )
         )
         return result
 

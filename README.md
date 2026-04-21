@@ -112,6 +112,21 @@ docker compose -f docker-compose.dev.yml up -d postgres redis
 python -m uvicorn backend.main:app --reload --port 8000
 ```
 
+### 日志调试
+默认日志级别是 `INFO`，并开启后端 middleware access log。常用本地调试开关：
+```bash
+# 开启更详细日志
+ECOM_LOG_LEVEL=DEBUG python -m uvicorn backend.main:app --reload --port 8000
+
+# 打印 SQLAlchemy engine SQL
+ECOM_LOG_SQLALCHEMY=true python -m uvicorn backend.main:app --reload --port 8000
+
+# 写入滚动文件日志，默认路径 logs/backend.log
+ECOM_LOG_FILE_ENABLED=true ECOM_LOG_FILE_PATH=logs/backend.log python -m uvicorn backend.main:app --reload --port 8000
+```
+
+生产环境建议保持 `ECOM_LOG_LEVEL=INFO` 或 `WARNING`，按需开启 `ECOM_LOG_JSON=true` 方便日志采集；排查数据库问题时再临时开启 `ECOM_LOG_SQLALCHEMY=true`。
+
 ### 6. 启动 Celery Worker（启用 Celery 时）
 Windows 本地建议：
 ```bash
@@ -181,6 +196,12 @@ docker compose -f docker-compose.prod.yml --profile monitoring up -d --build
 - `ECOM_RATE_LIMIT_UPLOAD_PRESIGN_WINDOW_SECONDS`
 - `ECOM_METRICS_ENABLED`
 - `ECOM_READINESS_CHECK_REDIS`
+- `ECOM_LOG_LEVEL`（默认 `INFO`）
+- `ECOM_LOG_JSON`（默认 `false`）
+- `ECOM_LOG_HTTP_ACCESS`（默认 `true`）
+- `ECOM_LOG_SQLALCHEMY`（默认 `false`）
+- `ECOM_LOG_FILE_ENABLED`（默认 `false`）
+- `ECOM_LOG_FILE_PATH`（默认 `logs/backend.log`）
 - `ECOM_DATABASE_URL`
 - `ECOM_DATABASE_ECHO`
 - `ECOM_COS_ENABLED`

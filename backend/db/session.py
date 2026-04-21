@@ -20,7 +20,7 @@ def get_async_engine() -> AsyncEngine:
     if _async_engine is None:
         settings = get_settings()
         engine_kwargs: dict[str, object] = {
-            "echo": settings.database_echo,
+            "echo": settings.database_echo or settings.log_sqlalchemy,
             "pool_pre_ping": True,
         }
         if settings.resolve_database_url().startswith("sqlite"):

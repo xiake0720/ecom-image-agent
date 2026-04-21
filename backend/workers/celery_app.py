@@ -1,14 +1,21 @@
-"""Celery 应用配置入口。"""
+"""Celery application configuration entrypoint."""
 
 from __future__ import annotations
+
+import logging
 
 from celery import Celery
 
 from backend.core.config import get_settings
+from backend.core.logging import format_log_event, setup_logging
+
+
+setup_logging()
+logger = logging.getLogger(__name__)
 
 
 def create_celery_app() -> Celery:
-    """创建 Celery app，并统一读取 FastAPI 配置。"""
+    """Create the Celery app from FastAPI settings."""
 
     settings = get_settings()
     app = Celery(
@@ -34,6 +41,15 @@ def create_celery_app() -> Celery:
         task_acks_late=True,
         broker_connection_retry_on_startup=True,
         timezone="UTC",
+    )
+    logger.info(
+        format_log_event(
+            "celery_app_configured",
+            celery_enabled=settings.celery_enabled,
+            task_always_eager=settings.celery_task_always_eager,
+            broker_configured=bool(settings.resolve_celery_broker_url()),
+            result_backend_configured=bool(settings.resolve_celery_result_backend()),
+        )
     )
     return app
 

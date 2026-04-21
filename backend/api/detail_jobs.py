@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
@@ -11,6 +12,7 @@ from fastapi.responses import FileResponse
 from backend.api.dependencies import get_current_user, get_request_context
 from backend.core.config import get_settings
 from backend.core.exceptions import AppException
+from backend.core.logging import format_log_event
 from backend.core.rate_limit import rate_limit
 from backend.core.request_context import RequestContext
 from backend.core.response import success_response
@@ -26,6 +28,7 @@ router = APIRouter(prefix="/detail/jobs", tags=["detail-jobs"])
 service = DetailPageJobService()
 repo = TaskRepository()
 runtime_service = DetailRuntimeService()
+logger = logging.getLogger(__name__)
 
 
 @router.post("")
@@ -89,7 +92,12 @@ async def create_detail_job(
         current_user=current_user,
         enqueue=False,
     )
-    _submit_detail_execution(task_id=result.task_id, plan_only=False)
+    _submit_detail_execution(
+        task_id=result.task_id,
+        plan_only=False,
+        request_id=request.state.request_id,
+        user_id=current_user.id.hex,
+    )
     await write_audit_log(
         action=AuditAction.TASK_CREATE.value,
         current_user=current_user,
@@ -162,7 +170,12 @@ async def create_detail_plan(
         current_user=current_user,
         enqueue=False,
     )
-    _submit_detail_execution(task_id=result.task_id, plan_only=True)
+    _submit_detail_execution(
+        task_id=result.task_id,
+        plan_only=True,
+        request_id=request.state.request_id,
+        user_id=current_user.id.hex,
+    )
     await write_audit_log(
         action=AuditAction.TASK_CREATE.value,
         current_user=current_user,
@@ -242,16 +255,78 @@ def _build_payload(
     )
 
 
-def _submit_detail_execution(*, task_id: str, plan_only: bool) -> None:
+def _submit_detail_execution(*, task_id: str, plan_only: bool, request_id: str = "", user_id: str = "") -> None:
     """根据配置把详情图任务提交到 Celery 或原本地执行方式。"""
 
     settings = get_settings()
+    dispatch_mode = "celery" if settings.celery_enabled else "local_queue"
+    logger.info(
+        format_log_event(
+            "task_dispatch_started",
+            request_id=request_id,
+            user_id=user_id,
+            task_id=task_id,
+            task_type=TaskType.DETAIL_PAGE.value,
+            mode=dispatch_mode,
+            plan_only=plan_only,
+        )
+    )
     if settings.celery_enabled:
         from backend.workers.tasks.detail_page_tasks import run_detail_page_task
 
-        run_detail_page_task.delay(task_id, plan_only)
+        try:
+            run_detail_page_task.delay(task_id, plan_only)
+        except Exception:
+            logger.exception(
+                format_log_event(
+                    "task_dispatch_failed",
+                    request_id=request_id,
+                    user_id=user_id,
+                    task_id=task_id,
+                    task_type=TaskType.DETAIL_PAGE.value,
+                    mode=dispatch_mode,
+                    plan_only=plan_only,
+                )
+            )
+            raise
+        logger.info(
+            format_log_event(
+                "task_dispatch_succeeded",
+                request_id=request_id,
+                user_id=user_id,
+                task_id=task_id,
+                task_type=TaskType.DETAIL_PAGE.value,
+                mode=dispatch_mode,
+                plan_only=plan_only,
+            )
+        )
         return
-    service.enqueue_existing_task(task_id=task_id, plan_only=plan_only)
+    try:
+        service.enqueue_existing_task(task_id=task_id, plan_only=plan_only)
+    except Exception:
+        logger.exception(
+            format_log_event(
+                "task_dispatch_failed",
+                request_id=request_id,
+                user_id=user_id,
+                task_id=task_id,
+                task_type=TaskType.DETAIL_PAGE.value,
+                mode=dispatch_mode,
+                plan_only=plan_only,
+            )
+        )
+        raise
+    logger.info(
+        format_log_event(
+            "task_dispatch_succeeded",
+            request_id=request_id,
+            user_id=user_id,
+            task_id=task_id,
+            task_type=TaskType.DETAIL_PAGE.value,
+            mode=dispatch_mode,
+            plan_only=plan_only,
+        )
+    )
 
 
 def _safe_json_list(raw: str) -> list[str]:

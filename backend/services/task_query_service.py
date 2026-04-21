@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from decimal import Decimal
+import logging
 from pathlib import Path
+from time import perf_counter
 from urllib.parse import quote
 import uuid
 
 from backend.core.exceptions import AppException
+from backend.core.logging import format_log_event
 from backend.db.enums import TaskStatus, TaskType
 from backend.db.models.task import Task as DbTask
 from backend.db.models.task import TaskEvent, TaskResult
@@ -31,6 +34,9 @@ from backend.services.detail_runtime_service import DetailRuntimeService
 from backend.services.task_runtime_service import TaskRuntimeService
 
 
+logger = logging.getLogger(__name__)
+
+
 class TaskQueryService:
     """面向 `/api/v1/tasks/*` 的任务查询编排层。"""
 
@@ -51,6 +57,18 @@ class TaskQueryService:
     ) -> TaskListResponse:
         """分页查询当前用户任务。"""
 
+        started_at = perf_counter()
+        logger.info(
+            format_log_event(
+                "task_query_started",
+                user_id=current_user.id.hex,
+                query_type="list_tasks",
+                page=page,
+                page_size=page_size,
+                task_type=task_type.value if task_type is not None else None,
+                status=status.value if status is not None else None,
+            )
+        )
         safe_page = max(page, 1)
         safe_page_size = min(max(page_size, 1), 100)
         offset = (safe_page - 1) * safe_page_size
@@ -68,60 +86,131 @@ class TaskQueryService:
                 task_type=task_type.value if task_type is not None else None,
                 status=status.value if status is not None else None,
             )
-        return TaskListResponse(
+        response = TaskListResponse(
             items=[self._to_list_item(task) for task in tasks],
             page=safe_page,
             page_size=safe_page_size,
             total=total,
         )
+        logger.info(
+            format_log_event(
+                "task_query_succeeded",
+                user_id=current_user.id.hex,
+                query_type="list_tasks",
+                result_count=len(response.items),
+                total=response.total,
+                elapsed_ms=_elapsed_ms(started_at),
+            )
+        )
+        return response
 
     async def get_task_detail(self, *, current_user: User, task_id: str) -> TaskDetailResponse:
         """读取单任务详情。"""
 
+        started_at = perf_counter()
+        logger.info(format_log_event("task_query_started", user_id=current_user.id.hex, task_id=task_id, query_type="task_detail"))
         task_row = await self._get_owned_task(current_user=current_user, task_id=task_id)
-        return self._to_detail_response(task_row)
+        response = self._to_detail_response(task_row)
+        logger.info(
+            format_log_event(
+                "task_query_succeeded",
+                user_id=current_user.id.hex,
+                task_id=task_id,
+                query_type="task_detail",
+                status=response.status.value,
+                elapsed_ms=_elapsed_ms(started_at),
+            )
+        )
+        return response
 
     async def get_task_runtime(self, *, current_user: User, task_id: str) -> TaskRuntimeResponse:
         """读取单任务 runtime 聚合。"""
 
+        started_at = perf_counter()
+        logger.info(format_log_event("task_query_started", user_id=current_user.id.hex, task_id=task_id, query_type="task_runtime"))
         async with self.session_factory() as session:
             task_repo = TaskDbRepository(session)
             event_repo = TaskEventRepository(session)
             task_uuid = self._parse_task_id(task_id)
             task_row = await task_repo.get_by_id_for_user(task_uuid, user_id=current_user.id)
             if task_row is None:
+                logger.warning(
+                    format_log_event(
+                        "task_query_failed",
+                        user_id=current_user.id.hex,
+                        task_id=task_id,
+                        query_type="task_runtime",
+                        reason="task_not_found",
+                        elapsed_ms=_elapsed_ms(started_at),
+                    )
+                )
                 raise AppException(f"任务 {task_id} 不存在", code=4044, status_code=404)
             events = await event_repo.list_by_task_for_user(task_row.id, user_id=current_user.id)
 
         runtime_payload = self._load_runtime_payload(task_row)
-        return TaskRuntimeResponse(
+        response = TaskRuntimeResponse(
             task=self._to_detail_response(task_row),
             runtime=runtime_payload,
             events=[self._to_event_response(item) for item in events],
         )
+        logger.info(
+            format_log_event(
+                "task_query_succeeded",
+                user_id=current_user.id.hex,
+                task_id=task_id,
+                query_type="task_runtime",
+                event_count=len(response.events),
+                elapsed_ms=_elapsed_ms(started_at),
+            )
+        )
+        return response
 
     async def get_task_results(self, *, current_user: User, task_id: str) -> TaskResultsResponse:
         """返回任务结果摘要列表。"""
 
+        started_at = perf_counter()
+        logger.info(format_log_event("task_query_started", user_id=current_user.id.hex, task_id=task_id, query_type="task_results"))
         async with self.session_factory() as session:
             task_repo = TaskDbRepository(session)
             result_repo = TaskResultRepository(session)
             task_uuid = self._parse_task_id(task_id)
             task_row = await task_repo.get_by_id_for_user(task_uuid, user_id=current_user.id)
             if task_row is None:
+                logger.warning(
+                    format_log_event(
+                        "task_query_failed",
+                        user_id=current_user.id.hex,
+                        task_id=task_id,
+                        query_type="task_results",
+                        reason="task_not_found",
+                        elapsed_ms=_elapsed_ms(started_at),
+                    )
+                )
                 raise AppException(f"任务 {task_id} 不存在", code=4044, status_code=404)
             result_rows = await result_repo.list_by_task_for_user(task_row.id, user_id=current_user.id)
 
-        return TaskResultsResponse(
+        response = TaskResultsResponse(
             task_id=task_row.id.hex,
             items=[self._to_result_response(task_row=task_row, result_row=item) for item in result_rows],
         )
+        logger.info(
+            format_log_event(
+                "task_query_succeeded",
+                user_id=current_user.id.hex,
+                task_id=task_id,
+                query_type="task_results",
+                result_count=len(response.items),
+                elapsed_ms=_elapsed_ms(started_at),
+            )
+        )
+        return response
 
     async def _get_owned_task(self, *, current_user: User, task_id: str) -> DbTask:
         async with self.session_factory() as session:
             task_repo = TaskDbRepository(session)
             task_row = await task_repo.get_by_id_for_user(self._parse_task_id(task_id), user_id=current_user.id)
         if task_row is None:
+            logger.warning(format_log_event("task_query_failed", user_id=current_user.id.hex, task_id=task_id, query_type="task_detail", reason="task_not_found"))
             raise AppException(f"任务 {task_id} 不存在", code=4044, status_code=404)
         return task_row
 
@@ -269,3 +358,7 @@ class TaskQueryService:
         if isinstance(value, Decimal):
             return float(value)
         return float(value)
+
+
+def _elapsed_ms(started_at: float) -> int:
+    return int((perf_counter() - started_at) * 1000)

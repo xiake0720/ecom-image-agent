@@ -1,8 +1,10 @@
 ﻿from __future__ import annotations
 
 import logging
+from time import perf_counter
 from typing import Any
 
+from backend.core.logging import format_log_event
 from backend.engine.domain.usage import ProviderUsageSnapshot
 from backend.engine.providers.llm.base import BaseTextProvider, StructuredModel
 
@@ -20,10 +22,30 @@ class GeminiTextProvider(BaseTextProvider):
         *,
         system_prompt: str | None = None,
     ) -> StructuredModel:
+        started_at = perf_counter()
         self.last_usage = ProviderUsageSnapshot.empty()
-        logger.info("当前文本 provider 处于 mock 模式，返回本地结构化占位数据，schema=%s", response_model.__name__)
+        logger.info(
+            format_log_event(
+                "provider_text_request_started",
+                provider="mock_gemini_text",
+                mode="mock",
+                schema=response_model.__name__,
+                prompt_length=len(prompt),
+                system_prompt_length=len(system_prompt or ""),
+            )
+        )
         # TODO: Replace this mock-only implementation with a real Gemini API call after MVP approval.
-        return self._mock_response(response_model)
+        result = self._mock_response(response_model)
+        logger.info(
+            format_log_event(
+                "provider_text_request_succeeded",
+                provider="mock_gemini_text",
+                mode="mock",
+                schema=response_model.__name__,
+                elapsed_ms=int((perf_counter() - started_at) * 1000),
+            )
+        )
+        return result
 
     def _mock_response(self, response_model: type[StructuredModel]) -> StructuredModel:
         payload = self._mock_payload(response_model)

@@ -8,11 +8,13 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 
 from fastapi import UploadFile
 
 from backend.db.enums import TaskType
 from backend.db.models.user import User
+from backend.core.logging import format_log_event
 from backend.engine.core.config import get_settings
 from backend.engine.core.paths import ensure_task_dirs
 from backend.engine.domain.asset import Asset, AssetType
@@ -57,80 +59,116 @@ class MainImageService:
         这样路由可以先返回 task_id，后台线程再读取已落盘素材执行 workflow。
         """
 
+        started_at = perf_counter()
         settings = get_settings()
         provider_label = settings.resolve_image_provider_route().label
         model_label = settings.resolve_image_model_selection().label
         task_id = self.storage.create_task_id()
+        logger.info(
+            format_log_event(
+                "task_create_started",
+                task_id=task_id,
+                user_id=current_user.id.hex if current_user is not None else None,
+                task_type=TaskType.MAIN_IMAGE.value,
+                provider=provider_label,
+                mode=settings.image_provider_mode,
+                detail_image_count=len(detail_files),
+                background_image_count=len(bg_files),
+                shot_count=payload.shot_count,
+            )
+        )
         task_dirs = ensure_task_dirs(task_id)
-        task = Task(
-            task_id=task_id,
-            brand_name=payload.brand_name,
-            product_name=payload.product_name,
-            category=payload.category,
-            platform=payload.platform,
-            shot_count=payload.shot_count,
-            aspect_ratio=payload.aspect_ratio,
-            image_size=payload.image_size,
-            status=TaskStatus.CREATED,
-            task_dir=str(task_dirs["task"]),
-            current_step="queued",
-            current_step_label="任务已提交，等待开始",
-            progress_percent=0,
-            style_type=payload.style_type,
-            style_notes=payload.style_notes,
-        )
-        self.storage.save_task_manifest(task)
+        try:
+            task = Task(
+                task_id=task_id,
+                brand_name=payload.brand_name,
+                product_name=payload.product_name,
+                category=payload.category,
+                platform=payload.platform,
+                shot_count=payload.shot_count,
+                aspect_ratio=payload.aspect_ratio,
+                image_size=payload.image_size,
+                status=TaskStatus.CREATED,
+                task_dir=str(task_dirs["task"]),
+                current_step="queued",
+                current_step_label="任务已提交，等待开始",
+                progress_percent=0,
+                style_type=payload.style_type,
+                style_notes=payload.style_notes,
+            )
+            self.storage.save_task_manifest(task)
 
-        uploads_payload = [(white_bg.filename or "white_bg.png", await white_bg.read(), AssetType.WHITE_BG)]
-        for file in detail_files:
-            uploads_payload.append((file.filename or "detail.png", await file.read(), AssetType.DETAIL))
-        for file in bg_files:
-            uploads_payload.append((file.filename or "style.png", await file.read(), AssetType.BACKGROUND_STYLE))
+            uploads_payload = [(white_bg.filename or "white_bg.png", await white_bg.read(), AssetType.WHITE_BG)]
+            for file in detail_files:
+                uploads_payload.append((file.filename or "detail.png", await file.read(), AssetType.DETAIL))
+            for file in bg_files:
+                uploads_payload.append((file.filename or "style.png", await file.read(), AssetType.BACKGROUND_STYLE))
 
-        assets = self.storage.save_uploads(task_id, uploads_payload)
-        self.storage.save_json_artifact(task_id, "inputs/asset_manifest.json", assets)
-        initial_state: WorkflowState = {
-            "task": task,
-            "assets": assets,
-            "logs": [
-                format_workflow_log(
+            assets = self.storage.save_uploads(task_id, uploads_payload)
+            self.storage.save_json_artifact(task_id, "inputs/asset_manifest.json", assets)
+            initial_state: WorkflowState = {
+                "task": task,
+                "assets": assets,
+                "logs": [
+                    format_workflow_log(
+                        task_id=task_id,
+                        node_name="fastapi_entry",
+                        event="queued",
+                        detail="API 请求已创建主图任务，等待后台执行",
+                    )
+                ],
+                "cache_enabled": bool(settings.enable_node_cache),
+                "ignore_cache": False,
+            }
+            summary = self.repo.create_task_summary(
+                task_id=task_id,
+                task_type="main_image",
+                status=task.status.value,
+                title=payload.product_name,
+                platform=payload.platform,
+                result_path=str(task_dirs["final"]),
+                created_at=task.created_at,
+                provider_label=provider_label,
+                model_label=model_label,
+                detail_image_count=len(detail_files),
+                background_image_count=len(bg_files),
+            )
+            self.repo.save_task(summary)
+            await self.db_mirror.create_task_record(
+                task_id=task_id,
+                current_user=current_user,
+                task_type=TaskType.MAIN_IMAGE,
+                title=payload.product_name,
+                platform=payload.platform,
+                input_summary={
+                    "white_bg_count": 1,
+                    "detail_image_count": len(detail_files),
+                    "background_image_count": len(bg_files),
+                },
+                params=payload.model_dump(mode="json"),
+                assets=self.db_mirror.build_main_image_asset_inputs(assets),
+                created_at=task.created_at,
+            )
+        except Exception:
+            logger.exception(
+                format_log_event(
+                    "task_create_failed",
                     task_id=task_id,
-                    node_name="fastapi_entry",
-                    event="queued",
-                    detail="API 请求已创建主图任务，等待后台执行",
+                    user_id=current_user.id.hex if current_user is not None else None,
+                    task_type=TaskType.MAIN_IMAGE.value,
+                    elapsed_ms=_elapsed_ms(started_at),
                 )
-            ],
-            "cache_enabled": bool(settings.enable_node_cache),
-            "ignore_cache": False,
-        }
-        summary = self.repo.create_task_summary(
-            task_id=task_id,
-            task_type="main_image",
-            status=task.status.value,
-            title=payload.product_name,
-            platform=payload.platform,
-            result_path=str(task_dirs["final"]),
-            created_at=task.created_at,
-            provider_label=provider_label,
-            model_label=model_label,
-            detail_image_count=len(detail_files),
-            background_image_count=len(bg_files),
-        )
-        self.repo.save_task(summary)
-        await self.db_mirror.create_task_record(
-            task_id=task_id,
-            current_user=current_user,
-            task_type=TaskType.MAIN_IMAGE,
-            title=payload.product_name,
-            platform=payload.platform,
-            input_summary={
-                "white_bg_count": 1,
-                "detail_image_count": len(detail_files),
-                "background_image_count": len(bg_files),
-            },
-            params=payload.model_dump(mode="json"),
-            assets=self.db_mirror.build_main_image_asset_inputs(assets),
-            created_at=task.created_at,
+            )
+            raise
+        logger.info(
+            format_log_event(
+                "task_create_persisted",
+                task_id=task_id,
+                user_id=current_user.id.hex if current_user is not None else None,
+                task_type=TaskType.MAIN_IMAGE.value,
+                asset_count=len(assets),
+                elapsed_ms=_elapsed_ms(started_at),
+            )
         )
         return PreparedMainImageTask(summary=summary, initial_state=initial_state)
 
@@ -180,6 +218,8 @@ class MainImageService:
 
         initial_state = prepared.initial_state
         task = initial_state["task"]
+        started_at = perf_counter()
+        logger.info(format_log_event("task_worker_started", task_id=task.task_id, task_type=TaskType.MAIN_IMAGE.value))
 
         def persist_progress(progress_state: WorkflowState) -> None:
             """把 workflow 最新任务态回写到索引，供前端轮询读取。"""
@@ -194,18 +234,41 @@ class MainImageService:
             result_task = result["task"]
             self.repo.save_runtime_task(result_task)
             self.db_mirror.sync_runtime_from_local_sync(task_id=result_task.task_id, task_type=TaskType.MAIN_IMAGE)
-            logger.info("主图任务完成 task_id=%s status=%s", task.task_id, result_task.status.value)
+            logger.info(
+                format_log_event(
+                    "task_worker_succeeded",
+                    task_id=task.task_id,
+                    task_type=TaskType.MAIN_IMAGE.value,
+                    status=result_task.status.value,
+                    elapsed_ms=_elapsed_ms(started_at),
+                )
+            )
         except WorkflowExecutionError as exc:
             failed_state = exc.task_state or {}
             failed_task = failed_state.get("task") if isinstance(failed_state, dict) else None
             if failed_task is not None:
                 self.repo.save_runtime_task(failed_task)
                 self.db_mirror.sync_runtime_from_local_sync(task_id=failed_task.task_id, task_type=TaskType.MAIN_IMAGE)
-            logger.exception("主图任务失败 task_id=%s node=%s", task.task_id, exc.node_name)
+            logger.exception(
+                format_log_event(
+                    "task_worker_failed",
+                    task_id=task.task_id,
+                    task_type=TaskType.MAIN_IMAGE.value,
+                    node=exc.node_name,
+                    elapsed_ms=_elapsed_ms(started_at),
+                )
+            )
             if raise_on_error:
                 raise
         except Exception as exc:  # pragma: no cover - 兜底逻辑
-            logger.exception("主图任务出现未处理异常 task_id=%s", task.task_id)
+            logger.exception(
+                format_log_event(
+                    "task_worker_failed",
+                    task_id=task.task_id,
+                    task_type=TaskType.MAIN_IMAGE.value,
+                    elapsed_ms=_elapsed_ms(started_at),
+                )
+            )
             failed_task = task.model_copy(
                 update={
                     "status": TaskStatus.FAILED,
@@ -263,3 +326,7 @@ class MainImageService:
         if suffix == ".webp":
             return "image/webp"
         return "image/png"
+
+
+def _elapsed_ms(started_at: float) -> int:
+    return int((perf_counter() - started_at) * 1000)

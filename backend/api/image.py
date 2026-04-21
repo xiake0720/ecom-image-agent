@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
@@ -9,6 +10,7 @@ from fastapi import Depends
 
 from backend.api.dependencies import get_current_user, get_request_context
 from backend.core.config import get_settings
+from backend.core.logging import format_log_event
 from backend.core.rate_limit import rate_limit
 from backend.core.request_context import RequestContext
 from backend.core.response import success_response
@@ -21,6 +23,7 @@ from backend.services.task_queue_service import main_image_task_queue
 
 router = APIRouter(prefix="/image", tags=["image"])
 service = MainImageService()
+logger = logging.getLogger(__name__)
 
 
 @router.post("/generate-main")
@@ -63,12 +66,59 @@ async def generate_main_image(
         current_user=current_user,
     )
     settings = get_settings()
+    dispatch_mode = "celery" if settings.celery_enabled else "local_queue"
+    logger.info(
+        format_log_event(
+            "task_dispatch_started",
+            request_id=request.state.request_id,
+            user_id=current_user.id.hex,
+            task_id=prepared.summary.task_id,
+            task_type=TaskType.MAIN_IMAGE.value,
+            mode=dispatch_mode,
+        )
+    )
     if settings.celery_enabled:
         from backend.workers.tasks.main_image_tasks import run_main_image_task
 
-        run_main_image_task.delay(prepared.summary.task_id)
+        try:
+            run_main_image_task.delay(prepared.summary.task_id)
+        except Exception:
+            logger.exception(
+                format_log_event(
+                    "task_dispatch_failed",
+                    request_id=request.state.request_id,
+                    user_id=current_user.id.hex,
+                    task_id=prepared.summary.task_id,
+                    task_type=TaskType.MAIN_IMAGE.value,
+                    mode=dispatch_mode,
+                )
+            )
+            raise
     else:
-        main_image_task_queue.enqueue(prepared, service.run_prepared_task)
+        try:
+            main_image_task_queue.enqueue(prepared, service.run_prepared_task)
+        except Exception:
+            logger.exception(
+                format_log_event(
+                    "task_dispatch_failed",
+                    request_id=request.state.request_id,
+                    user_id=current_user.id.hex,
+                    task_id=prepared.summary.task_id,
+                    task_type=TaskType.MAIN_IMAGE.value,
+                    mode=dispatch_mode,
+                )
+            )
+            raise
+    logger.info(
+        format_log_event(
+            "task_dispatch_succeeded",
+            request_id=request.state.request_id,
+            user_id=current_user.id.hex,
+            task_id=prepared.summary.task_id,
+            task_type=TaskType.MAIN_IMAGE.value,
+            mode=dispatch_mode,
+        )
+    )
     await write_audit_log(
         action=AuditAction.TASK_CREATE.value,
         current_user=current_user,

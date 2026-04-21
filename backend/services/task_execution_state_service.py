@@ -4,13 +4,18 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+import logging
 import uuid
 
+from backend.core.logging import format_log_event
 from backend.db.enums import TaskEventLevel, TaskEventType, TaskStatus
 from backend.db.models.task import TaskEvent
 from backend.db.session import get_async_session_factory
 from backend.repositories.db.task_db_repository import TaskDbRepository
 from backend.repositories.db.task_event_repository import TaskEventRepository
+
+
+logger = logging.getLogger(__name__)
 
 
 class TaskExecutionStateService:
@@ -19,7 +24,7 @@ class TaskExecutionStateService:
     def __init__(self) -> None:
         self.session_factory = get_async_session_factory()
 
-    async def mark_running(self, *, task_id: str, step: str = "celery_worker") -> None:
+    async def mark_running(self, *, task_id: str, step: str = "celery_worker") -> str | None:
         """标记任务已被 Celery worker 接收并开始执行。"""
 
         task_uuid = uuid.UUID(task_id)
@@ -28,7 +33,8 @@ class TaskExecutionStateService:
             event_repo = TaskEventRepository(session)
             task_row = await task_repo.get_by_id(task_uuid)
             if task_row is None:
-                return
+                logger.warning(format_log_event("task_state_update_failed", task_id=task_id, step=step, reason="task_not_found"))
+                return None
 
             task_row.status = TaskStatus.RUNNING.value
             task_row.current_step = step
@@ -46,6 +52,8 @@ class TaskExecutionStateService:
                 )
             )
             await session.commit()
+            logger.info(format_log_event("task_state_running", task_id=task_id, user_id=task_row.user_id.hex, step=step))
+            return task_row.user_id.hex
 
     async def mark_retrying(self, *, task_id: str, exc: Exception, retry_count: int) -> None:
         """记录任务即将重试，并把状态放回 queued。"""
@@ -56,6 +64,7 @@ class TaskExecutionStateService:
             event_repo = TaskEventRepository(session)
             task_row = await task_repo.get_by_id(task_uuid)
             if task_row is None:
+                logger.warning(format_log_event("task_state_update_failed", task_id=task_id, state="retrying", reason="task_not_found"))
                 return
 
             task_row.status = TaskStatus.QUEUED.value
@@ -75,6 +84,7 @@ class TaskExecutionStateService:
                 )
             )
             await session.commit()
+            logger.info(format_log_event("task_retrying", task_id=task_id, user_id=task_row.user_id.hex, retry_count=retry_count))
 
     async def mark_failed(self, *, task_id: str, exc: Exception, retry_count: int) -> None:
         """记录 Celery 终态失败，避免异常无声丢失。"""
@@ -85,6 +95,7 @@ class TaskExecutionStateService:
             event_repo = TaskEventRepository(session)
             task_row = await task_repo.get_by_id(task_uuid)
             if task_row is None:
+                logger.warning(format_log_event("task_state_update_failed", task_id=task_id, state="failed", reason="task_not_found"))
                 return
 
             task_row.status = TaskStatus.FAILED.value
@@ -105,11 +116,12 @@ class TaskExecutionStateService:
                 )
             )
             await session.commit()
+            logger.info(format_log_event("task_failed", task_id=task_id, user_id=task_row.user_id.hex, retry_count=retry_count))
 
-    def mark_running_sync(self, *, task_id: str, step: str = "celery_worker") -> None:
+    def mark_running_sync(self, *, task_id: str, step: str = "celery_worker") -> str | None:
         """同步包装，供 Celery worker 调用。"""
 
-        asyncio.run(self.mark_running(task_id=task_id, step=step))
+        return asyncio.run(self.mark_running(task_id=task_id, step=step))
 
     def mark_retrying_sync(self, *, task_id: str, exc: Exception, retry_count: int) -> None:
         """同步包装，供 Celery worker 调用。"""

@@ -1,11 +1,14 @@
-"""v1 文件存储业务编排服务。"""
+"""v1 file storage orchestration service."""
 
 from __future__ import annotations
 
+import logging
+from time import perf_counter
 from urllib.parse import quote
 import uuid
 
 from backend.core.exceptions import AppException
+from backend.core.logging import format_log_event
 from backend.db.enums import TaskAssetScanStatus
 from backend.db.models.task import TaskAsset
 from backend.db.models.user import User
@@ -18,8 +21,11 @@ from backend.services.storage.cos_service import CosService
 from backend.services.storage.upload_guard_service import UploadGuardService
 
 
+logger = logging.getLogger(__name__)
+
+
 class StorageService:
-    """编排预签名上传与签名下载，并保证用户所有权校验。"""
+    """Coordinate presigned upload/download URLs and ownership checks."""
 
     def __init__(
         self,
@@ -37,9 +43,21 @@ class StorageService:
         current_user: User,
         payload: StoragePresignRequest,
     ) -> StoragePresignResponse:
-        """为当前用户任务生成图片直传 URL，并预写 task_assets 元数据。"""
+        """Create a browser direct-upload URL and pre-create task asset metadata."""
 
+        started_at = perf_counter()
         task_uuid = self._parse_uuid(payload.task_id, field_name="task_id")
+        logger.info(
+            format_log_event(
+                "storage_lookup_started",
+                user_id=current_user.id.hex,
+                task_id=task_uuid.hex,
+                operation="create_presigned_upload",
+                file_name=payload.file_name,
+                mime_type=payload.mime_type,
+                size_bytes=payload.size_bytes,
+            )
+        )
         file_meta = self.upload_guard.validate_image_upload(
             file_name=payload.file_name,
             mime_type=payload.mime_type,
@@ -52,6 +70,16 @@ class StorageService:
             asset_repo = TaskAssetRepository(session)
             task_row = await task_repo.get_by_id_for_user(task_uuid, user_id=current_user.id)
             if task_row is None:
+                logger.warning(
+                    format_log_event(
+                        "storage_lookup_failed",
+                        user_id=current_user.id.hex,
+                        task_id=task_uuid.hex,
+                        operation="create_presigned_upload",
+                        reason="task_not_found",
+                        elapsed_ms=_elapsed_ms(started_at),
+                    )
+                )
                 raise AppException(f"任务 {payload.task_id} 不存在", code=4044, status_code=404)
 
             cos_key = self.cos_service.build_task_object_key(
@@ -83,6 +111,16 @@ class StorageService:
             asset_repo.add(asset_row)
             await session.commit()
 
+        logger.info(
+            format_log_event(
+                "storage_lookup_succeeded",
+                user_id=current_user.id.hex,
+                task_id=task_uuid.hex,
+                file_id=asset_row.id.hex,
+                operation="create_presigned_upload",
+                elapsed_ms=_elapsed_ms(started_at),
+            )
+        )
         return StoragePresignResponse(
             file_id=asset_row.id.hex,
             task_id=task_uuid.hex,
@@ -93,9 +131,18 @@ class StorageService:
         )
 
     async def create_download_url(self, *, current_user: User, file_id: str) -> FileDownloadUrlResponse:
-        """按 file_id 查询资产或结果，校验归属后返回下载 URL。"""
+        """Resolve an owned asset/result and return a download URL."""
 
+        started_at = perf_counter()
         object_uuid = self._parse_uuid(file_id, field_name="file_id")
+        logger.info(
+            format_log_event(
+                "storage_lookup_started",
+                user_id=current_user.id.hex,
+                file_id=object_uuid.hex,
+                operation="create_download_url",
+            )
+        )
         async with self.session_factory() as session:
             asset_repo = TaskAssetRepository(session)
             result_repo = TaskResultRepository(session)
@@ -105,8 +152,28 @@ class StorageService:
             if asset_row is not None:
                 task_row = await task_repo.get_by_id_for_user(asset_row.task_id, user_id=current_user.id)
                 if task_row is None:
+                    logger.warning(
+                        format_log_event(
+                            "storage_lookup_failed",
+                            user_id=current_user.id.hex,
+                            file_id=object_uuid.hex,
+                            source_type="asset",
+                            reason="task_not_found",
+                            elapsed_ms=_elapsed_ms(started_at),
+                        )
+                    )
                     raise AppException(f"文件 {file_id} 不存在", code=4045, status_code=404)
                 download_url = self._build_download_url(task_type=task_row.task_type, task_id=task_row.id.hex, cos_key=asset_row.cos_key)
+                logger.info(
+                    format_log_event(
+                        "storage_lookup_succeeded",
+                        user_id=current_user.id.hex,
+                        file_id=asset_row.id.hex,
+                        task_id=asset_row.task_id.hex,
+                        source_type="asset",
+                        elapsed_ms=_elapsed_ms(started_at),
+                    )
+                )
                 return FileDownloadUrlResponse(
                     file_id=asset_row.id.hex,
                     source_type="asset",
@@ -118,11 +185,41 @@ class StorageService:
 
             result_row = await result_repo.get_by_id_for_user(object_uuid, user_id=current_user.id)
             if result_row is None:
+                logger.warning(
+                    format_log_event(
+                        "storage_lookup_failed",
+                        user_id=current_user.id.hex,
+                        file_id=object_uuid.hex,
+                        operation="create_download_url",
+                        reason="file_not_found",
+                        elapsed_ms=_elapsed_ms(started_at),
+                    )
+                )
                 raise AppException(f"文件 {file_id} 不存在", code=4045, status_code=404)
             task_row = await task_repo.get_by_id_for_user(result_row.task_id, user_id=current_user.id)
             if task_row is None:
+                logger.warning(
+                    format_log_event(
+                        "storage_lookup_failed",
+                        user_id=current_user.id.hex,
+                        file_id=object_uuid.hex,
+                        source_type="result",
+                        reason="task_not_found",
+                        elapsed_ms=_elapsed_ms(started_at),
+                    )
+                )
                 raise AppException(f"文件 {file_id} 不存在", code=4045, status_code=404)
             download_url = self._build_download_url(task_type=task_row.task_type, task_id=task_row.id.hex, cos_key=result_row.cos_key)
+            logger.info(
+                format_log_event(
+                    "storage_lookup_succeeded",
+                    user_id=current_user.id.hex,
+                    file_id=result_row.id.hex,
+                    task_id=result_row.task_id.hex,
+                    source_type="result",
+                    elapsed_ms=_elapsed_ms(started_at),
+                )
+            )
             return FileDownloadUrlResponse(
                 file_id=result_row.id.hex,
                 source_type="result",
@@ -133,7 +230,7 @@ class StorageService:
             )
 
     def _build_download_url(self, *, task_type: str, task_id: str, cos_key: str) -> str:
-        """COS 模式签发 URL；本地兼容模式回退旧文件接口。"""
+        """Sign a COS URL when enabled, otherwise return the local compatibility API URL."""
 
         if self.cos_service.is_enabled() and cos_key.startswith("users/"):
             return self.cos_service.create_presigned_download_url(key=cos_key)
@@ -147,3 +244,7 @@ class StorageService:
             return uuid.UUID(value)
         except ValueError as exc:
             raise AppException(f"{field_name} 非法: {value}", code=4007, status_code=400) from exc
+
+
+def _elapsed_ms(started_at: float) -> int:
+    return int((perf_counter() - started_at) * 1000)

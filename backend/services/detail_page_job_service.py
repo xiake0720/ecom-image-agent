@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+import logging
 from pathlib import Path
 from queue import Queue
 from threading import Lock, Thread
+from time import perf_counter
 
 from fastapi import UploadFile
 
+from backend.core.logging import format_log_event
 from backend.db.enums import TaskType
 from backend.db.models.user import User
 from backend.engine.core.config import get_settings
@@ -21,6 +24,9 @@ from backend.engine.workflows.detail_state import DetailWorkflowExecutionError, 
 from backend.repositories.task_repository import TaskRepository
 from backend.schemas.detail import DetailPageAssetRef, DetailPageJobCreatePayload, DetailPageJobCreateResult
 from backend.services.task_db_mirror_service import TaskDbMirrorService
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -48,6 +54,7 @@ class _DetailTaskQueue:
         with self._lock:
             self._pending.append(item.task_id)
         self._queue.put((item, executor))
+        logger.info(format_log_event("task_dispatch_succeeded", task_id=item.task_id, task_type=TaskType.DETAIL_PAGE.value, mode="local_queue"))
 
     def _ensure_worker(self) -> None:
         with self._lock:
@@ -99,86 +106,124 @@ class DetailPageJobService:
     ) -> DetailPageJobCreateResult:
         """创建详情图任务，根据模式立即执行或入队。"""
 
+        started_at = perf_counter()
         settings = get_settings()
         task_id = self.storage.create_task_id()
+        logger.info(
+            format_log_event(
+                "task_create_started",
+                task_id=task_id,
+                user_id=current_user.id.hex if current_user is not None else None,
+                task_type=TaskType.DETAIL_PAGE.value,
+                provider=settings.resolve_image_provider_route().label,
+                mode="plan_only" if plan_only else "full",
+                packaging_file_count=len(packaging_files),
+                scene_ref_file_count=len(scene_ref_files),
+                target_slice_count=payload.target_slice_count,
+            )
+        )
         task_dirs = ensure_task_dirs(task_id)
-        self._ensure_detail_dirs(task_dirs["task"])
-        task = Task(
-            task_id=task_id,
-            brand_name=payload.brand_name,
-            product_name=payload.product_name or f"{payload.tea_type}详情图",
-            category=payload.category,
-            platform=payload.platform,
-            shot_count=payload.target_slice_count,
-            aspect_ratio="3:4",
-            image_size=payload.image_size,
-            status=TaskStatus.CREATED,
-            task_dir=str(task_dirs["task"]),
-            current_step="queued",
-            current_step_label="详情图任务已提交",
-            progress_percent=0,
-            style_type=payload.style_preset,
-            style_notes=payload.style_notes,
-        )
-        self.storage.save_task_manifest(task)
+        try:
+            self._ensure_detail_dirs(task_dirs["task"])
+            task = Task(
+                task_id=task_id,
+                brand_name=payload.brand_name,
+                product_name=payload.product_name or f"{payload.tea_type}详情图",
+                category=payload.category,
+                platform=payload.platform,
+                shot_count=payload.target_slice_count,
+                aspect_ratio="3:4",
+                image_size=payload.image_size,
+                status=TaskStatus.CREATED,
+                task_dir=str(task_dirs["task"]),
+                current_step="queued",
+                current_step_label="详情图任务已提交",
+                progress_percent=0,
+                style_type=payload.style_preset,
+                style_notes=payload.style_notes,
+            )
+            self.storage.save_task_manifest(task)
 
-        assets = await self._persist_assets(
-            task_id=task_id,
-            payload=payload,
-            packaging_files=packaging_files,
-            dry_leaf_files=dry_leaf_files,
-            tea_soup_files=tea_soup_files,
-            leaf_bottom_files=leaf_bottom_files,
-            scene_ref_files=scene_ref_files,
-            bg_ref_files=bg_ref_files,
-        )
-        # Celery worker 只能接收 task_id，必须把恢复执行所需输入先落盘。
-        self.storage.save_json_artifact(task_id, "inputs/request_payload.json", payload)
-        self.storage.save_json_artifact(task_id, "inputs/asset_manifest.json", assets)
-        initial_state: DetailWorkflowState = {
-            "task": task,
-            "detail_payload": payload.model_copy(),
-            "detail_assets": assets,
-            "logs": [
-                format_detail_workflow_log(
+            assets = await self._persist_assets(
+                task_id=task_id,
+                payload=payload,
+                packaging_files=packaging_files,
+                dry_leaf_files=dry_leaf_files,
+                tea_soup_files=tea_soup_files,
+                leaf_bottom_files=leaf_bottom_files,
+                scene_ref_files=scene_ref_files,
+                bg_ref_files=bg_ref_files,
+            )
+            # Celery worker 只能接收 task_id，必须把恢复执行所需输入先落盘。
+            self.storage.save_json_artifact(task_id, "inputs/request_payload.json", payload)
+            self.storage.save_json_artifact(task_id, "inputs/asset_manifest.json", assets)
+            initial_state: DetailWorkflowState = {
+                "task": task,
+                "detail_payload": payload.model_copy(),
+                "detail_assets": assets,
+                "logs": [
+                    format_detail_workflow_log(
+                        task_id=task_id,
+                        node_name="fastapi_entry",
+                        event="queued",
+                        detail="API 请求已创建详情图任务，等待 detail graph 执行",
+                    )
+                ],
+                "error_message": "",
+            }
+            provider_label = settings.resolve_image_provider_route().label
+            model_label = settings.resolve_image_model_selection().label
+            summary = self.repo.create_task_summary(
+                task_id=task_id,
+                task_type="detail_page_v2",
+                status=task.status.value,
+                title=task.product_name,
+                platform=payload.platform,
+                result_path=str(get_task_dir(task_id) / "generated"),
+                created_at=task.created_at,
+                provider_label=provider_label,
+                model_label=model_label,
+            )
+            self.repo.save_task(summary)
+            await self.db_mirror.create_task_record(
+                task_id=task_id,
+                current_user=current_user,
+                task_type=TaskType.DETAIL_PAGE,
+                title=task.product_name,
+                platform=payload.platform,
+                input_summary={
+                    "plan_only": plan_only,
+                    "main_image_task_id": payload.main_image_task_id,
+                    "selected_main_result_count": len(payload.selected_main_result_ids),
+                    "selling_point_count": len(payload.selling_points),
+                },
+                params=payload.model_dump(mode="json"),
+                source_task_id=payload.main_image_task_id or None,
+                assets=self.db_mirror.build_detail_asset_inputs(task_id, assets),
+                created_at=task.created_at,
+            )
+        except Exception:
+            logger.exception(
+                format_log_event(
+                    "task_create_failed",
                     task_id=task_id,
-                    node_name="fastapi_entry",
-                    event="queued",
-                    detail="API 请求已创建详情图任务，等待 detail graph 执行",
+                    user_id=current_user.id.hex if current_user is not None else None,
+                    task_type=TaskType.DETAIL_PAGE.value,
+                    mode="plan_only" if plan_only else "full",
+                    elapsed_ms=_elapsed_ms(started_at),
                 )
-            ],
-            "error_message": "",
-        }
-        provider_label = settings.resolve_image_provider_route().label
-        model_label = settings.resolve_image_model_selection().label
-        summary = self.repo.create_task_summary(
-            task_id=task_id,
-            task_type="detail_page_v2",
-            status=task.status.value,
-            title=task.product_name,
-            platform=payload.platform,
-            result_path=str(get_task_dir(task_id) / "generated"),
-            created_at=task.created_at,
-            provider_label=provider_label,
-            model_label=model_label,
-        )
-        self.repo.save_task(summary)
-        await self.db_mirror.create_task_record(
-            task_id=task_id,
-            current_user=current_user,
-            task_type=TaskType.DETAIL_PAGE,
-            title=task.product_name,
-            platform=payload.platform,
-            input_summary={
-                "plan_only": plan_only,
-                "main_image_task_id": payload.main_image_task_id,
-                "selected_main_result_count": len(payload.selected_main_result_ids),
-                "selling_point_count": len(payload.selling_points),
-            },
-            params=payload.model_dump(mode="json"),
-            source_task_id=payload.main_image_task_id or None,
-            assets=self.db_mirror.build_detail_asset_inputs(task_id, assets),
-            created_at=task.created_at,
+            )
+            raise
+        logger.info(
+            format_log_event(
+                "task_create_persisted",
+                task_id=task_id,
+                user_id=current_user.id.hex if current_user is not None else None,
+                task_type=TaskType.DETAIL_PAGE.value,
+                mode="plan_only" if plan_only else "full",
+                asset_count=len(assets),
+                elapsed_ms=_elapsed_ms(started_at),
+            )
         )
 
         prepared = PreparedDetailTask(
@@ -188,6 +233,7 @@ class DetailPageJobService:
             plan_only=plan_only,
         )
         if enqueue:
+            logger.info(format_log_event("task_dispatch_started", task_id=task_id, task_type=TaskType.DETAIL_PAGE.value, mode="local_queue"))
             if plan_only:
                 self.run_prepared(prepared)
             else:
@@ -240,6 +286,15 @@ class DetailPageJobService:
 
         initial_state = prepared.initial_state
         task = initial_state["task"]
+        started_at = perf_counter()
+        logger.info(
+            format_log_event(
+                "task_worker_started",
+                task_id=prepared.task_id,
+                task_type=TaskType.DETAIL_PAGE.value,
+                mode="plan_only" if prepared.plan_only else "full",
+            )
+        )
 
         def persist_progress(progress_state: DetailWorkflowState) -> None:
             progress_task = progress_state.get("task")
@@ -256,15 +311,44 @@ class DetailPageJobService:
             result_task = result["task"]
             self.repo.save_runtime_task(result_task, task_type="detail_page_v2")
             self.db_mirror.sync_runtime_from_local_sync(task_id=result_task.task_id, task_type=TaskType.DETAIL_PAGE)
+            logger.info(
+                format_log_event(
+                    "task_worker_succeeded",
+                    task_id=prepared.task_id,
+                    task_type=TaskType.DETAIL_PAGE.value,
+                    mode="plan_only" if prepared.plan_only else "full",
+                    status=result_task.status.value,
+                    elapsed_ms=_elapsed_ms(started_at),
+                )
+            )
         except DetailWorkflowExecutionError as exc:
             failed_state = exc.task_state or {}
             failed_task = failed_state.get("task") if isinstance(failed_state, dict) else None
             if failed_task is not None:
                 self.repo.save_runtime_task(failed_task, task_type="detail_page_v2")
                 self.db_mirror.sync_runtime_from_local_sync(task_id=failed_task.task_id, task_type=TaskType.DETAIL_PAGE)
+            logger.exception(
+                format_log_event(
+                    "task_worker_failed",
+                    task_id=prepared.task_id,
+                    task_type=TaskType.DETAIL_PAGE.value,
+                    mode="plan_only" if prepared.plan_only else "full",
+                    node=exc.node_name,
+                    elapsed_ms=_elapsed_ms(started_at),
+                )
+            )
             if raise_on_error:
                 raise
         except Exception as exc:  # pragma: no cover - 兜底保护
+            logger.exception(
+                format_log_event(
+                    "task_worker_failed",
+                    task_id=prepared.task_id,
+                    task_type=TaskType.DETAIL_PAGE.value,
+                    mode="plan_only" if prepared.plan_only else "full",
+                    elapsed_ms=_elapsed_ms(started_at),
+                )
+            )
             failed_task = task.model_copy(
                 update={
                     "status": TaskStatus.FAILED,
@@ -308,6 +392,15 @@ class DetailPageJobService:
                 name = file.filename or f"{role}_{counter}.png"
                 target = get_task_dir(task_id) / "inputs" / name
                 target.write_bytes(await file.read())
+                logger.info(
+                    format_log_event(
+                        "local_file_saved",
+                        task_id=task_id,
+                        role=role,
+                        file_name=name,
+                        source_type="upload",
+                    )
+                )
                 asset_rows.append(
                     DetailPageAssetRef(
                         asset_id=f"asset-{counter:03d}",
@@ -325,6 +418,16 @@ class DetailPageJobService:
                 name = f"main_{counter:03d}_{Path(rel).name}"
                 target = get_task_dir(task_id) / "inputs" / name
                 target.write_bytes(source.read_bytes())
+                logger.info(
+                    format_log_event(
+                        "local_file_saved",
+                        task_id=task_id,
+                        role="main_result",
+                        file_name=name,
+                        source_type="main_task",
+                        source_task_id=payload.main_image_task_id,
+                    )
+                )
                 asset_rows.append(
                     DetailPageAssetRef(
                         asset_id=f"asset-{counter:03d}",
@@ -368,3 +471,7 @@ class DetailPageJobService:
             )
             for index, path in enumerate(image_paths, start=1)
         ]
+
+
+def _elapsed_ms(started_at: float) -> int:
+    return int((perf_counter() - started_at) * 1000)

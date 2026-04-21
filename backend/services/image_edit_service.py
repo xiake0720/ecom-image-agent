@@ -12,6 +12,7 @@ import logging
 from pathlib import Path
 import shutil
 from threading import Thread
+from time import perf_counter
 from urllib.parse import quote
 import uuid
 
@@ -19,6 +20,7 @@ from PIL import Image
 
 from backend.core.config import get_settings
 from backend.core.exceptions import AppException
+from backend.core.logging import format_log_event
 from backend.db.enums import ImageEditMode, ImageEditStatus, TaskEventLevel, TaskEventType, TaskResultStatus, TaskStatus, TaskType
 from backend.db.models.task import ImageEdit, Task as DbTask
 from backend.db.models.task import TaskEvent, TaskResult
@@ -92,6 +94,7 @@ class ImageEditService:
     ) -> ImageEditResponse:
         """Create an image edit task scoped to the current user."""
 
+        started_at = perf_counter()
         source_result_uuid = self._parse_uuid(result_id, field_name="result_id")
         edit_task_id = uuid.uuid4()
         edit_id = uuid.uuid4()
@@ -99,6 +102,18 @@ class ImageEditService:
         selection = payload.selection.model_dump(mode="json")
         execution_backend = self._resolve_execution_backend()
         mode = ImageEditMode.FULL_IMAGE_CONSTRAINED_REGENERATION.value
+        logger.info(
+            format_log_event(
+                "image_edit_started",
+                user_id=current_user.id.hex,
+                result_id=source_result_uuid.hex,
+                task_id=edit_task_id.hex,
+                mode=mode,
+                dispatch=dispatch,
+                selection_type=payload.selection_type,
+                instruction_length=len(payload.instruction),
+            )
+        )
 
         async with self.session_factory() as session:
             task_repo = TaskDbRepository(session)
@@ -174,6 +189,16 @@ class ImageEditService:
             ):
                 event_repo.add(event)
             await session.commit()
+            logger.info(
+                format_log_event(
+                    "task_create_persisted",
+                    user_id=current_user.id.hex,
+                    result_id=source_result_uuid.hex,
+                    task_id=edit_task_id.hex,
+                    mode=mode,
+                    elapsed_ms=_elapsed_ms(started_at),
+                )
+            )
 
         if dispatch:
             self._dispatch_task(edit_task_id.hex)
@@ -182,6 +207,17 @@ class ImageEditService:
             created = await ImageEditRepository(session).get_by_id(edit_id)
             if created is None:
                 raise AppException("图片编辑任务创建失败", code=5003, status_code=500)
+            logger.info(
+                format_log_event(
+                    "image_edit_succeeded",
+                    user_id=current_user.id.hex,
+                    result_id=source_result_uuid.hex,
+                    task_id=edit_task_id.hex,
+                    edit_id=edit_id.hex,
+                    mode=mode,
+                    elapsed_ms=_elapsed_ms(started_at),
+                )
+            )
             return self._to_edit_response(edit_row=created, edited_result=None, edited_task=None)
 
     async def list_edits(self, *, current_user: User, result_id: str) -> ImageEditListResponse:
@@ -214,12 +250,25 @@ class ImageEditService:
     def run_edit_task_sync(self, edit_task_id: str) -> None:
         """Synchronous wrapper used by Celery and local fallback execution."""
 
+        started_at = perf_counter()
+        logger.info(format_log_event("image_edit_started", task_id=edit_task_id, mode="execute"))
         try:
             prepared = asyncio.run(self._prepare_execution(edit_task_id=edit_task_id))
             generated = self._generate_image(prepared)
             asyncio.run(self._complete_execution(prepared=prepared, generated=generated))
+            logger.info(
+                format_log_event(
+                    "image_edit_succeeded",
+                    task_id=edit_task_id,
+                    user_id=prepared.user_id.hex,
+                    result_id=prepared.source_result_id.hex,
+                    provider=generated.provider_name,
+                    mode=prepared.mode,
+                    elapsed_ms=_elapsed_ms(started_at),
+                )
+            )
         except Exception as exc:
-            logger.exception("Image edit task failed edit_task_id=%s", edit_task_id)
+            logger.exception(format_log_event("image_edit_failed", task_id=edit_task_id, mode="execute", elapsed_ms=_elapsed_ms(started_at)))
             try:
                 asyncio.run(self._mark_failed(edit_task_id=edit_task_id, exc=exc))
             except Exception:
@@ -329,10 +378,48 @@ class ImageEditService:
             width=prepared.source_width,
             height=prepared.source_height,
         )
-        generation = bindings.image_generation_provider.generate_images(
-            plan,
-            output_dir=generated_dir,
-            reference_assets=[source_asset],
+        provider_started_at = perf_counter()
+        logger.info(
+            format_log_event(
+                "provider_image_request_started",
+                task_id=task_id,
+                user_id=prepared.user_id.hex,
+                provider=bindings.image_provider_name,
+                model=bindings.image_model_selection.model_id,
+                mode=prepared.mode,
+                reference_count=1,
+            )
+        )
+        try:
+            generation = bindings.image_generation_provider.generate_images(
+                plan,
+                output_dir=generated_dir,
+                reference_assets=[source_asset],
+            )
+        except Exception:
+            logger.exception(
+                format_log_event(
+                    "provider_image_request_failed",
+                    task_id=task_id,
+                    user_id=prepared.user_id.hex,
+                    provider=bindings.image_provider_name,
+                    model=bindings.image_model_selection.model_id,
+                    mode=prepared.mode,
+                    elapsed_ms=_elapsed_ms(provider_started_at),
+                )
+            )
+            raise
+        logger.info(
+            format_log_event(
+                "provider_image_request_succeeded",
+                task_id=task_id,
+                user_id=prepared.user_id.hex,
+                provider=bindings.image_provider_name,
+                model=bindings.image_model_selection.model_id,
+                mode=prepared.mode,
+                image_count=len(generation.images),
+                elapsed_ms=_elapsed_ms(provider_started_at),
+            )
         )
         if not generation.images:
             raise RuntimeError("image provider did not return any generated image")
@@ -548,10 +635,13 @@ class ImageEditService:
         )
 
     def _dispatch_task(self, edit_task_id: str) -> None:
+        backend = "celery" if self.settings.celery_enabled else "local_thread_fallback"
+        logger.info(format_log_event("task_dispatch_started", task_id=edit_task_id, task_type=TaskType.IMAGE_EDIT.value, mode=backend))
         if self.settings.celery_enabled:
             from backend.workers.tasks.image_edit_tasks import run_image_edit_task
 
             run_image_edit_task.delay(edit_task_id)
+            logger.info(format_log_event("task_dispatch_succeeded", task_id=edit_task_id, task_type=TaskType.IMAGE_EDIT.value, mode=backend))
             return
 
         worker = Thread(
@@ -560,6 +650,7 @@ class ImageEditService:
             daemon=True,
         )
         worker.start()
+        logger.info(format_log_event("task_dispatch_succeeded", task_id=edit_task_id, task_type=TaskType.IMAGE_EDIT.value, mode=backend))
 
     def _resolve_execution_backend(self) -> str:
         if self.settings.celery_enabled:
@@ -762,3 +853,7 @@ class ImageEditService:
 
     def _utcnow(self) -> datetime:
         return datetime.now(timezone.utc)
+
+
+def _elapsed_ms(started_at: float) -> int:
+    return int((perf_counter() - started_at) * 1000)

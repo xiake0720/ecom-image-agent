@@ -22,6 +22,7 @@ import requests
 
 from backend.engine.core.config import Settings
 from backend.engine.core.logging import describe_proxy_status, summarize_text
+from backend.core.logging import format_log_event
 from backend.engine.domain.asset import Asset
 from backend.engine.domain.generation_result import GeneratedImage, GenerationResult
 from backend.engine.domain.image_prompt_plan import ImagePromptPlan
@@ -198,6 +199,19 @@ class Banana2ImageProvider(BaseImageProvider):
         started_at = perf_counter()
         self.last_usage = ProviderUsageSnapshot.unavailable(request_count=1)
         logger.info(
+            format_log_event(
+                "provider_image_request_started",
+                provider=self.provider_alias,
+                transport=transport,
+                model=self.model_id,
+                shot_id=shot_id,
+                aspect_ratio=aspect_ratio,
+                image_size=image_size,
+                reference_count=len(reference_assets),
+                background_style_count=len(background_style_assets),
+            )
+        )
+        logger.info(
             "发送 Banana2 图片请求，shot_id=%s transport=%s model=%s aspect_ratio=%s image_size=%s reference_count=%s background_style_count=%s proxy=%s",
             shot_id,
             transport,
@@ -259,6 +273,16 @@ class Banana2ImageProvider(BaseImageProvider):
         usage = usage.model_copy(update={"latency_ms": elapsed_ms})
         self.last_usage = usage
         logger.info("Banana2 图片请求成功，shot_id=%s transport=%s elapsed_ms=%s", shot_id, transport, elapsed_ms)
+        logger.info(
+            format_log_event(
+                "provider_image_request_succeeded",
+                provider=self.provider_alias,
+                transport=transport,
+                model=self.model_id,
+                shot_id=shot_id,
+                elapsed_ms=elapsed_ms,
+            )
+        )
         return image_bytes, usage
 
     def _generate_single_via_google_sdk(

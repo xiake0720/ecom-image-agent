@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+from time import perf_counter
 
 from PIL import Image
 
+from backend.core.logging import format_log_event
 from backend.engine.core.config import get_settings
 from backend.engine.domain.asset import Asset
 from backend.engine.domain.generation_result import GeneratedImage, GenerationResult
@@ -15,6 +18,7 @@ from backend.engine.domain.usage import ProviderUsageSnapshot
 from backend.engine.providers.image.base import BaseImageProvider
 
 MOCK_IMAGE_ROOT = Path("assets/mock/banana2")
+logger = logging.getLogger(__name__)
 
 
 class MockBanana2ImageProvider(BaseImageProvider):
@@ -38,6 +42,16 @@ class MockBanana2ImageProvider(BaseImageProvider):
         """兼容旧版 prompt 计划，逐张复制固定样张。"""
 
         del reference_assets, background_style_assets
+        started_at = perf_counter()
+        logger.info(
+            format_log_event(
+                "provider_image_request_started",
+                provider=self.provider_alias,
+                model=self.model_id,
+                mode="mock",
+                prompt_count=len(plan.prompts),
+            )
+        )
         output_dir.mkdir(parents=True, exist_ok=True)
         images: list[GeneratedImage] = []
         self.last_usage = ProviderUsageSnapshot.empty()
@@ -60,6 +74,16 @@ class MockBanana2ImageProvider(BaseImageProvider):
                     height=height,
                 )
             )
+        logger.info(
+            format_log_event(
+                "provider_image_request_succeeded",
+                provider=self.provider_alias,
+                model=self.model_id,
+                mode="mock",
+                image_count=len(images),
+                elapsed_ms=int((perf_counter() - started_at) * 1000),
+            )
+        )
         return GenerationResult(images=images, usage=ProviderUsageSnapshot.empty())
 
     def generate_images_v2(
@@ -73,6 +97,16 @@ class MockBanana2ImageProvider(BaseImageProvider):
         """兼容 v2 prompt 计划，逐张复制固定样张。"""
 
         del reference_assets, background_style_assets
+        started_at = perf_counter()
+        logger.info(
+            format_log_event(
+                "provider_image_request_started",
+                provider=self.provider_alias,
+                model=self.model_id,
+                mode="mock_v2",
+                prompt_count=len(prompt_plan.shots),
+            )
+        )
         output_dir.mkdir(parents=True, exist_ok=True)
         images: list[GeneratedImage] = []
         self.last_usage = ProviderUsageSnapshot.empty()
@@ -89,6 +123,16 @@ class MockBanana2ImageProvider(BaseImageProvider):
                     height=height,
                 )
             )
+        logger.info(
+            format_log_event(
+                "provider_image_request_succeeded",
+                provider=self.provider_alias,
+                model=self.model_id,
+                mode="mock_v2",
+                image_count=len(images),
+                elapsed_ms=int((perf_counter() - started_at) * 1000),
+            )
+        )
         return GenerationResult(images=images, usage=ProviderUsageSnapshot.empty())
 
     def resolve_generation_context(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 from pathlib import Path
 from typing import Iterable, TypeVar
@@ -14,8 +15,10 @@ from backend.engine.core.paths import ensure_task_dirs, get_cache_dir
 from backend.engine.domain.asset import Asset, AssetType
 from backend.engine.domain.task import Task
 from backend.engine.domain.usage import UsageEvent, UsageSummary, summarize_usage_events
+from backend.core.logging import format_log_event
 
 ModelT = TypeVar("ModelT")
+logger = logging.getLogger(__name__)
 
 
 class LocalStorageService:
@@ -47,6 +50,17 @@ class LocalStorageService:
             target = task_dirs["inputs"] / filename
             target.write_bytes(payload)
             width, height = self._read_image_size(target)
+            logger.info(
+                format_log_event(
+                    "local_file_saved",
+                    task_id=task_id,
+                    file_name=filename,
+                    asset_type=asset_type.value,
+                    size_bytes=len(payload),
+                    width=width,
+                    height=height,
+                )
+            )
             assets.append(
                 Asset(
                     asset_id=f"asset-{index:02d}",

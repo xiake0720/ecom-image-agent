@@ -14,6 +14,7 @@ import requests
 
 from backend.engine.core.config import Settings
 from backend.engine.core.logging import describe_proxy_status, summarize_text
+from backend.core.logging import format_log_event
 from backend.engine.domain.asset import Asset
 from backend.engine.domain.generation_result import GeneratedImage, GenerationResult
 from backend.engine.domain.image_prompt_plan import ImagePromptPlan
@@ -220,6 +221,18 @@ class RunApiGemini31ImageProvider(BaseImageProvider):
         self.last_usage = ProviderUsageSnapshot.unavailable(request_count=1)
         url = f"{self.settings.runapi_image_base_url.rstrip('/')}/v1/models/{self.model_id}:generateContent"
         logger.info(
+            format_log_event(
+                "provider_image_request_started",
+                provider="runapi_gemini31",
+                model=self.model_id,
+                shot_id=shot_id,
+                aspect_ratio=aspect_ratio,
+                image_size=image_size,
+                reference_count=len(reference_assets),
+                background_style_count=len(background_assets),
+            )
+        )
+        logger.info(
             "发送 Gemini 3.1 图片请求，shot_id=%s, url=%s, aspect_ratio=%s, image_size=%s, reference_count=%s, background_style_count=%s, proxy=%s",
             shot_id,
             url,
@@ -282,6 +295,15 @@ class RunApiGemini31ImageProvider(BaseImageProvider):
         )
         self.last_usage = usage
         logger.info("Gemini 3.1 图片请求成功，shot_id=%s, elapsed_ms=%s", shot_id, elapsed_ms)
+        logger.info(
+            format_log_event(
+                "provider_image_request_succeeded",
+                provider="runapi_gemini31",
+                model=self.model_id,
+                shot_id=shot_id,
+                elapsed_ms=elapsed_ms,
+            )
+        )
         return self._extract_image_bytes(data), usage
 
     def _build_request_payload(
